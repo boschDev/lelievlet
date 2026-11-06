@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Leren, Verkeerstekens: a quiz on the borden, tonnen and seinen of Zoeken, and on the lichten, dagmerken
 // and geluidsseinen of other ships (zoeken.js hands them over, each with its picture, its name and what it
 // means you must do; a geluidssein can be heard). Only what CWO asks about comes in. The kinds of exercise:
@@ -17,41 +16,95 @@
 
 import { TYPING } from '../config.ts';
 
+/** What a question asks for: what it is called, or what it means and what you must do. */
+type Over = 'naam' | 'doen';
+
+/**
+ * A sign, mark, signal, ship or sound as Zoeken hands it to the quiz (zoeken.js entries()): what it is, the
+ * picture of it, and how to put it out on the water or let it be heard.
+ */
+export interface TekenEntry {
+  soort: string;                      // bord, ton, sein, licht, dagmerk, geluid
+  id: string;
+  naam: string;
+  tekst?: string;
+  doen?: string;                      // what it means, what you must do
+  groep: string;
+  cwo: boolean;
+  ahead?: boolean;                    // out on the water it stands ahead, not beside
+  breed?: boolean;                    // a wide picture
+  familie?: string;                   // what looks or sounds the same
+  src(): string;
+  place?(opts: { helm?: boolean; willekeurig?: boolean }): void;
+  speel?(klaar: () => void): boolean;
+  stil?(): void;
+  speelt?(): boolean;
+}
+
+/** The score so far. */
+interface Totaal { goed: number; fout: number; rondes: number; beste: number }
+/** How one entry went: right and wrong, when it was last asked, whether it went wrong then. */
+interface Stats { goed: number; fout: number; laatst: number; mis?: boolean }
+/** What is kept in localStorage. */
+interface Opslag { totaal: Totaal; per: Record<string, Stats>; keuze: { soort?: string; kind?: string; length?: string } }
+
+/** A round of questions. */
+interface Ronde {
+  soort: string; kind: string; queue: TekenEntry[]; index: number; goed: number; fout: number;
+  streak: number; best: number; wrong: TekenEntry[]; done: boolean; fouten: boolean;
+}
+/** The question on the card. */
+interface Vraag { entry: TekenEntry; type: string; about: Over; options: TekenEntry[]; answered: boolean; chosen?: number }
+
+/** What initTekenQuiz is given (see there). */
+export interface TekenQuizOpties {
+  ui: ShadowRoot | Document;
+  wrap: HTMLElement;
+  zoeken: { entries(): TekenEntry[]; release(): void };
+  closePanels(): void;
+  openLearn(kind: string): void;
+  opslaan?: boolean;
+  engaged(): boolean;
+  realTarget(e: Event): Element;
+  signal: AbortSignal;
+  veranderd?: () => void;
+}
+
 const CHOICES = 4;
-const LENGTHS = { 10: 10, 20: 20, alles: Infinity };
+const LENGTHS: Record<string, number> = { 10: 10, 20: 20, alles: Infinity };
 const TYPES = ['zien', 'herkennen', 'water'];
-const SOORTEN = { alles: ['bord', 'ton', 'sein', 'licht', 'dagmerk', 'geluid'], borden: ['bord'], tonnen: ['ton'], seinen: ['sein'],
+const SOORTEN: Record<string, string[]> = { alles: ['bord', 'ton', 'sein', 'licht', 'dagmerk', 'geluid'], borden: ['bord'], tonnen: ['ton'], seinen: ['sein'],
   lichten: ['licht'], dagmerken: ['dagmerk'], geluiden: ['geluid'] };
-const MARKS = { goed: '✓', fout: '✗' };
+const MARKS: Record<string, string> = { goed: '✓', fout: '✗' };
 const STORE = 'lelievlet.verkeerstekens.v1';
 
-const el = (tag, className, text) => { const n = document.createElement(tag); if (className) n.className = className; if (text != null) n.textContent = text; return n; };
-const shuffle = (list) => { const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const pct = (a, total) => Math.round((100 * a) / Math.max(total, 1));
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string | null, text?: string | null): HTMLElementTagNameMap[K] => { const n = document.createElement(tag); if (className) n.className = className; if (text != null) n.textContent = text; return n; };
+const shuffle = <T>(list: T[]): T[] => { const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const pct = (a: number, total: number): number => Math.round((100 * a) / Math.max(total, 1));
 
 // what a question asks for: 'naam' (what it is called) or 'doen' (what it means, what you must do)
-const VRAAG = {
+const VRAAG: Record<Over, Record<string, string>> = {
   naam: { bord: 'Hoe heet dit bord?', ton: 'Hoe heet deze markering?', licht: 'Wat voor schip is dit?', dagmerk: 'Wat voor schip is dit?',
     geluid: 'Wat betekent dit geluidssein?' },
   doen: { bord: 'Wat betekent dit bord?', ton: 'Hoe vaar je langs deze markering?', sein: 'Wat betekent dit sein?' },
 };
-const HERKEN = { bord: 'Welk bord hoort hierbij?', ton: 'Welke markering hoort hierbij?', sein: 'Welk sein hoort hierbij?',
+const HERKEN: Record<string, string> = { bord: 'Welk bord hoort hierbij?', ton: 'Welke markering hoort hierbij?', sein: 'Welk sein hoort hierbij?',
   licht: 'Welke lichten horen hierbij?', dagmerk: 'Welk dagmerk hoort hierbij?', geluid: 'Welk geluidssein hoort hierbij?' };
 /** On the water: where to look. */
-const WATER = { licht: 'Een schip op het water, ’s nachts.', dagmerk: 'Een schip op het water, overdag.' };
+const WATER: Record<string, string> = { licht: 'Een schip op het water, ’s nachts.', dagmerk: 'Een schip op het water, overdag.' };
 /**
  * Naam or doen, as the entry allows: a signal has no name worth asking (it says what it looks like); a ship by
  * its lights or dagmerken, and a geluidssein, by what it is - its name says it.
  */
-const askFor = (e) => (e.soort === 'sein' || !e.naam ? 'doen' : ['licht', 'dagmerk', 'geluid'].includes(e.soort) || !e.doen ? 'naam'
+const askFor = (e: TekenEntry): Over => (e.soort === 'sein' || !e.naam ? 'doen' : ['licht', 'dagmerk', 'geluid'].includes(e.soort) || !e.doen ? 'naam'
   : Math.random() < 0.5 ? 'naam' : 'doen');
-const textOf = (e, about) => (about === 'doen' ? e.doen : e.naam);
+const textOf = (e: TekenEntry, about: Over): string | undefined => (about === 'doen' ? e.doen : e.naam);
 /**
  * What makes two answers different enough to tell apart: a meaning by its first sentence (E.10a to f
  * all start "Je vaart op een nevenvaarwater…" and differ only in the drawing), a name without what is
  * in brackets at its end ("splitsing (d)" and "(e)", "in de richting van de pijl" and "… (staand)").
  */
-const gistOf = (e, about) => (about === 'doen' ? (e.doen ?? '').split(/(?<=[.!?])\s/)[0] : (e.naam ?? '').replace(/\s*\([^)]*\)$/, '').toLowerCase());
+const gistOf = (e: TekenEntry, about: Over): string => (about === 'doen' ? (e.doen ?? '').split(/(?<=[.!?])\s/)[0] : (e.naam ?? '').replace(/\s*\([^)]*\)$/, '').toLowerCase());
 /**
  * Signs that mean the same and differ only in their drawing never stand in one question together: one
  * of them would be as right as the other. B.1a and b (the arrow lying or standing), B.9a and b, the
@@ -69,7 +122,7 @@ const LOOKALIKES = [
   /^(B\.9[ab]|E\.9[a-i]|E\.10[a-f])$/, /^(B\.1[ab]|D\.3[abc])$/, /^(A\.10|D\.2)$/, /^(A\.1|D\.1[ab])$/,
   /^vast-(a10|d2|a1|d1a|d1b)$/,
 ];
-function familyOf(e, about) {
+function familyOf(e: TekenEntry, about: Over): string {
   if (e.familie) return e.familie;                               // ships that look the same, signals that sound the same
   if (e.soort === 'bord') { const f = FAMILIES.find((r) => r.test(e.id)); if (f) return String(f); }
   // a mark passed on the same side going up (opvarend) is passed the same way, whatever it looks like
@@ -86,14 +139,15 @@ function familyOf(e, about) {
  * shut for the round; openLearn(kind): back to the Leren panel; opslaan: whether the score is kept;
  * engaged, realTarget, signal: as main.js.
  */
-export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaan = true, engaged, realTarget, signal, veranderd = () => {} }) {
-  const $ = (id) => ui.getElementById(id);
+export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaan = true, engaged, realTarget, signal, veranderd = () => {} }: TekenQuizOpties) {
+  // every id asked for is in the viewer's template, the element of the kind its use says
+  const $ = <T extends HTMLElement = HTMLElement>(id: string): T => ui.getElementById(id) as T;
 
   // ---------------------------------------------------------------- the score, kept in localStorage
   // { v: 1, totaal: { goed, fout, rondes, beste }, per: { '<soort>:<id>': { goed, fout, laatst, mis } }, keuze: { soort, kind, length } }
-  const EMPTY = { goed: 0, fout: 0, rondes: 0, beste: 0 };
-  const fresh = () => ({ totaal: { ...EMPTY }, per: {}, keuze: {} });
-  function readStore() {
+  const EMPTY: Totaal = { goed: 0, fout: 0, rondes: 0, beste: 0 };
+  const fresh = (): Opslag => ({ totaal: { ...EMPTY }, per: {}, keuze: {} });
+  function readStore(): Opslag | null {
     if (!opslaan) return null;
     try {
       const raw = JSON.parse(localStorage.getItem(STORE) ?? 'null');
@@ -102,18 +156,18 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   }
   let store = readStore() ?? fresh();
   /** One change, made to what is stored right now (another viewer on the page may have added to it). */
-  function change(fn) {
+  function change(fn: (s: Opslag) => void): void {
     const now = readStore() ?? store;
     fn(now); store = now;
     if (opslaan) try { localStorage.setItem(STORE, JSON.stringify({ v: 1, ...store })); } catch { /* it works without */ }
     veranderd();                                   // the logboek shows the score
   }
-  const keyOf = (e) => `${e.soort}:${e.id}`;
-  const statsOf = (e) => store.per[keyOf(e)] ?? { goed: 0, fout: 0, laatst: 0 };
+  const keyOf = (e: TekenEntry): string => `${e.soort}:${e.id}`;
+  const statsOf = (e: TekenEntry): Stats => store.per[keyOf(e)] ?? { goed: 0, fout: 0, laatst: 0 };
 
   // ---------------------------------------------------------------- the start panel
   // the kinds of exercise in the words of what is asked: a sound is heard, not seen, and is not out on the water
-  const KIND_WOORDEN = {
+  const KIND_WOORDEN: Record<string, Record<string, [string, string]>> = {
     zien: { geluid: ['Wat hoor je?', 'Wat het geluidssein betekent'] },
     herkennen: { licht: ['Welke lichten?', 'Kies het plaatje bij de naam'], dagmerk: ['Welk dagmerk?', 'Kies het plaatje bij de naam'],
       geluid: ['Welk geluid?', 'Kies het sein bij de betekenis'] },
@@ -122,22 +176,22 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   function benoemKinds() {
     const enkel = SOORTEN[soort]?.length === 1 ? SOORTEN[soort][0] : null;
     for (const b of $('teken-kind').querySelectorAll('button')) {
-      const [kop, uitleg] = (enkel && KIND_WOORDEN[b.dataset.kind]?.[enkel]) ?? kindTekst.get(b.dataset.kind) ?? [];
-      if (b.querySelector('b') && kop) b.querySelector('b').textContent = kop;
-      if (b.querySelector('span') && uitleg) b.querySelector('span').textContent = uitleg;
+      const [kop, uitleg] = (enkel && KIND_WOORDEN[b.dataset.kind!]?.[enkel]) ?? kindTekst.get(b.dataset.kind) ?? [];
+      if (b.querySelector('b') && kop) b.querySelector('b')!.textContent = kop;
+      if (b.querySelector('span') && uitleg) b.querySelector('span')!.textContent = uitleg;
       b.disabled = b.dataset.kind === 'water' && enkel === 'geluid';
     }
-    if (enkel === 'geluid' && kind === 'water') $('teken-kind').querySelector('[data-kind="zien"]')?.click();
+    if (enkel === 'geluid' && kind === 'water') $('teken-kind').querySelector<HTMLElement>('[data-kind="zien"]')?.click();
   }
   let soort = store.keuze.soort ?? 'alles'; let kind = store.keuze.kind ?? 'zien'; let length = store.keuze.length ?? '10';
-  const pick = (group, attr, value, set) => {
+  const pick = (group: string, attr: string, value: string, set: (v: string) => void): void => {
     const buttons = [...$(group).querySelectorAll('button')];
-    const press = (v) => { for (const x of buttons) x.setAttribute('aria-checked', String(x.dataset[attr] === v)); };
-    if (!buttons.some((b) => b.dataset[attr] === value)) value = buttons[0].dataset[attr];
+    const press = (v: string | undefined): void => { for (const x of buttons) x.setAttribute('aria-checked', String(x.dataset[attr] === v)); };
+    if (!buttons.some((b) => b.dataset[attr] === value)) value = buttons[0].dataset[attr]!;
     press(value); set(value);
     for (const b of buttons) {
       b.addEventListener('click', () => {
-        press(b.dataset[attr]); set(b.dataset[attr]);
+        press(b.dataset[attr]); set(b.dataset[attr]!);
         change((s) => { s.keuze = { soort, kind, length }; });
         refreshPanel();
       });
@@ -153,10 +207,10 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   /** What went wrong the last time it was asked, of the kind chosen. */
   const wrongPool = () => pool().filter((e) => statsOf(e).mis);
   /** Light spaced repetition: what went wrong, or was never asked, comes first; what went well later. */
-  const weight = (e) => { const s = statsOf(e); return (s.mis ? 4 : 0) + (s.goed + s.fout ? 1 / (1 + s.goed - s.fout) : 2) + Math.random() * 1.5; };
+  const weight = (e: TekenEntry): number => { const s = statsOf(e); return (s.mis ? 4 : 0) + (s.goed + s.fout ? 1 / (1 + s.goed - s.fout) : 2) + Math.random() * 1.5; };
 
-  const askConfirm = (on) => { clearConfirm.hidden = !on; clearButton.hidden = on; };
-  const startButton = $('teken-start'); const wrongButton = $('teken-wrong');
+  const askConfirm = (on: boolean): void => { clearConfirm.hidden = !on; clearButton.hidden = on; };
+  const startButton = $<HTMLButtonElement>('teken-start'); const wrongButton = $('teken-wrong');
   const totalLine = $('teken-total'); const clearButton = $('teken-clear'); const clearConfirm = $('teken-clear-confirm');
   function refreshPanel() {
     store = readStore() ?? store;
@@ -188,11 +242,12 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   const plaat = Object.assign(el('img', 'teken-plaat'), { alt: '' });
   // a geluidssein: to be heard, as often as you like
   const speel = Object.assign(el('button', 'teken-speel'), { type: 'button', hidden: true });
-  let speelt = null;                                             // the entry that is sounding
+  let speelt: TekenEntry | null = null;                                            // the entry that is sounding
   const speelLabel = () => { speel.textContent = speelt ? '■ Stop' : '▶ Laat horen'; };
-  const laatHoren = (e) => {
-    if (speelt) { speelt.stil(); return; }
-    if (e.speel(() => { speelt = null; speelLabel(); })) { speelt = e; speelLabel(); }
+  const laatHoren = (e: TekenEntry): void => {
+    // only an entry that can be heard has its play button
+    if (speelt) { speelt.stil!(); return; }
+    if (e.speel!(() => { speelt = null; speelLabel(); })) { speelt = e; speelLabel(); }
   };
   speel.addEventListener('click', () => question && laatHoren(question.entry));
   const answers = el('div', 'answers'); const feedback = el('div', 'feedback');
@@ -205,33 +260,34 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   wrap.append(card);
   card.addEventListener('pointerdown', (e) => e.stopPropagation());   // the column's popovers keep out of it
 
-  let onPrimary = null; let onSecondary = null; let onExtra = null;
+  let onPrimary: (() => void) | null = null; let onSecondary: (() => void) | null = null; let onExtra: (() => void) | null = null;
   primary.addEventListener('click', () => onPrimary?.());
   secondary.addEventListener('click', () => onSecondary?.());
   extra.addEventListener('click', () => onExtra?.());
-  function setActions(primaryText, primaryFn, secondaryText = null, secondaryFn = null, extraText = null, extraFn = null) {
+  function setActions(primaryText: string | null, primaryFn: (() => void) | null, secondaryText: string | null = null, secondaryFn: (() => void) | null = null,
+    extraText: string | null = null, extraFn: (() => void) | null = null): void {
     primary.hidden = !primaryText; primary.textContent = primaryText ?? ''; onPrimary = primaryFn; primary.disabled = !primaryFn;
     secondary.hidden = !secondaryText; secondary.textContent = secondaryText ?? ''; onSecondary = secondaryFn;
     extra.hidden = !extraText; extra.textContent = extraText ?? ''; onExtra = extraFn;
     actions.hidden = !primaryText && !secondaryText && !extraText;
   }
-  function setFeedback(text, mood = null) {
+  function setFeedback(text: string | null, mood: string | null = null): void {
     feedback.replaceChildren();
     feedback.className = `feedback${mood ? ` ${mood}` : ''}`;
     for (const m of ['goed', 'fout']) card.classList.toggle(m, mood === m);
     feedback.classList.toggle('leeg', !text);
     if (!text) { feedback.textContent = '\u00a0'; return; }   // the empty line kept, so an answer does not make the card grow
-    if (MARKS[mood]) feedback.append(el('span', 'mark', MARKS[mood]));
+    if (MARKS[mood!]) feedback.append(el('span', 'mark', MARKS[mood!]));   // (no mood: no mark)
     feedback.append(el('span', 'tekst', text));
   }
-  const setHint = (text) => { hint.textContent = text ?? ''; hint.hidden = !text; };
-  const showPicture = (e) => { plaat.src = e.src(); plaat.hidden = false; plaat.classList.toggle('breed', Boolean(e.breed)); };
+  const setHint = (text: string | null | undefined): void => { hint.textContent = text ?? ''; hint.hidden = !text; };
+  const showPicture = (e: TekenEntry): void => { plaat.src = e.src(); plaat.hidden = false; plaat.classList.toggle('breed', Boolean(e.breed)); };
 
   // ---------------------------------------------------------------- a round
-  let round = null;       // { kind, queue, index, goed, fout, streak, best, wrong, done, fouten }
-  let question = null;    // { entry, type, about, options, answered, chosen }
+  let round: Ronde | null = null;      // { kind, queue, index, goed, fout, streak, best, wrong, done, fouten }
+  let question: Vraag | null = null;   // { entry, type, about, options, answered, chosen }
 
-  function setOn(on) {
+  function setOn(on: boolean): void {
     wrap.classList.toggle('quiz-on', on);
     card.hidden = !on;
     if (on) closePanels();
@@ -241,18 +297,18 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
     const ready = fouten ? wrongPool() : pool();
     if (!ready.length) return;
     const wanted = Math.min(LENGTHS[length], ready.length);
-    const queue = shuffle(ready.map((e) => [weight(e), e]).sort((a, b) => b[0] - a[0]).slice(0, wanted).map(([, e]) => e));
+    const queue = shuffle(ready.map((e): [number, TekenEntry] => [weight(e), e]).sort((a, b) => b[0] - a[0]).slice(0, wanted).map(([, e]) => e));
     round = { soort, kind, queue, index: 0, goed: 0, fout: 0, streak: 0, best: 0, wrong: [], done: false, fouten };
     setOn(true);
     ask();
   }
 
   /** Three others of the same kind, its lookalikes first, then its own group: none that reads the same, none of the same family. */
-  function distractors(entry, by, about) {
+  function distractors(entry: TekenEntry, by: (e: TekenEntry) => string, about: Over): TekenEntry[] {
     const same = zoeken.entries().filter((e) => e.cwo && e.soort === entry.soort && e !== entry && by(e) && by(e) !== by(entry));
-    const seen = new Set([by(entry)]); const families = new Set([familyOf(entry, about)]); const out = [];
+    const seen = new Set([by(entry)]); const families = new Set([familyOf(entry, about)]); const out: TekenEntry[] = [];
     const alike = LOOKALIKES.find((r) => r.test(entry.id));
-    const like = (x) => alike?.test(x.id);
+    const like = (x: TekenEntry): boolean | undefined => alike?.test(x.id);
     for (const e of [...shuffle(same.filter(like)), ...shuffle(same.filter((x) => !like(x) && x.groep === entry.groep)),
       ...shuffle(same.filter((x) => !like(x) && x.groep !== entry.groep))]) {
       if (out.length === CHOICES - 1) break;
@@ -263,16 +319,16 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   }
 
   function refreshHead() {
-    const done = round.index + (question?.answered ? 1 : 0);
-    count.textContent = `${Math.min(round.index + 1, round.queue.length)} / ${round.queue.length}`;
-    barFill.style.width = `${(done / round.queue.length) * 100}%`;
-    score.textContent = round.streak >= 2 ? `reeks ${round.streak}` : '';
+    const done = round!.index + (question?.answered ? 1 : 0);
+    count.textContent = `${Math.min(round!.index + 1, round!.queue.length)} / ${round!.queue.length}`;
+    barFill.style.width = `${(done / round!.queue.length) * 100}%`;
+    score.textContent = round!.streak >= 2 ? `reeks ${round!.streak}` : '';
   }
 
   function clearQuestion() {
     big.hidden = true; card.classList.remove('results');
     plaat.hidden = true; plaat.removeAttribute('src');
-    if (speelt) speelt.stil();
+    if (speelt) speelt.stil!();
     speel.hidden = true;
     vraag.classList.remove('lang');
     answers.replaceChildren(); answers.hidden = true;
@@ -280,13 +336,13 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
   }
 
   function ask() {
-    if (round.index >= round.queue.length) { showResults(); return; }
-    const entry = round.queue[round.index];
-    const gekozen = round.kind === 'gemengd' ? TYPES[Math.floor(Math.random() * TYPES.length)] : round.kind;
+    if (round!.index >= round!.queue.length) { showResults(); return; }
+    const entry = round!.queue[round!.index];
+    const gekozen = round!.kind === 'gemengd' ? TYPES[Math.floor(Math.random() * TYPES.length)] : round!.kind;
     const type = gekozen === 'water' && !entry.place ? 'zien' : gekozen;           // a geluidssein is not out on the water
     const about = askFor(entry);
     // pictures told apart by what they are asked as; a picture that goes with the same words would be right as well
-    const by = (e) => gistOf(e, about);
+    const by = (e: TekenEntry): string => gistOf(e, about);
     const options = shuffle([entry, ...distractors(entry, by, about)]);
     question = { entry, type, about, options, answered: false };
     if (type !== 'water') zoeken.release();                      // in Gemengd: what the last question put out goes
@@ -295,7 +351,7 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
     setActions('Volgende', null);
     if (type === 'herkennen') {
       // the question is the name or the meaning itself, said in full; which picture goes with it
-      vraag.textContent = entry.soort === 'sein' ? `${entry.groep}: ${textOf(entry, about)}` : textOf(entry, about);
+      vraag.textContent = entry.soort === 'sein' ? `${entry.groep}: ${textOf(entry, about)}` : textOf(entry, about)!;   // askFor asks what the entry has
       vraag.classList.toggle('lang', vraag.textContent.length > 60);
       setHint(HERKEN[entry.soort]);
       answers.className = `answers plaatjes${entry.breed ? ' breed' : ''}`;
@@ -310,7 +366,7 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
       vraag.textContent = VRAAG[about][entry.soort];
       if (type === 'water') {
         setHint(WATER[entry.soort] ?? (entry.ahead ? 'Kijk vooruit, vanaf het roer.' : 'Kijk opzij, vanaf het roer.'));
-        entry.place({ helm: true, willekeurig: true });
+        entry.place!({ helm: true, willekeurig: true });   // type is water only for what can be placed
       } else {
         setHint(null);
         showPicture(entry);
@@ -327,20 +383,20 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
     answers.hidden = false;
   }
 
-  function answer(i) {
+  function answer(i: number): void {
     if (!question || question.answered) return;
     const { entry, options, type } = question;
     const right = options[i] === entry;
     question.chosen = i;
-    for (const [j, b] of [...answers.children].entries()) {
+    for (const [j, b] of ([...answers.children] as HTMLButtonElement[]).entries()) {   // its children are the answer buttons
       b.disabled = true;
       if (options[j] === entry) b.classList.add('goed'); else if (j === i) b.classList.add('fout');
     }
     question.answered = true;
-    round[right ? 'goed' : 'fout']++;
-    round.streak = right ? round.streak + 1 : 0; round.best = Math.max(round.best, round.streak);
-    if (!right) round.wrong.push(entry);
-    const { best } = round;
+    round![right ? 'goed' : 'fout']++;
+    round!.streak = right ? round!.streak + 1 : 0; round!.best = Math.max(round!.best, round!.streak);
+    if (!right) round!.wrong.push(entry);
+    const { best } = round!;
     change((s) => {
       const stats = s.per[keyOf(entry)] ?? (s.per[keyOf(entry)] = { goed: 0, fout: 0, laatst: 0 });
       stats[right ? 'goed' : 'fout']++; stats.laatst = Date.now(); stats.mis = !right;
@@ -353,26 +409,26 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
     if (type === 'herkennen') showPicture(entry);
     if (entry.speel && speel.hidden) { speel.hidden = false; speelLabel(); }
     setFeedback(right ? `Goed! ${said}` : `Fout. ${said}`, right ? 'goed' : 'fout');
-    setActions(round.index + 1 < round.queue.length ? 'Volgende' : 'Uitslag', next);
+    setActions(round!.index + 1 < round!.queue.length ? 'Volgende' : 'Uitslag', next);
     primary.focus();
   }
 
-  function next() { round.index++; ask(); }
+  function next() { round!.index++; ask(); }
 
   function showResults() {
-    round.done = true; question = null;
+    round!.done = true; question = null;
     clearQuestion(); zoeken.release();
     change((s) => { s.totaal.rondes++; });
-    const total = round.goed + round.fout;
+    const total = round!.goed + round!.fout;
     card.classList.add('results');
     count.textContent = 'Klaar'; barFill.style.width = '100%'; score.textContent = '';
-    big.hidden = false; big.textContent = `${pct(round.goed, total)}%`;
-    vraag.textContent = `${round.goed} van de ${total} goed`;
-    setHint(round.best >= 2 ? `Beste reeks: ${round.best} goed op rij` : '');
-    const wrong = [...new Set(round.wrong)];
+    big.hidden = false; big.textContent = `${pct(round!.goed, total)}%`;
+    vraag.textContent = `${round!.goed} van de ${total} goed`;
+    setHint(round!.best >= 2 ? `Beste reeks: ${round!.best} goed op rij` : '');
+    const wrong = [...new Set(round!.wrong)];
     setFeedback(wrong.length ? `Nog eens oefenen: ${wrong.map((e) => (e.soort === 'bord' ? e.id : e.naam)).join(', ')}` : 'Alles goed!', wrong.length ? null : 'goed');
     const again = wrongPool();
-    setActions('Nog een ronde', () => startRound(round.fouten), 'Andere oefening', backToPanel,
+    setActions('Nog een ronde', () => startRound(round!.fouten), 'Andere oefening', backToPanel,
       again.length ? `Oefen je fouten (${again.length})` : null, again.length ? () => startRound(true) : null);
     primary.focus();
   }
@@ -383,12 +439,12 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
     setOn(false);
   }
   function backToPanel() { closeRound(); openLearn('verkeerstekens'); }
-  stop.addEventListener('click', () => (round?.done || !(round?.goed + round?.fout) ? closeRound() : showResults()));
+  stop.addEventListener('click', () => (round?.done || !((round?.goed ?? NaN) + (round?.fout ?? NaN)) ? closeRound() : showResults()));   // no round: NaN, closed
 
   // 1-4 pick an answer, Enter goes on - only while this viewer has the pointer or the focus
   window.addEventListener('keydown', (e) => {
     if (!round || !engaged() || e.ctrlKey || e.metaKey || e.altKey || realTarget(e).closest?.(TYPING)) return;
-    if (question && !question.answered && e.key >= '1' && e.key <= String(CHOICES)) { answers.children[Number(e.key) - 1]?.click(); e.preventDefault(); return; }
+    if (question && !question.answered && e.key >= '1' && e.key <= String(CHOICES)) { (answers.children[Number(e.key) - 1] as HTMLElement | undefined)?.click(); e.preventDefault(); return; }   // the answers are buttons
     if (e.key === 'Enter' && realTarget(e).tagName !== 'BUTTON' && !primary.hidden && !primary.disabled) { primary.click(); e.preventDefault(); }
   }, { signal });
 
@@ -401,7 +457,7 @@ export function initTekenQuiz({ ui, wrap, zoeken, closePanels, openLearn, opslaa
     goed: round.goed, fout: round.fout, fouten: round.fouten, klaar: round.done,
     type: question?.type, over: question?.about,
     teken: question ? { soort: question.entry.soort, id: question.entry.id, naam: question.entry.naam } : undefined,
-    opties: question?.options.map((e) => `${e.id}: ${question.type === 'herkennen' ? e.naam : textOf(e, question.about)}`),
+    opties: question?.options.map((e) => `${e.id}: ${question!.type === 'herkennen' ? e.naam : textOf(e, question!.about)}`),
     gekozen: question?.chosen, beantwoord: question ? question.answered : undefined,
   };
   return { active: () => Boolean(round), stop: () => round && closeRound(), refresh: refreshPanel, info,

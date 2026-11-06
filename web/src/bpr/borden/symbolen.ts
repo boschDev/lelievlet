@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Vessel symbols shared by the A prohibitions (black on white) and their E permissions (white on
 // blue): A.12/E.15, A.13/E.16, A.15/E.18, A.16/E.19, A.17/E.20. Each is drawn in the 600 x 600
 // frame of a square sign after the BPR's own drawing, in one colour `fill`; `gap` (the field colour)
@@ -8,8 +7,8 @@
  * A smooth closed outline through `pts` ([x, y] pairs), as a path: a Catmull-Rom spline turned
  * into cubic Béziers, so an organic shape can be given as the points it passes through.
  */
-export function glad(pts) {
-  const n = pts.length; const p = (i) => pts[(i + n) % n]; const f = (v) => v.toFixed(1);
+export function glad(pts: [number, number][]): string {
+  const n = pts.length; const p = (i: number): [number, number] => pts[(i + n) % n]; const f = (v: number): string => v.toFixed(1);
   let d = `M${p(0)[0]},${p(0)[1]}`;
   for (let i = 0; i < n; i++) {
     const [a, b, c, e] = [p(i - 1), p(i), p(i + 1), p(i + 2)];
@@ -19,7 +18,7 @@ export function glad(pts) {
 }
 
 /** Three-bladed propeller seen end-on: blades up (leaning left), right, and down-left. */
-export const schroef = (fill) => `<path fill="${fill}" d="${glad([
+export const schroef = (fill: string): string => `<path fill="${fill}" d="${glad([
   // upper blade, right edge
   [248, 118], [280, 128], [298, 150], [312, 170], [322, 190], [327, 215], [328, 245], [334, 270], [345, 293],
   // right blade
@@ -32,18 +31,18 @@ export const schroef = (fill) => `<path fill="${fill}" d="${glad([
 ])}"/>`;
 
 /** The word "sport", lower case, spaced wide as in the BPR drawing. */
-export const sport = (fill) =>
+export const sport = (fill: string): string =>
   `<text x="300" y="340" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="146" letter-spacing="6" text-anchor="middle" fill="${fill}">sport</text>`;
 
 /** Sailing boat in side view: a right-angled mainsail with the mast at the right, a hull below. */
-export const zeilboot = (fill) => `<g fill="${fill}">`
+export const zeilboot = (fill: string): string => `<g fill="${fill}">`
   + '<polygon points="352,100 356,405 123,405"/>'
   + '<path d="M93,435 L513,436 L418,513 L135,513 C110,513 97,495 95,470 Z"/>'
   + '</g>';
 
 /** Rowing boat with one rower, facing left, the oar running down to the lower left across the hull. */
-export function roeiboot(fill, gap) {
-  const oar = (stroke, extra = 0) => `<g stroke="${stroke}" stroke-linecap="round">`
+export function roeiboot(fill: string, gap?: string): string {
+  const oar = (stroke: string, extra = 0): string => `<g stroke="${stroke}" stroke-linecap="round">`
     + `<line x1="446" y1="219" x2="200" y2="480" stroke-width="${20 + extra}"/>`
     + `<line x1="294" y1="380" x2="190" y2="490" stroke-width="${34 + extra}"/></g>`;
   // where the oar crosses the hull the E drawing keeps a thin line of the field colour around it
@@ -57,7 +56,7 @@ export function roeiboot(fill, gap) {
 }
 
 /** Windsurfer: a person leaning back on the left, arms out to the boom, a curved sail on the right. */
-export const zeilplank = (fill) => `<g fill="${fill}">`
+export const zeilplank = (fill: string): string => `<g fill="${fill}">`
   + '<circle cx="128" cy="272" r="24"/>'
   // sail: straight luff from the masthead to the tack, straight foot, a curved leech
   + '<path d="M345,97 L270,457 L457,392 C458,300 420,180 345,97 Z"/>'

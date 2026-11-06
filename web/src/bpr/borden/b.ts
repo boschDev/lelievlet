@@ -1,26 +1,25 @@
-// @ts-nocheck
 // Signs of group(s) B of BPR bijlage 7, drawn after the BPR's own drawings (reference/bpr/tekens/bpr_img).
 // See kader.js for the conventions every group follows.
-import { gebod, tekst, ZWART } from './kader.ts';
+import { gebod, tekst, ZWART, type Punt } from './kader.ts';
 
 /**
  * The BPR's arrow, pointing right from x0 to the tip at x1 on the line y = cy: a straight shaft
  * `shaft` wide and a head `head` wide and `headLen` long whose barbs are cut off square-ish and
  * swept back a little (measured on 65453 and 65454).
  */
-function pijlR(x0, x1, cy, shaft, head, headLen, fill = ZWART) {
+function pijlR(x0: number, x1: number, cy: number, shaft: number, head: number, headLen: number, fill = ZWART): string {
   const c = x1 - headLen; const s = shaft / 2; const h = head / 2;
   const back = c - headLen * 0.2; const join = c - headLen * 0.05;  // the swept-back barb
-  const pts = [[x0, -s], [join, -s], [back, -h * 0.95], [c, -h], [x1, 0], [c, h], [back, h * 0.95], [join, s], [x0, s]];
+  const pts: Punt[] = [[x0, -s], [join, -s], [back, -h * 0.95], [c, -h], [x1, 0], [c, h], [back, h * 0.95], [join, s], [x0, s]];
   return `<polygon points="${pts.map(([x, y]) => `${x.toFixed(1)},${(cy + y).toFixed(1)}`).join(' ')}" fill="${fill}"/>`;
 }
 
 /** A black bar with round ends from (x1, y1) to (x2, y2), `width` wide (B.5, B.8). */
-const staaf = (x1, y1, x2, y2, width) =>
+const staaf = (x1: number, y1: number, x2: number, y2: number, width: number): string =>
   `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ZWART}" stroke-width="${width}" stroke-linecap="round"/>`;
 
 /** A black rectangle. */
-const blok = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${ZWART}"/>`;
+const blok = (x: number, y: number, w: number, h: number): string => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${ZWART}"/>`;
 
 export default {
   // B.1a: follow the direction of the arrow; landscape, the arrow a little right of centre

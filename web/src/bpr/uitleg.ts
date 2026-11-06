@@ -1,9 +1,11 @@
-// @ts-nocheck
 // What every sign and mark in the viewer means, in Dutch, for the card in the search panel. After the
 // BPR text (reference/bpr/BPR_2026-06-17.txt, bijlage 7 and 8 and the articles they point to), with
 // reference/bpr/TEKENS.md, tekens.json, BETONNING.md and boeien.json. Keys follow TEKENS and MARKS.
 
-export const BORD_UITLEG = {
+/** What a sign or mark means, for its card: betekenis, what a lelievlet does, how you pass it, its light. */
+export interface Uitleg { betekenis?: string; lelievlet?: string; passeren?: string; licht?: string }
+
+export const BORD_UITLEG: Record<string, Uitleg> = {
   'A.1': {
     betekenis: 'Hier mag je niet invaren, uitvaren of doorvaren. In plaats van het bord kan er ook een rood licht of een rode vlag hangen.',
     lelievlet: 'Dit verbod geldt voor elk schip, dus ook voor een lelievlet: wacht vóór het teken.',
@@ -299,7 +301,7 @@ export const BORD_UITLEG = {
   },
 };
 
-export const MARK_UITLEG = {
+export const MARK_UITLEG: Record<string, Uitleg> = {
   'lateraal-rechts-stompe-ton': {
     betekenis: 'Een rode ton met een stompe bovenkant markeert de rechterzijde van het vaarwater, gezien in de richting van zee of stroomafwaarts.',
     passeren: 'Opvarend, dus komend van zee of open water of tegen de stroom in, houd je hem aan bakboord. Afvarend houd je hem aan stuurboord.',

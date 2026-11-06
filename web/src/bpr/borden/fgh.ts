@@ -1,27 +1,32 @@
-// @ts-nocheck
 // Signs of group(s) FGH of BPR bijlage 7, drawn after the BPR's own drawings (reference/bpr/tekens/bpr_img).
 // See kader.js for the conventions every group follows.
 //
 // F are plates, drawn on their own with the BPR's example text. G and H are not single boards but
 // arrangements at bridges, locks and weirs: each is one illustration on a light-grey panel, made of
 // the BPR's little scenes side by side, each scene in its own coordinates (the drawing's pixels).
-import { svg, tekst, ROOD, WIT, ZWART, BLAUW, GROEN, GEEL } from './kader.ts';
+import { svg, tekst, ROOD, WIT, ZWART, BLAUW, GROEN, GEEL, type LampSoort, type Punt } from './kader.ts';
+import type { Bord } from './index.ts';
+
+/** A little scene of a G/H illustration, in its own coordinates. */
+export interface Scene { w: number; h: number; body: string }
+/** A lamp of a bridge pier: its colour and, if it is not steady, how it shows. */
+type PijlerLicht = [string, LampSoort?];
 
 const PANEEL = '#e4e5e2';   // the neutral grey behind a G/H illustration
 const LIJN = 3;             // line width of the scene drawings, in scene units
 
 // ---- small drawing helpers -------------------------------------------------------------------
 
-const lijn = (pts, w = LIJN) => `<polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="${ZWART}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"/>`;
-const vlak = (pts, fill = WIT, w = LIJN) => `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="${fill}" stroke="${ZWART}" stroke-width="${w}" stroke-linejoin="round"/>`;
+const lijn = (pts: Punt[], w = LIJN): string => `<polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="${ZWART}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"/>`;
+const vlak = (pts: Punt[], fill = WIT, w = LIJN): string => `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="${fill}" stroke="${ZWART}" stroke-width="${w}" stroke-linejoin="round"/>`;
 
 /** A signal light as the scene drawings show it: a coloured disc with a black outline; 'flikker' adds black wedges. */
-function licht(cx, cy, r, colour, kind = 'vast') {
+function licht(cx: number, cy: number, r: number, colour: string, kind: LampSoort = 'vast'): string {
   let s = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${colour}" stroke="${ZWART}" stroke-width="${r * 0.14}"/>`;
   if (kind === 'flikker') {
     for (let i = 0; i < 4; i++) {
       const a0 = (i * Math.PI) / 2 + 0.35; const a1 = a0 + 0.8; const q = r * 0.85;
-      const p = (a) => `${(cx + q * Math.cos(a)).toFixed(1)},${(cy + q * Math.sin(a)).toFixed(1)}`;
+      const p = (a: number): string => `${(cx + q * Math.cos(a)).toFixed(1)},${(cy + q * Math.sin(a)).toFixed(1)}`;
       s += `<path d="M${cx},${cy} L${p(a0)} A${q},${q} 0 0 1 ${p(a1)} Z" fill="${ZWART}"/>`;
     }
   }
@@ -29,7 +34,7 @@ function licht(cx, cy, r, colour, kind = 'vast') {
 }
 
 /** Water: `n` wavy lines between x0 and x1, from y0 down to the bed at y1. */
-function water(x0, x1, y0, y1, n = 4) {
+function water(x0: number, x1: number, y0: number, y1: number, n = 4): string {
   const step = (y1 - y0) / n; const period = 64; let s = '';
   for (let i = 0; i < n; i++) {
     const y = y0 + step * (i + 0.5); let d = `M${x0},${y}`;
@@ -43,17 +48,17 @@ function water(x0, x1, y0, y1, n = 4) {
 }
 
 /** A small diamond (half-diagonal `r`): `left`/`right` colour for each half, outline in `rand`. */
-function wybertje(cx, cy, r, left, right, rand) {
+function wybertje(cx: number, cy: number, r: number, left: string, right: string, rand: string): string {
   const top = `${cx},${cy - r}`; const bot = `${cx},${cy + r}`;
   return `<polygon points="${top} ${cx - r},${cy} ${bot}" fill="${left}"/><polygon points="${top} ${cx + r},${cy} ${bot}" fill="${right}"/>`
     + `<polygon points="${top} ${cx + r},${cy} ${bot} ${cx - r},${cy}" fill="none" stroke="${rand}" stroke-width="${r * 0.07}"/>`;
 }
-const a10 = (cx, cy, r, redLeft) => wybertje(cx, cy, r, redLeft ? ROOD : WIT, redLeft ? WIT : ROOD, ROOD);
-const d2 = (cx, cy, r, greenLeft) => wybertje(cx, cy, r, greenLeft ? GROEN : WIT, greenLeft ? WIT : GROEN, GROEN);
-const d1 = (cx, cy, r) => wybertje(cx, cy, r, GEEL, GEEL, ZWART);
+const a10 = (cx: number, cy: number, r: number, redLeft: boolean): string => wybertje(cx, cy, r, redLeft ? ROOD : WIT, redLeft ? WIT : ROOD, ROOD);
+const d2 = (cx: number, cy: number, r: number, greenLeft: boolean): string => wybertje(cx, cy, r, greenLeft ? GROEN : WIT, greenLeft ? WIT : GROEN, GROEN);
+const d1 = (cx: number, cy: number, r: number): string => wybertje(cx, cy, r, GEEL, GEEL, ZWART);
 
 /** An A.1 board (red-white-red bands) centred on cx, cy. */
-const a1 = (cx, cy, w, h) => `<rect x="${cx - w / 2}" y="${cy - h / 2}" width="${w}" height="${h}" fill="${ROOD}"/>`
+const a1 = (cx: number, cy: number, w: number, h: number): string => `<rect x="${cx - w / 2}" y="${cy - h / 2}" width="${w}" height="${h}" fill="${ROOD}"/>`
   + `<rect x="${cx - w / 2}" y="${cy - h * 0.13}" width="${w}" height="${h * 0.26}" fill="${WIT}"/>`;
 
 /**
@@ -61,8 +66,8 @@ const a1 = (cx, cy, w, h) => `<rect x="${cx - w / 2}" y="${cy - h / 2}" width="$
  * { w, h, body }. All scenes share one scale (as in the BPR, where they are printed alike), set by
  * the widest row and capped at `max`; scenes in a row stand on a common base line.
  */
-function tafereel(rows, W = 900, max = 1, gap = 30, margin = 30) {
-  const width = (row) => row.reduce((t, s) => t + s.w, 0);
+function tafereel(rows: Scene[][], W = 900, max = 1, gap = 30, margin = 30): Bord {
+  const width = (row: Scene[]): number => row.reduce((t, s) => t + s.w, 0);
   const k = Math.min(max, ...rows.map((row) => (W - 2 * margin - gap * (row.length - 1)) / width(row)));
   let y = margin; let out = '';
   for (const row of rows) {
@@ -81,13 +86,13 @@ function tafereel(rows, W = 900, max = 1, gap = 30, margin = 30) {
 // ---- F: plates -------------------------------------------------------------------------------
 
 /** A white plate with a thin black border and one line of black text. */
-function plaat(w, h, text, size, spacing = 0) {
+function plaat(w: number, h: number, text: string, size: number, spacing = 0): string {
   const t = tekst(w / 2, h / 2, text, size).replace('<text ', `<text letter-spacing="${spacing}" `);
   return svg(w, h, `<rect x="5" y="5" width="${w - 10}" height="${h - 10}" fill="${WIT}" stroke="${ZWART}" stroke-width="10"/>${t}`);
 }
 
 // F.2a: the pointed plate beside the main sign, as high as the sign, with the length of the stretch
-function puntbord() {
+function puntbord(): string {
   const w = 460; const h = 600;
   return svg(w, h, `<polygon points="5,5 290,5 455,300 290,595 5,595" fill="${WIT}" stroke="${ZWART}" stroke-width="10" stroke-linejoin="round"/>`
     + tekst(185, 255, '2', 78) + tekst(185, 350, 'km', 70));
@@ -96,7 +101,7 @@ function puntbord() {
 // ---- G: fixed bridges (G.1), scene 480 x 240 ------------------------------------------------
 
 /** A fixed bridge: fascia between two lines (or only the underside line), two tapered piers, water. */
-function vasteBrug(top, { gevel = true, bodem = false } = {}) {
+function vasteBrug(top: string, { gevel = true, bodem = false }: { gevel?: boolean; bodem?: boolean } = {}): Scene {
   let s = '';
   if (gevel) s += lijn([[0, 12], [480, 12]]);
   s += lijn([[0, 80], [480, 80]]);
@@ -109,7 +114,7 @@ function vasteBrug(top, { gevel = true, bodem = false } = {}) {
 // ---- G: movable bridges (G.2), scenes 400 x 195 and 421 x 445 -------------------------------
 
 /** A lifting bridge seen closed: sloping deck, two piers with `lights` (colour per lamp, top down), yellow under the span. */
-function brug(lights, geel = 0) {
+function brug(lights: PijlerLicht[], geel = 0): Scene {
   let s = lijn([[0, 5], [396, 5], [396, 25]]) + lijn([[0, 59], [50, 59]]) + lijn([[97, 59], [396, 25]]);
   s += vlak([[50, 59], [99, 59], [99, 190], [50, 190]]) + vlak([[353, 25], [397, 25], [397, 190], [353, 190]]);
   s += water(99, 353, 146, 190) + lijn([[99, 190], [353, 190]]);
@@ -120,7 +125,7 @@ function brug(lights, geel = 0) {
 }
 
 /** A bascule bridge standing open: raised leaf over the left pier, `lights` in both piers. */
-function ophaalbrug(lights) {
+function ophaalbrug(lights: PijlerLicht[]): Scene {
   let s = vlak([[183, 8], [208, 20], [125, 300], [80, 358], [26, 382]]);
   s += vlak([[77, 299], [125, 299], [125, 420], [77, 420]]) + vlak([[376, 299], [424, 299], [424, 420], [376, 420]]);
   s += water(125, 376, 372, 420, 3) + lijn([[125, 420], [376, 420]]);
@@ -131,7 +136,7 @@ function ophaalbrug(lights) {
 // ---- G: weirs (G.3), scenes 564 x 196 and 568 x 272 -----------------------------------------
 
 /** A weir seen from downstream: two tall piers with `lights` (colour per lamp, top down) on their fronts, water between. */
-function stuw(lights, y0 = 44) {
+function stuw(lights: string[], y0 = 44): Scene {
   let s = vlak([[12, 12], [108, 12], [108, 184], [12, 184]]) + vlak([[456, 12], [552, 12], [552, 184], [456, 184]]);
   s += water(108, 456, 130, 184) + lijn([[108, 184], [456, 184]]);
   lights.forEach((c, i) => { s += licht(60, y0 + i * 60, 16, c) + licht(504, y0 + i * 60, 16, c); });
@@ -139,7 +144,7 @@ function stuw(lights, y0 = 44) {
 }
 
 /** A bridge over a weir: the deck line, the structure with its two piers, water in the opening; `top` over it. */
-function stuwBrug(top) {
+function stuwBrug(top: string): Scene {
   let s = lijn([[20, 12], [548, 12]]) + vlak([[18, 96], [554, 96], [554, 262], [18, 262]]);
   s += lijn([[110, 96], [110, 262]]) + lijn([[460, 96], [460, 262]]) + water(110, 460, 214, 262);
   return { w: 568, h: 272, body: s + top };
@@ -148,14 +153,14 @@ function stuwBrug(top) {
 // ---- G: locks (G.4), scenes 420 x 200, 400 x 275, 472 x 538 ----------------------------------
 
 /** A lock head seen from outside: two walls with ledges, `lights` beside each wall. */
-function sluis(lights, y0 = 44) {
+function sluis(lights: string[], y0 = 44): Scene {
   let s = lijn([[24, 14], [68, 14], [68, 191], [370, 191], [370, 14], [414, 14]]) + water(68, 370, 149, 191);
   lights.forEach((c, i) => { s += licht(44, y0 + i * 34, 14.5, c) + licht(394, y0 + i * 34, 14.5, c); });
   return { w: 420, h: 200, body: s };
 }
 
 /** A lock with a fixed-looking movable bridge over its head (G.4.2). */
-function sluisBrug(lights, geel = 0, y0 = 100) {
+function sluisBrug(lights: string[], geel = 0, y0 = 100): Scene {
   let s = lijn([[9, 20], [395, 20], [393, 48], [359, 50]]) + lijn([[9, 78], [56, 78], [359, 50]]);
   s += lijn([[56, 78], [56, 269], [359, 269], [359, 50]]) + water(56, 359, 230, 269);
   lights.forEach((c, i) => { s += licht(30, y0 + i * 36, 14.5, c) + licht(385, y0 + i * 36, 14.5, c); });
@@ -164,7 +169,7 @@ function sluisBrug(lights, geel = 0, y0 = 100) {
 }
 
 /** A lock with its bascule bridge raised (G.4.2, last picture). */
-function sluisOphaal() {
+function sluisOphaal(): Scene {
   let s = vlak([[182, 9], [215, 23], [110, 336], [80, 446], [13, 406]]);
   s += lijn([[67, 336], [110, 336], [110, 525], [411, 525], [411, 336], [460, 336]]) + water(110, 411, 480, 525, 3);
   s += licht(88, 379, 14, GROEN) + licht(438, 387, 14, GROEN);
@@ -174,7 +179,7 @@ function sluisOphaal() {
 // ---- G.5: height marks -----------------------------------------------------------------------
 
 /** The hoogteschaal: metre blocks 7..11 (or from `start`) alternating black and yellow, decimetre ticks down the left. */
-function hoogteschaal(W = 320, framed = true, start = 7) {
+function hoogteschaal(W = 320, framed = true, start = 7): Bord {
   const x = framed ? 50 : 0; const y = framed ? 50 : 0; const M = 160; const narrow = 39; const wide = 78;
   let s = '';
   for (let i = 0; i < 5; i++) {
@@ -195,7 +200,7 @@ function hoogteschaal(W = 320, framed = true, start = 7) {
 }
 
 /** The voorhoogteschaal: a white name plate over the scale, as G.5.1 in its panel. */
-function voorHoogteschaal(naam = 'Hoge brug') {
+function voorHoogteschaal(naam = 'Hoge brug'): Bord {
   const scale = hoogteschaal(320, false);
   const plate = `<rect x="50" y="40" width="320" height="80" fill="${WIT}" stroke="${ZWART}" stroke-width="6"/>${tekst(210, 80, naam, 44)}`;
   return { w: 420, h: 1000, svg: svg(420, 1000, `<rect width="420" height="1000" fill="${PANEEL}"/>${plate}<g transform="translate(50,150)">${scale.svg.replace(/^<svg[^>]*>|<\/svg>$/g, '')}</g>`) };
@@ -204,16 +209,16 @@ function voorHoogteschaal(naam = 'Hoge brug') {
 // ---- H.3: spui- en inlaattekens ---------------------------------------------------------------
 
 /** A flag pole with its black cap, from y0 down to y1. */
-const paal = (x, y0, y1) => lijn([[x, y0], [x, y1]], 5) + `<rect x="${x - 14}" y="${y0 - 5}" width="28" height="9" fill="${ZWART}"/>`;
-const tekstWit = (x, y, t, size) => tekst(x, y, t, size, WIT).replace('<text ', '<text letter-spacing="2" ');
+const paal = (x: number, y0: number, y1: number): string => lijn([[x, y0], [x, y1]], 5) + `<rect x="${x - 14}" y="${y0 - 5}" width="28" height="9" fill="${ZWART}"/>`;
+const tekstWit = (x: number, y: number, t: string, size: number): string => tekst(x, y, t, size, WIT).replace('<text ', '<text letter-spacing="2" ');
 
 /** The blue "spuien" flag on its pole; x is the pole. */
-const vlag = (x, y) => paal(x, y, y + 235) + `<rect x="${x + 4}" y="${y + 8}" width="245" height="92" fill="${BLAUW}"/>` + tekstWit(x + 126, y + 52, 'spuien', 52);
+const vlag = (x: number, y: number): string => paal(x, y, y + 235) + `<rect x="${x + 4}" y="${y + 8}" width="245" height="92" fill="${BLAUW}"/>` + tekstWit(x + 126, y + 52, 'spuien', 52);
 /** The blue "inlaten" pennant on its pole; x is the pole. */
-const wimpel = (x, y, len = 360) => paal(x, y, y + 235) + `<polygon points="${x + 4},${y + 28} ${x + len},${y + 70} ${x + 4},${y + 112}" fill="${BLAUW}"/>` + tekstWit(x + len * 0.33, y + 70, 'inlaten', 50);
-const enof = (x, y, t = 'en/of') => `<text x="${x}" y="${y}" font-family="Arial, Helvetica, sans-serif" font-size="44" text-anchor="middle" fill="${ZWART}">${t}</text>`;
+const wimpel = (x: number, y: number, len = 360): string => paal(x, y, y + 235) + `<polygon points="${x + 4},${y + 28} ${x + len},${y + 70} ${x + 4},${y + 112}" fill="${BLAUW}"/>` + tekstWit(x + len * 0.33, y + 70, 'inlaten', 50);
+const enof = (x: number, y: number, t = 'en/of'): string => `<text x="${x}" y="${y}" font-family="Arial, Helvetica, sans-serif" font-size="44" text-anchor="middle" fill="${ZWART}">${t}</text>`;
 
-const rood = (x, y) => licht(x, y, 32, ROOD);
+const rood = (x: number, y: number): string => licht(x, y, 32, ROOD);
 
 export default {
   'F.1': { w: 600, h: 160, svg: plaat(600, 160, '800', 120, 6) },
@@ -267,14 +272,14 @@ export default {
 
 // the little scenes on their own, for Seinen (zoeken.js): one picture per state of a bridge or lock
 /** The hoogteschaal itself, as it stands in the water: no panel round it, a metre 160 units, 1.5 m wide. */
-export const hoogteschaalBord = (start = 7) => hoogteschaal(240, false, start);
+export const hoogteschaalBord = (start = 7): Bord => hoogteschaal(240, false, start);
 
 /**
  * A piece of a hoogteschaal, from the figure `van` at its top down to `tot` (metres, not whole ones), as it is fixed
  * to a kade wall: the same blocks and ticks, cut off where the wall ends. water: the figure the water stands at, for
  * a picture of it (the water over the scale from there down); the model has its own water.
  */
-export function hoogteschaalStuk(van, tot, W = 240, water = null) {
+export function hoogteschaalStuk(van: number, tot: number, W = 240, water: number | null = null): Bord {
   const M = 160; const narrow = 39; const wide = 78; const H = Math.round((tot - van) * M);
   let s = '';
   for (let k = Math.floor(van); k < Math.ceil(tot); k++) {

@@ -1,14 +1,14 @@
-// @ts-nocheck
 // Signs of group(s) A of BPR bijlage 7, drawn after the BPR's own drawings (reference/bpr/tekens/bpr_img).
 // See kader.js for the conventions every group follows.
 import { svg, verbod, ruit, tekst, lamp, ROOD, WIT, ZWART, GROEN } from './kader.ts';
+import type { LampSoort } from './kader.ts';
 import { glad, schroef, sport, zeilboot, roeiboot, zeilplank } from './symbolen.ts';
 
 /**
  * A vertical arrow with its tip at (x, tip) and its tail at (x, tail): a shaft `shaft` wide and a
  * head `len` long and `wide` wide, as in A.2 and A.4 (the BPR head is wider than it is long).
  */
-function pijlV(x, tail, tip, shaft = 62, len = 146, wide = 176) {
+function pijlV(x: number, tail: number, tip: number, shaft = 62, len = 146, wide = 176): string {
   const d = Math.sign(tip - tail); const base = tip - d * len; const s = shaft / 2; const h = wide / 2;
   return `<polygon points="${x - s},${tail} ${x - s},${base} ${x - h},${base} ${x},${tip} ${x + h},${base} ${x + s},${base} ${x + s},${tail}" fill="${ZWART}"/>`;
 }
@@ -34,7 +34,7 @@ const golven = () => [247, 419].map((y) =>
   `<path d="M78,${y} C185,${y} 195,${y - 68} 300,${y - 68} C405,${y - 68} 415,${y} 522,${y}" fill="none" stroke="${ZWART}" stroke-width="76"/>`).join('');
 
 /** A backplate with two signal lights one above the other, red over green. */
-const lichten = (w, h, y1, y2, r, groen = 'vast') => svg(w, h,
+const lichten = (w: number, h: number, y1: number, y2: number, r: number, groen: LampSoort = 'vast'): string => svg(w, h,
   `<rect width="${w}" height="${h}" fill="${ZWART}"/>${lamp(w / 2, y1, r, ROOD)}${lamp(w / 2, y2, r, GROEN, groen)}`);
 
 export default {

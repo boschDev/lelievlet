@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The lights and dagmerken of other ships explained, one entry for every configuration of schepen.js
 // (and of reference/bpr/lichten.json), in the order of CONFIGS. The content is our own plain Dutch for
 // scouts of 12 to 16, after the BPR text in force from 2026-06-17 (hoofdstuk 3, 6.04a, 10.03, 10.04; local copy
@@ -12,7 +11,12 @@ export const LICHT_GROEPEN = ['Grote schepen', 'Kleine schepen', 'Slepen, duwen 
 // the rule for meeting a groot schip, said the same way everywhere (BPR 6.04 lid 2, 3; 6.17 lid 2, 3)
 const GROOT = 'tenzij jij aan de stuurboordkant van het vaarwater vaart en het grote schip niet';
 
-export const LICHT_UITLEG = {
+/** What a configuration of schepen.ts shows and means (see above). */
+export interface LichtUitleg {
+  naam: string; groep: string; artikel: string; lichten: string; dagmerk?: string; betekenis: string; lelievlet: string;
+}
+
+export const LICHT_UITLEG: Record<string, LichtUitleg> = {
   // -- grote schepen
   groot_motorschip: {
     naam: 'Groot motorschip', groep: 'Grote schepen', artikel: 'BPR 3.08 lid 1',

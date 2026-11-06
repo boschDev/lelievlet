@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { BORDEN } from './borden/index.ts';
 import { TEKENS } from './tekens.ts';
@@ -13,6 +12,78 @@ import { makeHoorn, patroonSvg } from './hoorn.ts';
 import { GELUIDEN, GELUID_GROEPEN } from './geluiden.ts';
 import { LICHT_GROEPEN, LICHT_UITLEG } from './lichtuitleg.ts';
 import { BEGRIPPEN, BEGRIP_GROEPEN } from '../begrippen.ts';
+import type { Mark } from './betonning.ts';
+import type { ExtraBord } from './borden/index.ts';
+import type { Sein } from './seinen.ts';
+import type { ShipConfig, ScheepsLicht, ScheepsDagmerk } from './schepen.ts';
+import type { Vlag } from './vlaggen.ts';
+import type { Uitleg } from './uitleg.ts';
+import type { LichtUitleg } from './lichtuitleg.ts';
+import type { TekenEntry } from './tekenquiz.ts';
+
+/** How show() puts a thing out: see there. */
+export interface PlaatsOpties { ahead?: boolean; helm?: boolean; wide?: boolean; far?: boolean; deg?: number }
+
+/** What the lelievlet shows of herself (eigen.show): her toplicht, ankerbol, sails, anchor, zaklamp. */
+export interface EigenSignalen { licht?: number; bal?: boolean; tuig?: string; hand?: boolean; anker?: boolean; zijde?: number }
+
+/** Where a hoist of flags hangs on her (eigen.flags): its middle, the way its face looks, her weather quarter. */
+export interface HijsPlek { mid: THREE.Vector3; face: THREE.Vector3; quarter: THREE.Vector3 }
+
+/** Where a begrip points on to: a page of Zoeken and an item there, a lesson, a handeling, a part. */
+export interface Naar { zoeken?: string; naam?: string; les?: string; onderwerp?: string; handeling?: string; stap?: string; onderdeel?: string }
+
+/** What initZoeken is given (see there). */
+export interface ZoekenOpties {
+  ui: ShadowRoot | Document;
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  boat(): THREE.Vector3;
+  lookFromHelm(at: THREE.Vector3 | null): void;
+  waterline(): number;
+  windArrow(): THREE.Object3D | null | undefined;
+  view(): { position: THREE.Vector3; target: THREE.Vector3 };
+  fly(position: THREE.Vector3, target: THREE.Vector3): void;
+  setDark(k: number | null): void;
+  eigen?: { show(s: EigenSignalen | null): void; flags?(group: THREE.Group | null): HijsPlek | null | undefined; box?(): THREE.Box3 | null };
+  begrip?: { label(n: Naar): string | null | undefined; open(n: Naar): string | null | undefined };
+}
+
+/** One item of a page's list, as pane() and the field over everything use it. */
+interface PaneItem {
+  button: HTMLButtonElement;
+  cwo?: boolean | null;               // false: not asked by CWO; null: says nothing about it
+  heading: string | undefined;
+  key: string;                        // what is searched, folded
+  place(opts?: PlaatsOpties): void;
+}
+
+/** What an item is called in the address of the page (idVan). */
+interface IdBron {
+  code?: string; spec?: { id: string }; sein?: { id: string }; config?: { id: string }; g?: { id: string }; v?: { id: string }; b?: { naam: string };
+}
+
+/** The chips of a page: their rows, and whether an item goes with what is on. */
+interface Chips<I> { rows: HTMLElement[]; onChange(fn: () => void): void; reset(): void; match(item: I): boolean }
+
+/** An item of a page for the field over everything on the start page. */
+export interface ZoekBron { key: string; cwo?: boolean | null; naam: string; src?(): string | undefined; open(): void }
+
+/** What is out on the water now, or shown on the lelievlet herself. */
+interface Getoond { key: string; object: THREE.Object3D | null; own?: EigenSignalen; flags?: THREE.Group }
+
+/** What the panel leaves of the view, and the camera's lens (freeView). */
+interface VrijZicht { covered: number; right: number; tanV: number; tanH: number }
+
+/** A light as seen from ahead, in a picture of it. */
+interface Stip { kleur: string; x: number; y: number }
+
+/** A dagmerk as seen from ahead, in a picture of it. */
+interface Merk { vorm: string; kleur: string; x: number; y: number; h: number }
+
+/** A mesh, as traverse() finds it among the rest. */
+const isMesh = (o: THREE.Object3D): o is THREE.Mesh => (o as THREE.Mesh).isMesh;
 
 // Zoeken, beside Onderdelen: the pages Borden (BPR bijlage 7), Markeringen (bijlage 8), Seinen (the
 // lights at bridges, locks and spuisluizen, bijlage 7 G and H), Vlaggen (the BPR's, the racing signals and
@@ -23,12 +94,12 @@ import { BEGRIPPEN, BEGRIP_GROEPEN } from '../begrippen.ts';
 // stands out on the water beside the boat while the camera goes to look at it; letting go of it (the
 // card's ×, another page, the panel closing) takes it away again and the camera back to where it was.
 
-const el = (tag, props = {}, ...children) => { const n = Object.assign(document.createElement(tag), props); n.append(...children); return n; };
-const fold = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
-const asImage = (svg) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;   // its own document: no ids shared
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] => { const n = Object.assign(document.createElement(tag), props); n.append(...children); return n; };
+const fold = (text: string): string => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+const asImage = (svg: string): string => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;   // its own document: no ids shared
 
 // Borden, as they look: the colour first, then where a colour has many signs, the kind of sign
-const BORD_KLEUREN = [
+const BORD_KLEUREN: { key: string; label: string; dot: string; groepen: [groep: string, codes: string[]][] }[] = [
   { key: 'rood', label: 'Rood', dot: '#c8102e', groepen: [
     ['Rood-wit', ['A.1', 'A.1a', 'A.10']],
     ['Doorgestreept', ['A.2', 'A.4', 'A.5', 'A.5.1', 'A.6', 'A.7', 'A.9', 'A.12', 'A.13', 'A.15', 'A.16', 'A.17']],
@@ -47,21 +118,21 @@ const BORD_KLEUREN = [
 ];
 
 // where an extra sign goes, when its looks say less than what it is for
-const EXTRA_GROEP = { 'G.5.1c': 'Hoogte en diepte', 'G.5.3': 'Hoogte en diepte', 'H.2.3': 'Wegwijzers' };
+const EXTRA_GROEP: Record<string, string> = { 'G.5.1c': 'Hoogte en diepte', 'G.5.3': 'Hoogte en diepte', 'H.2.3': 'Wegwijzers' };
 
 // the signs beyond the main list (most of them not asked by CWO), each in its place by its looks: in a group of its colour, a new one
 // when the colour has its groups and this is none of them, in the one there is when it has only one
-const EXTRA_BY = new Map(EXTRA.map((x) => [x.code, x]));
+const EXTRA_BY = new Map(EXTRA.map((x): [string, ExtraBord] => [x.code, x]));
 for (const x of EXTRA) {
-  const k = BORD_KLEUREN.find((c) => c.key === x.kleur) ?? BORD_KLEUREN.find((c) => c.key === 'wit');
+  const k = BORD_KLEUREN.find((c) => c.key === x.kleur) ?? BORD_KLEUREN.find((c) => c.key === 'wit')!;
   const named = k.groepen.some(([g]) => g);
   const name = EXTRA_GROEP[x.code] ?? x.groep;
-  const groep = named ? k.groepen.find(([g]) => g === name) ?? (k.groepen.push([name || 'Overig', []]), k.groepen.at(-1)) : k.groepen[0];
+  const groep = named ? k.groepen.find(([g]) => g === name) ?? (k.groepen.push([name || 'Overig', []]), k.groepen.at(-1)!) : k.groepen[0];
   groep[1].push(x.code);
 }
 
 // Markeringen: the shape of the body, and the colours on it
-const VORM = {
+const VORM: Record<string, string> = {
   stompeTon: 'stomp', spitseTon: 'spits', sparStomp: 'spar', sparSpits: 'spar', sparKlein: 'spar', sparAanvullend: 'spar',
   sparAanvullendSpits: 'spar', bol: 'bol', drijfbaken: 'baken', kopbaken: 'baken', steekbaken: 'baken', walbaken: 'wal', haveningang: 'wal',
   oeverbord: 'bord', geleidelijn: 'bord', geleidelichten: 'licht', sectorlicht: 'licht',
@@ -71,7 +142,7 @@ const VORMEN = [['stomp', 'Stompe ton'], ['spits', 'Spitse ton'], ['spar', 'Spar
 const MARK_KLEUREN = [['rood', 'Rood', '#c1121c'], ['groen', 'Groen', '#0f8a3c'], ['geel', 'Geel', '#f2c200'],
   ['zwart', 'Zwart', '#161616'], ['wit', 'Wit', '#ffffff'], ['hout', 'Takken', '#7a5a3a']];
 // (a sector light: the colours of its sectors too)
-const kleurenVan = (spec) => new Set([...spec.banden.flatMap((b) => b.split(/[ -]/)), ...(spec.sectoren ?? []).map(([k]) => k)].filter((k) => MARK_KLEUREN.some(([key]) => key === k)));
+const kleurenVan = (spec: Mark): Set<string> => new Set([...spec.banden.flatMap((b) => b.split(/[ -]/)), ...(spec.sectoren ?? []).map(([k]) => k)].filter((k) => MARK_KLEUREN.some(([key]) => key === k)));
 
 const CLEAR = 4.5;                 // m: kept between it and the middle of the wind arrow
 const OUT = 7;                     // m: how far from the middle of the boat a sign or mark is put out
@@ -93,22 +164,23 @@ const TEKEN_AAN_BOORD = new Set(['duiker', 'stuurboord_op_stuurboord', 'bescherm
  * Returns { update(dt), release(), info(), entries(), reset(), goto(page), destroy(), parts(list, search) }.
  */
 
-export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, waterline, windArrow, view, fly, setDark, eigen, begrip }) {
+export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, waterline, windArrow, view, fly, setDark, eigen, begrip }: ZoekenOpties) {
   // how dark it is held here, 0 day .. 1 night: the lights of a ship shown come up with it, as a light does at dusk
   let darkK = 0;
-  const holdDark = (k) => { darkK = Math.min(k ?? 0, 1); setDark(k); };
-  const $ = (id) => ui.getElementById(id);
+  const holdDark = (k: number | null): void => { darkK = Math.min(k ?? 0, 1); setDark(k); };
+  // every id asked for is in the viewer's template, the element of the kind its use says
+  const $ = <T extends HTMLElement = HTMLElement>(id: string): T => ui.getElementById(id) as T;
   const holder = new THREE.Group(); holder.name = 'zoeken'; scene.add(holder);
-  const built = new Map();                                       // 'bord:A.6' / 'mark:id' -> the object, built once
-  let shown = null;                                              // { key, object }
-  let cameFrom = null;                                           // the view before the first one was put out
+  const built = new Map<string, THREE.Object3D>();                                      // 'bord:A.6' / 'mark:id' -> the object, built once
+  let shown: Getoond | null = null;                                             // { key, object }
+  let cameFrom: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;                                          // the view before the first one was put out
   let dark = false; let t = 0;
   let helmHeld = false;
   const downwind = new THREE.Vector3(); const quat = new THREE.Quaternion(); const quat2 = new THREE.Quaternion();                                          // the view is at the helm, for Op het water
-  const cards = [];                                              // every card's close, to let go from anywhere
-  const resets = [];                                             // every tab back to how it opened the first time
-  const entries = [];                                            // every sign, mark and signal, for the quiz (tekenquiz.js)
-  const sources = [];                                            // per tab what it has, for the field over everything
+  const cards: ((andRelease: boolean) => void)[] = [];                                             // every card's close, to let go from anywhere
+  const resets: (() => void)[] = [];                                            // every tab back to how it opened the first time
+  const entries: TekenEntry[] = [];                                           // every sign, mark and signal, for the quiz (tekenquiz.js)
+  const sources: { cat: string; search: HTMLInputElement; items(): ZoekBron[] }[] = [];                                           // per tab what it has, for the field over everything
   const hoorn = makeHoorn();                                     // the sound signals of Geluidsseinen, heard
 
   const NAMEN = new Map(TEKENS.flatMap(([, , list]) => list));   // code -> name
@@ -122,7 +194,9 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
    * where the camera stands, given the middle of what is to be seen and how far back it must be to see
    * all of it; `w` and `h` the picture in pixels. The renderer is left as it was, whatever goes wrong.
    */
-  function snapshots(list, { lens: lensAt, w = THUMB, h = THUMB, fit = 0.56, extent = (size) => Math.max(size.y, size.x, size.z) }) {
+  function snapshots(list: { object: THREE.Object3D; img: HTMLImageElement }[], { lens: lensAt, w = THUMB, h = THUMB, fit = 0.56, extent = (size: THREE.Vector3) => Math.max(size.y, size.x, size.z) }: {
+    lens(mid: THREE.Vector3, reach: number, size: THREE.Vector3): [number, number, number]; w?: number; h?: number; fit?: number; extent?(size: THREE.Vector3): number;
+  }): void {
     const stage = new THREE.Scene(); stage.environment = scene.environment;
     stage.add(new THREE.HemisphereLight(0xffffff, 0x8a99a8, 1.1));
     const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(-3, 6, 5); stage.add(sun);
@@ -130,7 +204,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     const target = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
     target.texture.colorSpace = THREE.SRGBColorSpace;
     const pixels = new Uint8Array(w * h * 4);
-    const canvas = el('canvas', { width: w, height: h }); const g = canvas.getContext('2d');
+    const canvas = el('canvas', { width: w, height: h }); const g = canvas.getContext('2d')!;
     const was = { target: renderer.getRenderTarget(), clear: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha(),
       planes: renderer.clippingPlanes };
     renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)];   // what is under water is left out
@@ -143,9 +217,9 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
         // framed on what is solid above the water: not the glow round a light, which is mostly empty
         box.makeEmpty();
         object.traverse((o) => {
-          if (!o.isMesh || !o.visible) return;
+          if (!isMesh(o) || !o.visible) return;
           if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-          box.union(part.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+          box.union(part.copy(o.geometry.boundingBox!).applyMatrix4(o.matrixWorld));
         });
         box.min.y = Math.max(box.min.y, 0); box.getSize(size); box.getCenter(mid);
         const reach = extent(size) * fit / Math.tan(THREE.MathUtils.degToRad(lens.fov / 2));
@@ -173,7 +247,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
    * what is as wide as the water (a veerpont between its two kades). `far`: a ship, turned `deg`, out ahead
    * (shipView).
    */
-  let lens = null;                                               // how far (and near) the camera saw before a ship took it further
+  let lens: number | null = null;                                              // how far (and near) the camera saw before a ship took it further
   /** Back to the camera's own range, once nothing far out is shown. */
   const restoreLens = () => { if (lens !== null) { camera.far = lens; camera.userData.minNear = 0; camera.updateProjectionMatrix(); lens = null; } };
   /**
@@ -181,22 +255,22 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
    * round, at the bottom of the view wherever it is), `covered` of the height; on a wide screen it stands at the
    * right, `right` of the width. And the camera's lens, as the tangents of half its angles.
    */
-  function freeView() {
-    const canvas = ui.getElementById('scene').getBoundingClientRect();
-    const covered = Math.max(0, ...[ui.getElementById('parts'), ...ui.querySelectorAll('.focus-card')].map((el) => el.getBoundingClientRect())
+  function freeView(): VrijZicht {
+    const canvas = ui.getElementById('scene')!.getBoundingClientRect();
+    const covered = Math.max(0, ...[ui.getElementById('parts')!, ...ui.querySelectorAll('.focus-card')].map((el) => el.getBoundingClientRect())
       .filter((r) => r.width > canvas.width * 0.6 || (r.width && r.bottom > canvas.bottom - 40 && r.left < canvas.left + canvas.width / 2 && r.right > canvas.left + canvas.width / 2))
       .map((r) => Math.max(0, canvas.bottom - r.top) / canvas.height));
-    const panel = ui.getElementById('parts').getBoundingClientRect();
+    const panel = ui.getElementById('parts')!.getBoundingClientRect();
     const right = panel.width && panel.width < canvas.width * 0.6 && panel.left > canvas.left + canvas.width / 2 ? Math.max(0, canvas.right - panel.left) / canvas.width : 0;
     const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     return { covered, right, tanV, tanH: tanV * camera.aspect };
   }
-  function show(key, make, { ahead = false, helm = false, wide = false, far = false, deg = 0 } = {}) {
+  function show(key: string, make: () => THREE.Object3D, { ahead = false, helm = false, wide = false, far = false, deg = 0 }: PlaatsOpties = {}): void {
     if (shown?.key === key) return;
     if (shown?.flags) eigen?.flags?.(null);
     if (shown?.own) eigen?.show(null);                           // the lelievlet back as she was
     if (!built.has(key)) built.set(key, make());
-    const object = built.get(key);
+    const object = built.get(key)!;
     holder.clear(); holder.add(object);
     if (!shown) cameFrom = view();
     shown = { key, object };
@@ -211,7 +285,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       return;
     }
     restoreLens();                                               // a sign or mark by the boat: the camera's own range
-    const arrow = windArrow()?.visible ? new THREE.Box3().setFromObject(windArrow()).getCenter(new THREE.Vector3()) : null;
+    const arrow = windArrow()?.visible ? new THREE.Box3().setFromObject(windArrow()!).getCenter(new THREE.Vector3()) : null;
     const spots = [near, -near].flatMap((s) => [1.5, 5, -2].map((dx) => ({ side: s, at: new THREE.Vector3(centre.x + dx, waterline(), centre.z + s * OUT) })));
     const { side, at } = ahead ? { side: near, at: new THREE.Vector3(centre.x + AHEAD, waterline(), centre.z) }
       : spots.find(({ at: p }) => !arrow || Math.hypot(p.x - arrow.x, p.z - arrow.z) > CLEAR) ?? spots[0];
@@ -226,7 +300,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       // the card of the round lies over the lower part: looked at a little below it, it stands in what is left.
       // Schipper's lens is some 90 degrees across, less upright on a narrow screen (main.js followRunView).
       const look = object.position.clone().setY(waterline() + height * 0.45);
-      const canvas = ui.getElementById('scene').getBoundingClientRect();
+      const canvas = ui.getElementById('scene')!.getBoundingClientRect();
       const card = [...ui.querySelectorAll('.focus-card')].map((el) => el.getBoundingClientRect()).find((r) => r.width);
       const covered = card ? Math.max(0, canvas.bottom - card.top) / canvas.height : 0;
       const upright = THREE.MathUtils.clamp(2 * Math.atan(1 / camera.aspect), THREE.MathUtils.degToRad(50), THREE.MathUtils.degToRad(85));
@@ -254,27 +328,32 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
    */
   const FRONT = 4; const FILL = 0.68;
   // a line or a thin post is narrower than a light: it never hides one (as schepen.js has it)
-  const thin = (o) => o.geometry?.type === 'CylinderGeometry' && Math.max(o.geometry.parameters.radiusTop, o.geometry.parameters.radiusBottom) < 0.045;
+  const thin = (o: THREE.Object3D): boolean => {
+    const g = (o as THREE.Mesh).geometry as THREE.CylinderGeometry | undefined;   // looked at only when its type says it is one
+    return g?.type === 'CylinderGeometry' && Math.max(g.parameters.radiusTop, g.parameters.radiusBottom) < 0.045;
+  };
   const sight = new THREE.Raycaster(); const lampAt = new THREE.Vector3(); const seen = new THREE.Vector3();
-  function shipView(object, deg, { covered, right, tanV, tanH }) {
+  /** A place to look at a ship from (shipView): the eye, how far out she lies, and how many of her lights it hides. */
+  interface ShipPlek { eye: number; d: number; from: THREE.Vector3; at: THREE.Vector3; aimH: number; aimV: number; hidden?: number }
+  function shipView(object: THREE.Object3D, deg: number, { covered, right, tanV, tanH }: VrijZicht): { at: THREE.Vector3; from: THREE.Vector3; target: THREE.Vector3 } {
     const centre = boat();
     const { top = 6, ship } = object.userData;
     const high = 2 * Math.atan(tanV * (1 - covered)) * FILL; const wide = 2 * Math.atan(tanH * (1 - right)) * FILL;
-    const lights = ship?.userData.lights ?? [];
-    const lamps = new Set(); for (const l of lights) l.lamp.traverse((o) => lamps.add(o));
-    const solid = []; object.traverse((o) => { if (o.isMesh && !lamps.has(o) && o.geometry?.type !== 'CircleGeometry') solid.push(o); });
+    const lights: ScheepsLicht[] = ship?.userData.lights ?? [];
+    const lamps = new Set<THREE.Object3D>(); for (const l of lights) l.lamp.traverse((o) => lamps.add(o));
+    const solid: THREE.Mesh[] = []; object.traverse((o) => { if (isMesh(o) && !lamps.has(o) && o.geometry?.type !== 'CircleGeometry') solid.push(o); });
     // what is to be seen of her, as she lies turned: the corners of all her parts above the water, from her middle
     object.position.set(0, 0, 0); object.rotation.y = -Math.PI / 2; object.updateMatrixWorld(true);
-    const origin = object.getWorldPosition(new THREE.Vector3()); const box = new THREE.Box3(); const points = [];
+    const origin = object.getWorldPosition(new THREE.Vector3()); const box = new THREE.Box3(); const points: THREE.Vector3[] = [];
     for (const o of solid) {
-      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); box.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); box.copy(o.geometry.boundingBox!).applyMatrix4(o.matrixWorld);
       for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
         points.push(new THREE.Vector3(x - origin.x, Math.max(0, y - origin.y), z - origin.z));
       }
     }
     const nearest = Math.min(0, ...points.map((p) => p.x)); const farthest = Math.max(1, ...points.map((p) => Math.hypot(p.x, p.z)));
     // the angles she takes up from an eye `eye` above the water and `side` to starboard of her line, her middle `d` ahead
-    const angles = (eye, side, d) => {
+    const angles = (eye: number, side: number, d: number): { h0: number; h1: number; v0: number; v1: number } => {
       let h0 = Infinity; let h1 = -Infinity; let v0 = Infinity; let v1 = -Infinity;
       for (const p of points) {
         const x = d + p.x; const z = p.z - side; const h = Math.atan2(z, x); const v = Math.atan2(p.y - eye, Math.hypot(x, z));
@@ -282,7 +361,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       }
       return { h0, h1, v0, v1 };
     };
-    const place = (eye, side) => {
+    const place = (eye: number, side: number): ShipPlek => {
       // not nearer than 8 m: closer by, a small boat looks as if seen through a door spy
       let d = 8 - nearest; let f = angles(eye, side, d);
       // on a phone, a duwstel across the narrow view lies the better part of a kilometre off
@@ -291,14 +370,14 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       return { eye, d, from, at: new THREE.Vector3(from.x + d, waterline(), centre.z), aimH: (f.h0 + f.h1) / 2, aimV: (f.v0 + f.v1) / 2 };
     };
     // how many of the lights that show towards `from` are hidden from it
-    const hiddenFrom = ({ from, at }) => {
+    const hiddenFrom = ({ from, at }: ShipPlek): number => {
       object.position.copy(at); object.rotation.y = -Math.PI / 2; object.updateMatrixWorld(true);
       let n = 0;
       for (const l of lights) {
         if (l.swing) continue;
         l.lamp.getWorldPosition(lampAt);
         if (l.arc) {
-          seen.copy(from); l.lamp.parent.worldToLocal(seen); seen.x -= l.rest.x; seen.z -= ship.userData.axis ?? 0;   // as schepen.js does
+          seen.copy(from); l.lamp.parent!.worldToLocal(seen); seen.x -= l.rest.x; seen.z -= ship.userData.axis ?? 0;   // as schepen.js does
           const bearing = THREE.MathUtils.radToDeg(Math.atan2(seen.z, seen.x)); const [lo, hi] = l.arc;
           const b = hi > 180 ? (bearing + 360) % 360 : bearing;
           if (b < lo || b > hi) continue;
@@ -310,17 +389,17 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       return n;
     };
     const base = THREE.MathUtils.clamp(top * 0.5, 2.5, 9.5);
-    let best = null;
+    let best: ShipPlek | null = null;
     // as high as it takes, up to well over her: from astern a sleepboot's heklicht is behind the ship she tows. And
     // where that is not enough (a ponton with a bok on it), a little to one side: on her line first, as she is met
     search: for (const side of [0, 4, -4, 8, -8]) {
       for (let eye = base; eye <= Math.max(base + 2, top * 1.6 + 2, 18); eye += 0.75) {
         const view = place(eye, side); view.hidden = hiddenFrom(view);
-        if (!best || view.hidden < best.hidden) best = view;
+        if (!best || view.hidden < best.hidden!) best = view;   // a best has been counted too
         if (!view.hidden) break search;
       }
     }
-    const { d, from, at, aimH, aimV } = best;
+    const { d, from, at, aimH, aimV } = best!;
     // the middle of what she takes up, up and down and side to side
     const target = from.clone().add(new THREE.Vector3(Math.cos(aimV) * Math.cos(aimH), Math.sin(aimV), Math.cos(aimV) * Math.sin(aimH)).multiplyScalar(d));
     // aimed lower, or for the panel at the right a little to the right of her: she is in the middle of what it leaves
@@ -337,7 +416,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     return { at, from, target };
   }
   /** The ship shown turned another way: out at the distance that goes with it, the camera after her. */
-  function turnShip(deg) {
+  function turnShip(deg: number): void {
     const object = shown?.object; if (!object?.userData.turn) return;
     object.userData.turn(deg);
     const { at, from, target } = shipView(object, deg, freeView());
@@ -348,21 +427,21 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
    * What a lelievlet carries, shown on the boat herself rather than on a model of one: nothing is put out,
    * her own toplicht and ankerbol are shown (eigen), and the camera goes round her to the side asked.
    */
-  function showOwn(key, signals, deg) {
+  function showOwn(key: string, signals: EigenSignalen, deg: number): void {
     holder.clear(); restoreLens();
     if (shown?.flags) eigen?.flags?.(null);
     if (shown?.own) eigen?.show(null);                           // another of hers: what the one before set, undone first
     if (helmHeld) { helmHeld = false; lookFromHelm(null); }
     if (!shown) cameFrom = view();
     shown = { key, object: null, own: { ...signals, licht: dark ? 1 : 0, zijde: deg } };
-    eigen?.show(shown.own);
+    eigen?.show(shown.own!);   // just set
     lookAtOwn(deg);
   }
   /**
    * A flag she may fly herself, on her: hoisted on her weather want, and looked at from her weather quarter,
    * square to the cloth, a little from above.
    */
-  function showFlags(key, v) {
+  function showFlags(key: string, v: Vlag): void {
     if (shown?.key === key) return;
     holder.clear(); restoreLens();
     if (helmHeld) { helmHeld = false; lookFromHelm(null); }
@@ -385,17 +464,17 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
    * Round her: 0 from ahead, 90 her bakboord, 180 from astern, 270 her stuurboord. As far off as it takes to see
    * all of her, the top of the mast to the water, in what the panel leaves of the view (as shipView has a ship).
    */
-  function lookAtOwn(deg) {
+  function lookAtOwn(deg: number): void {
     if (shown?.own) shown.own.zijde = deg;                       // the zaklamp is held out on the side she is seen from
     const c = boat(); const a = THREE.MathUtils.degToRad(deg);
     const box = eigen?.box?.() ?? new THREE.Box3(c.clone().addScalar(-3), c.clone().addScalar(3));
-    const points = [];
+    const points: THREE.Vector3[] = [];
     for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) points.push(new THREE.Vector3(x, Math.max(y, waterline()), z));   // above the water
     const { covered, right, tanV, tanH } = freeView();
     const high = 2 * Math.atan(tanV * (1 - covered)) * FILL; const wide = 2 * Math.atan(tanH * (1 - right)) * FILL;
     const ahead = new THREE.Vector3(-Math.cos(a), 0, Math.sin(a)); const across = new THREE.Vector3(-ahead.z, 0, ahead.x);   // looking, and to its right
     const eye = waterline() + 2.5; const q = new THREE.Vector3();
-    const angles = (from) => {
+    const angles = (from: THREE.Vector3): { h0: number; h1: number; v0: number; v1: number } => {
       let h0 = Infinity; let h1 = -Infinity; let v0 = Infinity; let v1 = -Infinity;
       for (const p of points) {
         q.copy(p).sub(from); const x = q.dot(ahead); const z = q.dot(across);
@@ -404,7 +483,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       }
       return { h0, h1, v0, v1 };
     };
-    const at = (d) => c.clone().addScaledVector(ahead, -d).setY(eye);
+    const at = (d: number): THREE.Vector3 => c.clone().addScaledVector(ahead, -d).setY(eye);
     let d = 7; let f = angles(at(d));
     while (d < 60 && (f.v1 - f.v0 > high || f.h1 - f.h0 > wide)) { d += 0.25; f = angles(at(d)); }
     const from = at(d); const aimH = (f.h0 + f.h1) / 2; const aimV = (f.v0 + f.v1) / 2;
@@ -432,11 +511,13 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
 
   // ---------------------------------------------------------------- one tab: search, chips, card, grid
   // what one item of a page is called in the address of the page (adres.js): its code or id, or a begrip by its name
-  const idVan = (item) => item.code ?? item.spec?.id ?? item.sein?.id ?? item.config?.id ?? item.g?.id ?? item.v?.id
+  const idVan = (item: IdBron): string | null => item.code ?? item.spec?.id ?? item.sein?.id ?? item.config?.id ?? item.g?.id ?? item.v?.id
     ?? (item.b ? fold(item.b.naam).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : null);
-  let kaartNu = null;                                            // the card open now: { cat, id }
-  const openers = new Map();                                     // a page -> open the item with that id there
-  function pane(root, { placeholder, items, chips, card }) {
+  let kaartNu: { cat: string; id: string | null } | null = null;                                           // the card open now: { cat, id }
+  const openers = new Map<string, (id: string) => boolean>();                                    // a page -> open the item with that id there
+  function pane<I extends PaneItem & IdBron>(root: HTMLElement, { placeholder, items, chips, card }: {
+    placeholder: string; items: I[]; chips: Chips<I>; card(item: I): (HTMLElement | null | undefined | false)[];
+  }): void {
     const cat = root.id.replace('zoek-', '');
     const search = el('input', { type: 'search', className: 'zoek-veld', autocomplete: 'off', placeholder });
     search.setAttribute('aria-label', placeholder.replace('…', ''));
@@ -448,9 +529,9 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     const kaart = el('div', { className: 'zoek-kaart', hidden: true });
     const empty = el('p', { className: 'hint', hidden: true, textContent: 'Niets gevonden.' });
     root.append(el('div', { className: 'zoek-zoekrij' }, search, cwo), ...chips.rows, el('div', { className: 'zoek-scroll' }, kaart, list, empty));
-    const scroller = kaart.parentElement;
+    const scroller = kaart.parentElement!;
 
-    let current = null;
+    let current: I | null = null;
     const closeCard = (andRelease = true) => {
       const back = kaart.contains(ui.activeElement) ? current?.button : null;   // the × had the focus: back to the item
       kaart.hidden = true; current?.button.removeAttribute('aria-current'); current = null;
@@ -460,14 +541,14 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       if (andRelease) release();
     };
     cards.push((andRelease) => { if (current) closeCard(andRelease); });
-    const open = (item) => {
+    const open = (item: I): void => {
       dark = false; holdDark(null);                               // each card starts as the viewer is; one with a light offers the night
       current?.button.removeAttribute('aria-current');
       current = item; item.button.setAttribute('aria-current', 'true');
       kaartNu = { cat, id: idVan(item) };
       const close = el('button', { type: 'button', className: 'zoek-kaart-sluit', title: 'Sluiten', textContent: '×', onclick: () => closeCard() });
       close.setAttribute('aria-label', 'Sluiten');
-      const parts = card(item).filter(Boolean);
+      const parts = card(item).filter((p): p is HTMLElement => Boolean(p));
       // what CWO does not ask about says so, on every page alike (Borden and Vlaggen say it in their own words)
       if (item.cwo === false && !parts.some((p) => /niet voor CWO/i.test(p.textContent ?? ''))) parts.push(el('p', { className: 'niet-cwo', textContent: 'Niet voor CWO.' }));
       kaart.replaceChildren(...parts, close);
@@ -477,7 +558,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       item.place();
     };
 
-    const sections = new Map();                                  // heading -> { section, grid }
+    const sections = new Map<string | undefined, { section: HTMLElement; grid: HTMLElement }>();                                 // heading -> { section, grid }
     for (const item of items) {
       if (item.cwo === false && !/niet voor CWO/.test(item.button.title)) item.button.title += ' (niet voor CWO)';
       if (!sections.has(item.heading)) {
@@ -486,7 +567,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
         list.append(section); sections.set(item.heading, { section, grid });
       }
       item.button.addEventListener('click', () => open(item));
-      sections.get(item.heading).grid.append(item.button);
+      sections.get(item.heading)!.grid.append(item.button);
     }
     const filter = () => {
       const query = fold(search.value.trim());
@@ -495,7 +576,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
         const hit = (!cwoOnly || item.cwo !== false) && chips.match(item) && (!query || item.key.includes(query));
         item.button.hidden = !hit; if (hit) found++;
       }
-      for (const { section, grid } of sections.values()) section.hidden = ![...grid.children].some((b) => !b.hidden);
+      for (const { section, grid } of sections.values()) section.hidden = !([...grid.children] as HTMLElement[]).some((b) => !b.hidden);   // the grid holds the item buttons
       empty.hidden = found > 0;
     };
     search.addEventListener('input', filter);
@@ -510,28 +591,29 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   }
 
   // the CWO chip of every page: one choice for all of them, kept when the panel closes
-  let cwoOnly = false; const cwoPanes = [];
+  let cwoOnly = false; const cwoPanes: (() => void)[] = [];
 
   /** A row of toggle chips; `many`: more than one can be on at once. */
-  function chipRow(options, { many = false, label }) {
+  // (the options as [key, text, dot?]; plain string arrays, as begrippen.ts has them, as well)
+  function chipRow(options: readonly (readonly string[])[], { many = false, label }: { many?: boolean; label: string }) {
     const row = el('div', { className: 'zoek-chips' });
     row.setAttribute('role', 'group'); row.setAttribute('aria-label', label);
-    const on = new Set();
-    let changed = () => {};
+    const on = new Set<string>();
+    let changed = (): void => {};
     const buttons = options.map(([key, text, dot]) => {
       const b = el('button', { type: 'button', className: 'chip' });
       if (dot) b.append(el('span', { className: 'dot', style: `background: ${dot}` }));
       b.append(text); b.dataset.key = key; b.setAttribute('aria-pressed', 'false');
       b.addEventListener('click', () => {
         if (on.has(key)) on.delete(key); else { if (!many) on.clear(); on.add(key); }
-        for (const x of buttons) x.setAttribute('aria-pressed', String(on.has(x.dataset.key)));
+        for (const x of buttons) x.setAttribute('aria-pressed', String(on.has(x.dataset.key!)));
         changed();
       });
       return b;
     });
     row.append(...buttons);
     const clear = () => { on.clear(); for (const x of buttons) x.setAttribute('aria-pressed', 'false'); };
-    return { row, on, clear, onChange: (fn) => { changed = fn; } };
+    return { row, on, clear, onChange: (fn: () => void) => { changed = fn; } };
   }
 
   // ---------------------------------------------------------------- Borden
@@ -539,7 +621,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     const kleur = chipRow(BORD_KLEUREN.map((k) => [k.key, k.label, k.dot]), { label: 'Kleur' });
     // the kinds of the colour that is on, when it has more than one
     const soortRow = el('div', { className: 'zoek-chips sub', hidden: true });
-    let soort = null; let changed = () => {};
+    let soort: string | null = null; let changed = (): void => {};
     const showKinds = () => {
       const k = BORD_KLEUREN.find((x) => kleur.on.has(x.key));
       soort = null;
@@ -559,14 +641,14 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     const items = BORD_KLEUREN.flatMap((k) => k.groepen.flatMap(([groep, codes]) => codes.map((code) => {
       const { svg } = BORDEN[code];
       const naam = NAMEN.get(code) ?? EXTRA_BY.get(code)?.naam ?? code;
-      const uitleg = BORD_UITLEG?.[code] ?? EXTRA_BY.get(code) ?? {};
+      const uitleg: Uitleg = BORD_UITLEG?.[code] ?? EXTRA_BY.get(code) ?? {};
       const cwo = cwoTeken(code);                                  // what the CWO asks (cwo.js), for the chip, the card and the quiz
       const button = el('button', { type: 'button', className: `zoek-item${cwo ? '' : ' niet-cwo'}`, title: `${code} ${naam}${cwo ? '' : ' (niet voor CWO)'}` },
         el('img', { src: asImage(svg), alt: '', loading: 'lazy', decoding: 'async' }), el('span', { textContent: code }));
       // where it really stands (seinen.js plaatsVan): what hangs on a bridge on one straight ahead, the veerpont on
       // both kades with the pont between, everything else on its post beside the boat
       const waar = plaatsVan(code);
-      const place = (opts) => show(`bord:${code}`, () => makeTeken(code), waar === 'paal' ? opts : { ...opts, ahead: true, wide: waar === 'pont' });
+      const place = (opts?: PlaatsOpties): void => show(`bord:${code}`, () => makeTeken(code), waar === 'paal' ? opts : { ...opts, ahead: true, wide: waar === 'pont' });
       entries.push({ soort: 'bord', id: code, naam, tekst: uitleg.betekenis ?? naam, doen: uitleg.betekenis, groep: `${k.key}:${groep}`,
         cwo, ahead: waar !== 'paal', src: () => asImage(svg), place });
       return { code, naam, uitleg, svg, cwo, kleur: k.key, groep, button, heading: groep ? `${k.label}: ${groep.toLowerCase()}` : k.label,
@@ -574,7 +656,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     })));
     pane($('zoek-borden'), {
       placeholder: 'Zoek bord of code…', items,
-      chips: { rows: [kleur.row, soortRow], onChange: (fn) => { changed = fn; }, reset: () => { kleur.clear(); showKinds(); },
+      chips: { rows: [kleur.row, soortRow], onChange: (fn: () => void) => { changed = fn; }, reset: () => { kleur.clear(); showKinds(); },
         match: (item) => (!kleur.on.size || kleur.on.has(item.kleur)) && (!soort || item.groep === soort) },
       card: (item) => [
         el('div', { className: 'zoek-kaart-kop' }, el('img', { src: asImage(item.svg), alt: '' }),
@@ -589,14 +671,14 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   {
     const vorm = chipRow(VORMEN, { label: 'Vorm' });
     const kleur = chipRow(MARK_KLEUREN, { many: true, label: 'Kleur' });
-    let changed = () => {};
+    let changed = (): void => {};
     vorm.onChange(() => changed()); kleur.onChange(() => changed());
-    const pictures = new Map();                                  // id -> img, drawn the first time the tab is opened
+    const pictures = new Map<string, HTMLImageElement>();                                  // id -> img, drawn the first time the tab is opened
     const items = MARKS.map((spec) => {
-      const uitleg = MARK_UITLEG?.[spec.id] ?? {};
+      const uitleg: Uitleg = MARK_UITLEG?.[spec.id] ?? {};
       const img = el('img', { alt: '' }); pictures.set(spec.id, img);
       const button = el('button', { type: 'button', className: 'zoek-item mark', title: spec.naam }, img, el('span', { textContent: spec.naam }));
-      const place = (opts) => show(`mark:${spec.id}`, () => makeMark(spec), opts);
+      const place = (opts?: PlaatsOpties): void => show(`mark:${spec.id}`, () => makeMark(spec), opts);
       const cwo = spec.cwo !== false;                          // a mark is CWO unless it says it is not
       entries.push({ soort: 'ton', id: spec.id, naam: spec.naam, tekst: uitleg.betekenis ?? spec.naam, doen: uitleg.passeren, groep: VORM[spec.vorm],
         cwo, src: () => img.src, place });
@@ -605,11 +687,11 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     });
     pane($('zoek-markeringen'), {
       placeholder: 'Zoek ton of baken…', items,
-      chips: { rows: [vorm.row, kleur.row], onChange: (fn) => { changed = fn; }, reset: () => { vorm.clear(); kleur.clear(); },
+      chips: { rows: [vorm.row, kleur.row], onChange: (fn: () => void) => { changed = fn; }, reset: () => { vorm.clear(); kleur.clear(); },
         match: (item) => (!vorm.on.size || vorm.on.has(item.vorm)) && [...kleur.on].every((k) => item.kleuren.has(k)) },
       card: (item) => {
         const night = item.spec.licht ? el('button', { type: 'button', className: 'link-button zoek-nacht' }) : null;
-        const label = () => { night.textContent = dark ? 'Bekijk overdag' : 'Bekijk ’s nachts'; };
+        const label = (): void => { night!.textContent = dark ? 'Bekijk overdag' : 'Bekijk ’s nachts'; };
         night?.addEventListener('click', () => { dark = !dark; holdDark(dark ? 1 : null); label(); });
         if (night) label();
         return [
@@ -625,7 +707,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       snapshots(items.map((item) => {
         const key = `mark:${item.spec.id}`;
         if (!built.has(key)) built.set(key, makeMark(item.spec));
-        return { object: built.get(key), img: item.img };
+        return { object: built.get(key)!, img: item.img };
       }), { lens: (mid, reach) => [mid.x - reach * 0.35, mid.y + reach * 0.18, mid.z + reach * 0.92] });
       pictures.clear();
     };
@@ -634,20 +716,21 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   // ---------------------------------------------------------------- Seinen
   {
     const PLEKKEN = [['brug', 'Beweegbare brug'], ['sluis', 'Sluis'], ['vast', 'Vaste brug'], ['stuw', 'Stuw'], ['spui', 'Spuien']];
-    const plekVan = (s) => ({ brug: 'brug', ophaal: 'brug', sluis: 'sluis', sluisbrug: 'sluis', sluisophaal: 'sluis', vast: 'vast', stuw: 'stuw', stuwbrug: 'stuw', spui: 'spui' })[s.bouw];
+    const PLEK: Record<string, string> = { brug: 'brug', ophaal: 'brug', sluis: 'sluis', sluisbrug: 'sluis', sluisophaal: 'sluis', vast: 'vast', stuw: 'stuw', stuwbrug: 'stuw', spui: 'spui' };
+    const plekVan = (s: Sein): string => PLEK[s.bouw];
     const LICHTKLEUREN = [['rood', 'Rood', '#c8102e'], ['groen', 'Groen', '#1f7a45'], ['geel', 'Geel', '#f5b800']];
-    const BORDKLEUR = { 'A.10': 'rood', 'A.1': 'rood', 'D.2': 'groen', 'D.1a': 'geel', 'D.1b': 'geel' };
-    const kleurenVanSein = (s) => new Set([...(s.lampen ?? []).map(([k]) => k), ...(s.geel ? ['geel'] : []), ...(s.driehoek ? ['rood'] : []),
+    const BORDKLEUR: Record<string, string> = { 'A.10': 'rood', 'A.1': 'rood', 'D.2': 'groen', 'D.1a': 'geel', 'D.1b': 'geel' };
+    const kleurenVanSein = (s: Sein): Set<string> => new Set([...(s.lampen ?? []).map(([k]) => k), ...(s.geel ? ['geel'] : []), ...(s.driehoek ? ['rood'] : []),
       ...(s.borden ? [BORDKLEUR[s.borden]] : [])]);
     const plek = chipRow(PLEKKEN, { label: 'Waar' });
     const kleur = chipRow(LICHTKLEUREN, { many: true, label: 'Kleur' });
-    let changed = () => {};
+    let changed = (): void => {};
     plek.onChange(() => changed()); kleur.onChange(() => changed());
     const items = SEINEN.map((sein) => {
       const svg = seinPlaatje(sein);
       const button = el('button', { type: 'button', className: 'zoek-item sein', title: `${sein.groep}: ${sein.naam}` },
         el('img', { src: asImage(svg), alt: '', loading: 'lazy', decoding: 'async' }), el('span', { textContent: sein.naam }));
-      const place = (opts) => show(`sein:${sein.id}`, () => makeSein(sein), { ...opts, ahead: true });
+      const place = (opts?: PlaatsOpties): void => show(`sein:${sein.id}`, () => makeSein(sein), { ...opts, ahead: true });
       const cwo = sein.cwo !== false;                          // a signal is CWO unless it says it is not
       entries.push({ soort: 'sein', id: sein.id, naam: sein.naam, tekst: sein.betekenis, doen: sein.betekenis, groep: sein.groep,
         cwo, ahead: true, breed: true, src: () => asImage(svg), place });
@@ -656,11 +739,11 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     });
     pane($('zoek-seinen'), {
       placeholder: 'Zoek sein…', items,
-      chips: { rows: [plek.row, kleur.row], onChange: (fn) => { changed = fn; }, reset: () => { plek.clear(); kleur.clear(); },
+      chips: { rows: [plek.row, kleur.row], onChange: (fn: () => void) => { changed = fn; }, reset: () => { plek.clear(); kleur.clear(); },
         match: (item) => (!plek.on.size || plek.on.has(item.plek)) && [...kleur.on].every((k) => item.kleuren.has(k)) },
       card: (item) => {
         const night = item.sein.borden && !item.sein.licht ? null : el('button', { type: 'button', className: 'link-button zoek-nacht' });   // boards only: nothing lit
-        const label = () => { night.textContent = dark ? 'Bekijk overdag' : 'Bekijk ’s nachts'; };
+        const label = (): void => { night!.textContent = dark ? 'Bekijk overdag' : 'Bekijk ’s nachts'; };
         night?.addEventListener('click', () => { dark = !dark; holdDark(dark ? 1 : null); label(); });
         if (night) label();
         return [
@@ -682,25 +765,25 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   // her card turns her to be seen from ahead, either side or astern - each light showing only inside
   // its own arc - and a slider goes from day to night and back on the same ship.
   {
-    const ZIJDEN = [['voren', 'Van voren', 0], ['stuurboord', 'Van stuurboord', 270], ['bakboord', 'Van bakboord', 90], ['achteren', 'Van achteren', 180]];
+    const ZIJDEN: [key: string, label: string, deg: number][] = [['voren', 'Van voren', 0], ['stuurboord', 'Van stuurboord', 270], ['bakboord', 'Van bakboord', 90], ['achteren', 'Van achteren', 180]];
     const LICHTKLEUREN = [['wit', 'Wit', '#ffffff'], ['rood', 'Rood', '#e0251b'], ['groen', 'Groen', '#1f9a4a'], ['geel', 'Geel', '#f5b800'], ['blauw', 'Blauw', '#2a6cf0']];
     // two kegels point to point (diabolo) are found under Kegel: a row of chips the shorter
     const VORMEN = [['bol', 'Bol'], ['kegel', 'Kegel'], ['cilinder', 'Cilinder'], ['ruit', 'Ruit'], ['bord', 'Bord'], ['vlag', 'Vlag']];
-    const vormVan = (naam) => (/diabolo/i.test(naam) ? 'kegel' : /bol/i.test(naam) ? 'bol' : /kegel/i.test(naam) ? 'kegel' : /cilinder/i.test(naam) ? 'cilinder'
+    const vormVan = (naam: string): string => (/diabolo/i.test(naam) ? 'kegel' : /bol/i.test(naam) ? 'bol' : /kegel/i.test(naam) ? 'kegel' : /cilinder/i.test(naam) ? 'cilinder'
       : /ruit/i.test(naam) ? 'ruit' : /bord/i.test(naam) ? 'bord' : /vlag|wimpel/i.test(naam) ? 'vlag' : 'overig');
-    const DOT = { wit: '#fff6dc', rood: '#ff3b2f', groen: '#3bff7a', geel: '#ffd23a', blauw: '#4a7dff' };
+    const DOT: Record<string, string> = { wit: '#fff6dc', rood: '#ff3b2f', groen: '#3bff7a', geel: '#ffd23a', blauw: '#4a7dff' };
     const WATER = new THREE.MeshStandardMaterial({ color: 0x5f93b5, transparent: true, opacity: 0.32, roughness: 0.25, depthWrite: false });
 
     /**
      * A ship turned to be seen from one side, her middle on the origin: the lamps as makeShip lays them.
      * In the frame of what show() puts out ahead, +z faces the boat.
      */
-    const makeView = (config) => {
+    const makeView = (config: ShipConfig): THREE.Group => {
       const ship = makeShip(config);
       // her middle and length from what she is made of: a sleep or a duwstel does not start at its origin
       ship.updateMatrixWorld(true);
       const box = new THREE.Box3(); const part = new THREE.Box3();
-      ship.traverse((o) => { if (o.isMesh && o.geometry) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); box.union(part.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld)); } });
+      ship.traverse((o) => { if (isMesh(o) && o.geometry) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); box.union(part.copy(o.geometry.boundingBox!).applyMatrix4(o.matrixWorld)); } });
       const length = box.isEmpty() ? (ship.userData.length ?? 10) : box.max.x - box.min.x;
       const turn = new THREE.Group(); ship.position.set(box.isEmpty() ? -length / 2 : -(box.min.x + box.max.x) / 2, 0, box.isEmpty() ? 0 : -(box.min.z + box.max.z) / 2); turn.add(ship);
       const view = new THREE.Group(); view.add(turn);
@@ -710,9 +793,9 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       view.userData = {
         // how high she goes, and half of the most she is across, turned any way: what show() fits in the view
         height: 6, length, top: box.isEmpty() ? 6 : box.max.y, beam: box.isEmpty() ? 6 : box.max.z - box.min.z, ship,
-        update: (t, night, cam) => ship.userData.update?.(t, night, cam),
+        update: (t: number, night: number, cam: THREE.Camera) => ship.userData.update?.(t, night, cam),
         // heading as seen: 0 coming at you, 90 her bakboord your way, 180 going away, 270 her stuurboord
-        turn: (deg) => { turn.rotation.y = -Math.PI / 2 - THREE.MathUtils.degToRad(deg); },
+        turn: (deg: number) => { turn.rotation.y = -Math.PI / 2 - THREE.MathUtils.degToRad(deg); },
       };
       view.userData.turn(0);
       return view;
@@ -720,15 +803,16 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
 
     // which of a samenstel the picture is of, where it is not the whole of it: of a sleep the ship that is towed, not
     // the sleepboot ahead of it (the deel of bpr/schepen.js fleet)
-    const ALLEEN = { gesleept_groot_schip: new Set(['b']), laatste_lengte_sleep: new Set(['a1', 'a2']) };
-    const deelVan = (o) => { for (let x = o; x; x = x.parent) if (x.userData?.deel) return x.userData.deel; return null; };
-    const telt = (alleen, o) => !alleen || alleen.has(deelVan(o));                       // a part of a hull
+    const ALLEEN: Record<string, Set<string | null>> = { gesleept_groot_schip: new Set(['b']), laatste_lengte_sleep: new Set(['a1', 'a2']) };
+    type Alleen = Set<string | null> | null | undefined;
+    const deelVan = (o: THREE.Object3D): string | null => { for (let x: THREE.Object3D | null = o; x; x = x.parent) if (x.userData?.deel) return x.userData.deel; return null; };
+    const telt = (alleen: Alleen, o: THREE.Object3D): boolean => !alleen || alleen.has(deelVan(o));                       // a part of a hull
     // a light by where it is ('b.voor'); a dagmerk, which hangs on the whole of it, by the part it is over
-    const lichtTelt = (alleen, plaats) => !alleen || alleen.has(String(plaats).split('.')[0]);
-    const merkTelt = (alleen, ship, shape) => {
+    const lichtTelt = (alleen: Alleen, plaats: string): boolean => !alleen || alleen.has(String(plaats).split('.')[0]);
+    const merkTelt = (alleen: Alleen, ship: THREE.Object3D, shape: THREE.Object3D): boolean => {
       if (!alleen) return true;
       const p = shape.getWorldPosition(new THREE.Vector3()); const box = new THREE.Box3();
-      let deel = null;
+      let deel: string | null = null;
       ship.traverse((o) => {
         if (deel || !o.userData?.deel) return;
         box.setFromObject(o).expandByScalar(0.5);                         // over it, whatever the height
@@ -737,28 +821,30 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       return alleen.has(deel);
     };
     /** What shows of her at night from dead ahead: [{ kleur, x, y }], x across as you see it, y up. */
-    const seenAhead = (ship, alleen = null) => {
+    const seenAhead = (ship: THREE.Object3D, alleen: Alleen = null): Stip[] => {
       ship.updateMatrixWorld(true);
       const p = new THREE.Vector3();
-      return (ship.userData.lights ?? []).filter(({ arc, plaats }) => (!arc || (arc[0] <= 0 && arc[1] >= 0)) && lichtTelt(alleen, plaats))
+      const lights: ScheepsLicht[] = ship.userData.lights ?? [];
+      return lights.filter(({ arc, plaats }) => (!arc || (arc[0] <= 0 && arc[1] >= 0)) && lichtTelt(alleen, plaats))
         .map(({ kleur, lamp }) => { lamp.getWorldPosition(p); return { kleur, x: -p.z, y: p.y }; });
     };
     /** What a night picture shows, to tell two apart: the colours where they are, in her own frame of them - each
      *  once: two lamps on one spot look like one. */
-    const lichtenKey = (dots) => {
+    const lichtenKey = (dots: Stip[]): string => {
       const xs = dots.map((d) => d.x); const ys = dots.map((d) => d.y);
       const [x0, y0] = [Math.min(...xs), Math.min(...ys)]; const w = Math.max(...xs) - x0 || 1; const h = Math.max(...ys) - y0 || 1;
       return [...new Set(dots.map((d) => `${d.kleur}@${Math.round(((d.x - x0) / w) * 4)},${Math.round(((d.y - y0) / h) * 4)}`))].sort().join(' ');
     };
     /** What a day picture shows: her dagmerken from the top down. */
-    const dagmerkKey = (ship, alleen = null) => {
+    const dagmerkKey = (ship: THREE.Object3D, alleen: Alleen = null): string => {
       ship.updateMatrixWorld(true); const p = new THREE.Vector3();
-      return (ship.userData.dagmerken ?? []).filter((d) => (!d.nacht || d.vorm !== 'boei') && merkTelt(alleen, ship, d.shape))
-        .map(({ shape, vorm, kleur }) => { shape.getWorldPosition(p); return [p.y, `${vorm}:${kleur}`]; })
+      const dagmerken: ScheepsDagmerk[] = ship.userData.dagmerken ?? [];
+      return dagmerken.filter((d) => (!d.nacht || d.vorm !== 'boei') && merkTelt(alleen, ship, d.shape))
+        .map(({ shape, vorm, kleur }): [number, string] => { shape.getWorldPosition(p); return [p.y, `${vorm}:${kleur}`]; })
         .sort((a, b) => b[0] - a[0]).map(([, k]) => k).join(' ');
     };
     /** The night picture: her lights on the dark, where they are as you see them, each with a little glow. */
-    const lightsSvg = (dots) => {
+    const lightsSvg = (dots: Stip[]): string => {
       const W = 160; const H = 120;
       const xs = dots.map((d) => d.x); const ys = dots.map((d) => d.y);
       const spanX = Math.max(3, Math.max(...xs, 0) - Math.min(...xs, 0)); const spanY = Math.max(3, Math.max(...ys, 0) - Math.min(...ys, 0));
@@ -773,10 +859,10 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
 
     // By day: her hull a dark shape on the water, and her dagmerken where they are as you see them from
     // ahead, each drawn as what it is - a bol round, a kegel a triangle, a cilinder upright, boards and flags
-    const KLEUR = { zwart: '#161616', geel: '#f2c200', rood: '#c1121c', groen: '#0f8a3c', wit: '#f6f6f2', blauw: '#1f4fd1', oranje: '#f26322', lichtblauw: '#86c8ec' };
-    const shapeSvg = (vorm, kleur, x, y, h) => {
+    const KLEUR: Record<string, string> = { zwart: '#161616', geel: '#f2c200', rood: '#c1121c', groen: '#0f8a3c', wit: '#f6f6f2', blauw: '#1f4fd1', oranje: '#f26322', lichtblauw: '#86c8ec' };
+    const shapeSvg = (vorm: string, kleur: string, x: number, y: number, h: number): string => {
       const c = KLEUR[kleur] ?? KLEUR.zwart; const r = h / 2; const cy = y - r; const line = 'stroke="#16222e" stroke-width="0.8"';
-      const tri = (up) => `<polygon points="${x - r},${up ? y : y - h} ${x + r},${up ? y : y - h} ${x},${up ? y - h : y}" fill="${c}"/>`;
+      const tri = (up: boolean): string => `<polygon points="${x - r},${up ? y : y - h} ${x + r},${up ? y : y - h} ${x},${up ? y - h : y}" fill="${c}"/>`;
       switch (vorm) {
         case 'bol': case 'boei': return `<circle cx="${x}" cy="${cy}" r="${r}" fill="${c}"/>`;
         case 'kegelOmlaag': return tri(false);
@@ -800,18 +886,19 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
         default: return `<rect x="${x - r}" y="${y - h}" width="${h}" height="${h * 0.75}" fill="${c}" ${line}/>`;   // a board or a flag
       }
     };
-    const daySvg = (ship, alleen = null) => {
+    const daySvg = (ship: THREE.Object3D, alleen: Alleen = null): string => {
       ship.updateMatrixWorld(true);
       const W = 160; const H = 120; const p = new THREE.Vector3();
-      const marks = (ship.userData.dagmerken ?? []).filter((d) => (!d.nacht || d.vorm !== 'boei') && merkTelt(alleen, ship, d.shape))
-        .map(({ shape, vorm, kleur, h }) => { shape.getWorldPosition(p); return { vorm, kleur, x: -p.z, y: p.y, h }; });
+      const dagmerken: ScheepsDagmerk[] = ship.userData.dagmerken ?? [];
+      const marks = dagmerken.filter((d) => (!d.nacht || d.vorm !== 'boei') && merkTelt(alleen, ship, d.shape))
+        .map(({ shape, vorm, kleur, h }): Merk => { shape.getWorldPosition(p); return { vorm, kleur, x: -p.z, y: p.y, h }; });
       // her hull as seen from ahead: as wide as she is, up to her deck
       // (not the dagmerken, and not a post or a line: on a small boat they would make her hull as high as they go)
-      const box = new THREE.Box3(); const part = new THREE.Box3(); const size = new THREE.Vector3(); const signs = new Set();
-      for (const { shape } of ship.userData.dagmerken ?? []) shape.traverse((o) => signs.add(o));
+      const box = new THREE.Box3(); const part = new THREE.Box3(); const size = new THREE.Vector3(); const signs = new Set<THREE.Object3D>();
+      for (const { shape } of dagmerken) shape.traverse((o) => signs.add(o));
       ship.traverse((o) => {
-        if (!o.isMesh || !o.geometry || signs.has(o) || !telt(alleen, o)) return;
-        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); part.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+        if (!isMesh(o) || !o.geometry || signs.has(o) || !telt(alleen, o)) return;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); part.copy(o.geometry.boundingBox!).applyMatrix4(o.matrixWorld);
         part.getSize(size); if (size.x < 0.3 && size.z < 0.3) return;
         if (part.max.y < 3.5) box.union(part);
       });
@@ -822,12 +909,12 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       const spanX = Math.max(1.5, Math.max(...xs) - Math.min(...xs) + 1.2); const spanY = Math.max(1.5, hi + 0.6);
       const k = Math.min((W - 24) / spanX, (H - 24) / spanY);
       const cx = (Math.max(...xs) + Math.min(...xs)) / 2; const cy = hi / 2;
-      const X = (x) => (W / 2 + (x - cx) * k).toFixed(1); const Y = (y) => (H / 2 - (y - cy) * k).toFixed(1);
+      const X = (x: number): string => (W / 2 + (x - cx) * k).toFixed(1); const Y = (y: number): string => (H / 2 - (y - cy) * k).toFixed(1);
       const base = Math.min(H, Number(Y(0)));
       // a picture, not a drawing to scale: every sign made larger by the same factor, to be told apart, and the
       // signs one above the other each pushed down below the one over it where they would run into each other
       const grow = Math.max(1, 16 / (Math.min(...marks.map((m) => m.h)) * k));
-      const placed = [];
+      const placed: (Merk & { size: number; foot: number })[] = [];
       for (const m of [...marks].sort((a, b) => b.y - a.y)) {
         const size = m.h * k * grow;
         const above = placed.filter((o) => Math.abs(o.x - m.x) * k < 16).map((o) => o.foot + 3);
@@ -842,38 +929,43 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
         + (base < H ? `<rect y="${base}" width="${W}" height="${H - base}" fill="#9fbfd6"/>` : '') + `${body}</svg>`;
     };
 
-    const KORT = { 'Grote schepen': 'Groot', 'Kleine schepen': 'Klein', 'Slepen, duwen en koppelen': 'Slepen en duwen', Veerponten: 'Veerpont',
+    const KORT: Record<string, string> = { 'Grote schepen': 'Groot', 'Kleine schepen': 'Klein', 'Slepen, duwen en koppelen': 'Slepen en duwen', Veerponten: 'Veerpont',
       Stilliggend: 'Stil', 'Werk en hinder': 'Werk', 'Bijzondere schepen': 'Bijzonder', 'De lelievlet': 'Lelievlet' };
     // A klein schip that the lelievlet herself can be - with her toplicht, her ankerbol - is shown as her, not
     // as a model: sailing (the sails up), at anchor (the sails down, the anchor out, the ankerbol up), moored.
-    const EIGEN = { klein_zeilschip_lt7m: { bal: false, tuig: 'op', hand: true }, klein_schip_stilliggend: { bal: true, anker: true }, lelievlet_gemeerd: { bal: false } };
+    const EIGEN: Record<string, EigenSignalen> = { klein_zeilschip_lt7m: { bal: false, tuig: 'op', hand: true }, klein_schip_stilliggend: { bal: true, anker: true }, lelievlet_gemeerd: { bal: false } };
     // what the BPR asks of a lelievlet is what it asks of any klein schip: those are not listed twice under her
     // own name; moored she has no klein schip beside her, so that one stays, among the ships lying still
     const DUBBEL = new Set(['lelievlet_zeilen', 'lelievlet_zeilen_driekleur', 'lelievlet_roeien', 'lelievlet_zeil_en_motor', 'lelievlet_geankerd', 'lelievlet_gesleept']);
-    const GROEP = { lelievlet_gemeerd: 'Stilliggend' };
+    const GROEP: Record<string, string> = { lelievlet_gemeerd: 'Stilliggend' };
     // and her picture is of the lelievlet too, as she is shown
     const BEELD = Object.fromEntries([['klein_zeilschip_lt7m', 'lelievlet_zeilen'], ['klein_schip_stilliggend', 'lelievlet_geankerd']]
-      .map(([id, als]) => [id, CONFIGS.find((c) => c.id === als)]));
+      .map(([id, als]): [string, ShipConfig | undefined] => [id, CONFIGS.find((c) => c.id === als)]));
     const SCHEPEN = CONFIGS.filter((c) => !DUBBEL.has(c.id));
     const GROEPEN = LICHT_GROEPEN.filter((g) => SCHEPEN.some((c) => (GROEP[c.id] ?? LICHT_UITLEG?.[c.id]?.groep) === g));
     /** One page of ships: 'nacht' (Lichten) or 'dag' (Dagmerken). Returns what draws its pictures. */
-    const pagina = (root, tijd) => {
+    /** An item of Lichten or Dagmerken; beeld: what its picture shows, once it is drawn. */
+    interface SchipItem extends PaneItem {
+      config: ShipConfig; uitleg: Partial<LichtUitleg>; naam: string; img: HTMLImageElement; cwo: boolean; groep: string;
+      kenmerken: Set<string>; beeld?: string;
+    }
+    const pagina = (root: HTMLElement, tijd: 'nacht' | 'dag'): (() => void) => {
       const kies = tijd === 'nacht' ? chipRow(LICHTKLEUREN, { many: true, label: 'Kleur van de lichten' })
         : chipRow(VORMEN, { many: true, label: 'Vorm van het dagmerk' });
-      let changed = () => {};
+      let changed = (): void => {};
       let zijde = 0;
-      const items = SCHEPEN.filter((config) => tijd === 'nacht' || config.dagmerken?.length).map((config) => {
-        const uitleg = LICHT_UITLEG?.[config.id] ?? {};
+      const items = SCHEPEN.filter((config) => tijd === 'nacht' || config.dagmerken?.length).map((config): SchipItem => {
+        const uitleg: Partial<LichtUitleg> = LICHT_UITLEG?.[config.id] ?? {};
         const img = el('img', { alt: '' });
         const naam = uitleg.naam ?? config.naam;
         const button = el('button', { type: 'button', className: 'zoek-item licht', title: naam }, img, el('span', { textContent: naam }));
         const kenmerken = new Set(tijd === 'nacht' ? (config.lichten ?? []).map(([k]) => k) : (config.dagmerken ?? []).map(([v]) => vormVan(v)));
         const key = `schip:${config.id}`;
-        const place = (opts) => {
+        const place = (opts?: PlaatsOpties): void => {
           if (EIGEN[config.id]) { showOwn(key, EIGEN[config.id], zijde); return; }
           if (!built.has(key)) built.set(key, makeView(config));
-          built.get(key).userData.turn(zijde);                       // first: how far out she goes depends on how she lies
-          show(key, () => built.get(key), { ...opts, ahead: true, far: true, deg: zijde });
+          built.get(key)!.userData.turn(zijde);                       // first: how far out she goes depends on how she lies
+          show(key, () => built.get(key)!, { ...opts, ahead: true, far: true, deg: zijde });
         };
         const g = GROEP[config.id] ?? uitleg.groep ?? GROEPEN[0];
         return { config, uitleg, naam, button, img, cwo: cwoLicht(uitleg.artikel ?? config.artikel), heading: g, groep: g, kenmerken,
@@ -906,7 +998,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
           tekst: item.uitleg.betekenis ?? item.naam, doen: item.uitleg.betekenis, groep: item.groep, cwo: true, ahead: true,
           get familie() { draw(); return `${tijd}:${item.beeld}`; },
           src: () => { draw(); return item.img.src; },
-          place: ({ willekeurig = false, ...opts } = {}) => {
+          place: ({ willekeurig = false, ...opts }: PlaatsOpties & { willekeurig?: boolean } = {}) => {
             const kanten = ZIJDEN.filter(([key]) => !(item.config.kade && key === 'bakboord')).map(([, , deg]) => deg);
             zijde = willekeurig ? kanten[Math.floor(Math.random() * kanten.length)] : 0;
             item.place(opts);
@@ -915,7 +1007,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       }
       pane(root, {
         placeholder: tijd === 'nacht' ? 'Zoek schip of licht…' : 'Zoek schip of dagmerk…', items,
-        chips: { rows: [groep.row, kies.row], onChange: (fn) => { changed = fn; }, reset: () => { groep.clear(); kies.clear(); },
+        chips: { rows: [groep.row, kies.row], onChange: (fn: () => void) => { changed = fn; }, reset: () => { groep.clear(); kies.clear(); },
           match: (item) => (!groep.on.size || groep.on.has(item.groep)) && [...kies.on].every((k) => item.kenmerken.has(k)) },
         card: (item) => {
           // as the page is: by night, or by day; the slider goes between the two on this ship
@@ -966,30 +1058,31 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     const groep = chipRow(GELUID_GROEPEN.map((g) => [g, g]), { label: 'Groep' });
     const gehoord = chipRow(GEHOORD, { label: 'Wat je hoort' });   // one at a time: together they say little
     const zelf = chipRow([['zelf', 'Mag een lelievlet zelf geven']], { label: 'Zelf geven' });
-    let changed = () => {};
+    let changed = (): void => {};
     groep.onChange(() => changed()); gehoord.onChange(() => changed()); zelf.onChange(() => changed());
+    const ENKEL: Record<string, string> = { Z: 'z', B: 'b' };     // a reeks is heard as what it is a reeks of
     const items = GELUIDEN.map((g) => {
       const svg = patroonSvg(g.patroon);
       const button = el('button', { type: 'button', className: 'zoek-item geluid', title: g.naam },
         el('img', { src: asImage(svg), alt: '' }), el('span', { textContent: g.naam }));
-      const tokens = new Set([...g.patroon].map((t) => ({ Z: 'z', B: 'b' })[t] ?? t));
+      const tokens = new Set([...g.patroon].map((t) => ENKEL[t] ?? t));
       // the quiz (tekenquiz.js): heard, and drawn as the BPR draws it; one pattern is one familie
       if (g.cwo) {
         entries.push({ soort: 'geluid', id: g.id, naam: g.naam, tekst: g.betekenis, doen: g.betekenis, groep: g.groep, cwo: true, breed: true,
           familie: `geluid:${g.patroon}`, src: () => asImage(svg),
-          speel: (klaar) => hoorn.play(g.patroon, { herhaald: g.herhaald, klaar }), stil: () => hoorn.stop(), speelt: () => hoorn.playing });
+          speel: (klaar: () => void) => hoorn.play(g.patroon, { herhaald: g.herhaald, klaar }), stil: () => hoorn.stop(), speelt: () => hoorn.playing });
       }
       return { g, svg, button, cwo: !!g.cwo, heading: g.groep, groep: g.groep, tokens,
         key: fold([g.naam, g.groep, g.betekenis ?? '', g.lelievlet ?? '', g.artikel ?? ''].join(' ')), place: () => {} };
     });
     pane($('zoek-geluiden'), {
       placeholder: 'Zoek geluidssein…', items,
-      chips: { rows: [groep.row, gehoord.row, zelf.row], onChange: (fn) => { changed = fn; }, reset: () => { groep.clear(); gehoord.clear(); zelf.clear(); },
+      chips: { rows: [groep.row, gehoord.row, zelf.row], onChange: (fn: () => void) => { changed = fn; }, reset: () => { groep.clear(); gehoord.clear(); zelf.clear(); },
         match: (item) => (!groep.on.size || groep.on.has(item.groep)) && [...gehoord.on].every((t) => item.tokens.has(t)) && (!zelf.on.size || item.g.klein) },
       card: (item) => {
         hoorn.stop();
         const speel = el('button', { type: 'button', className: 'primary zoek-speel' });
-        const label = (on) => { speel.textContent = on ? '■ Stop' : '▶ Laat horen'; };
+        const label = (on: boolean): void => { speel.textContent = on ? '■ Stop' : '▶ Laat horen'; };
         label(false);
         speel.addEventListener('click', () => {
           if (hoorn.playing) { hoorn.stop(); return; }
@@ -1016,11 +1109,11 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   {
     const ALREADY = new Set(['bpr-A.1-rode-vlag', 'bpr-H.3a-spuien', 'bpr-H.3b-inlaten']);
     // what kind of flag first: a signal of the BPR, a racing signal, or the code flags themselves
-    const SOORT = { bpr: 'seinen', wedstrijd: 'wedstrijd', letter: 'seinboek', cijfer: 'seinboek', vervanger: 'seinboek', onderscheiding: 'seinboek' };
+    const SOORT: Record<string, string> = { bpr: 'seinen', wedstrijd: 'wedstrijd', letter: 'seinboek', cijfer: 'seinboek', vervanger: 'seinboek', onderscheiding: 'seinboek' };
     const categorie = chipRow([['seinen', 'Seinen'], ['wedstrijd', 'Wedstrijd'], ['seinboek', 'Letters en cijfers']], { label: 'Soort' });
     const kleur = chipRow(VLAG_KLEUREN, { many: true, label: 'Kleur' });
     const patroonRow = el('div', { className: 'zoek-chips sub', hidden: true });
-    let patroon = null; let changed = () => {};
+    let patroon: string | null = null; let changed = (): void => {};
     const order = new Map(VLAG_GROEPEN.map((g, i) => [g, i]));
     const items = [...VLAGGEN].sort((a, b) => (order.get(a.groep) ?? 99) - (order.get(b.groep) ?? 99)).map((v) => {
       const svg = vlagSvg(v);
@@ -1028,7 +1121,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       const cwo = Boolean(v.cwo) && (!/^BPR\b/.test(v.bron ?? '') || cwoBron(v.bron));
       const button = el('button', { type: 'button', className: `zoek-item vlag${cwo ? '' : ' niet-cwo'}`, title: `${v.naam}${cwo ? '' : ' (niet voor CWO)'}` },
         el('img', { src: asImage(svg), alt: '', loading: 'lazy', decoding: 'async' }), el('span', { textContent: v.naam }));
-      const place = (opts) => show(`vlag:${v.id}`, () => makeVlag(v), opts);
+      const place = (opts?: PlaatsOpties): void => show(`vlag:${v.id}`, () => makeVlag(v), opts);
       if (cwo && !ALREADY.has(v.id)) {
         entries.push({ soort: 'sein', id: v.id, naam: v.naam, tekst: v.betekenis, doen: v.betekenis, groep: 'Vlaggen en borden aan boord', cwo: true, src: () => asImage(svg), place });
       }
@@ -1046,7 +1139,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
         const b = el('button', { type: 'button', className: 'chip', textContent: label }); b.dataset.key = key; b.setAttribute('aria-pressed', 'false');
         b.addEventListener('click', () => {
           patroon = patroon === key ? null : key;
-          for (const x of patroonRow.children) x.setAttribute('aria-pressed', String(x.dataset.key === patroon));
+          for (const x of patroonRow.children as HTMLCollectionOf<HTMLElement>) x.setAttribute('aria-pressed', String(x.dataset.key === patroon));   // its chips
           changed();
         });
         return b;
@@ -1056,7 +1149,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     categorie.onChange(() => { showPatterns(); changed(); });
     pane($('zoek-vlaggen'), {
       placeholder: 'Zoek vlag, letter of sein…', items,
-      chips: { rows: [categorie.row, kleur.row, patroonRow], onChange: (fn) => { changed = fn; }, reset: () => { categorie.clear(); kleur.clear(); showPatterns(); },
+      chips: { rows: [categorie.row, kleur.row, patroonRow], onChange: (fn: () => void) => { changed = fn; }, reset: () => { categorie.clear(); kleur.clear(); showPatterns(); },
         match: (item) => (!categorie.on.size || categorie.on.has(item.soort)) && [...kleur.on].every((k) => item.kleuren.has(k)) && (!patroon || item.patroon === patroon) },
       card: (item) => [
         el('div', { className: 'zoek-kaart-kop' }, el('img', { src: asImage(item.svg), alt: '' }),
@@ -1074,9 +1167,9 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   // (begrip.label, begrip.open); an item of Zoeken is opened here.
   {
     const groep = chipRow(BEGRIP_GROEPEN, { label: 'Groep' });
-    let changed = () => {};
+    let changed = (): void => {};
     groep.onChange(() => changed());
-    const KOP = new Map(BEGRIP_GROEPEN);
+    const KOP = new Map(BEGRIP_GROEPEN as [string, string][]);     // pairs [groep, kop], as begrippen.ts lists them
     const items = BEGRIPPEN.map((b) => {
       const button = el('button', { type: 'button', className: 'zoek-begrip', title: b.naam },
         el('b', { textContent: b.naam }), el('span', { textContent: b.uitleg }));
@@ -1084,15 +1177,15 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
       return { b, button, cwo: b.cwo ? true : null, heading: KOP.get(b.groep), groep: b.groep, place: () => {},
         key: fold([b.naam, ...(b.ook ?? []), b.uitleg].join(' ')) };
     });
-    const zoekLabel = (n) => `${CATS[n.zoeken]} › ${n.naam}`;
+    const zoekLabel = (n: Naar): string => `${CATS[n.zoeken!]} › ${n.naam}`;   // only for one that goes to a page here
     pane($('zoek-begrippen'), {
       placeholder: 'Zoek begrip…', items,
-      chips: { rows: [groep.row], onChange: (fn) => { changed = fn; }, reset: () => groep.clear(),
+      chips: { rows: [groep.row], onChange: (fn: () => void) => { changed = fn; }, reset: () => groep.clear(),
         match: (item) => !groep.on.size || groep.on.has(item.groep) },
       card: (item) => {
         const { b } = item;
         const melding = el('p', { className: 'niet-cwo', hidden: true });
-        const knoppen = (b.naar ?? []).map((n, i) => {
+        const knoppen = (b.naar ?? []).map((n: Naar, i) => {
           const tekst = n.zoeken ? zoekLabel(n) : begrip?.label(n);
           if (!tekst) return null;
           const knop = el('button', { type: 'button', className: `zoek-naar${i === 0 ? ' primary' : ''}`, textContent: tekst });
@@ -1101,7 +1194,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
             melding.hidden = !waarom; melding.textContent = waarom ? `Dat kan nu niet: ${waarom.charAt(0).toLowerCase()}${waarom.slice(1)}.` : '';
           });
           return knop;
-        }).filter(Boolean);
+        }).filter((k): k is HTMLButtonElement => Boolean(k));
         return [
           el('div', { className: 'zoek-kaart-kop' }, el('div', {}, el('span', { className: 'code', textContent: [KOP.get(b.groep), b.cwo && `CWO ${b.cwo}`].filter(Boolean).join(' · ') }),
             el('h3', { textContent: b.naam }))),
@@ -1114,7 +1207,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     });
   }
   /** An item of another page here, by its name: that page, with its card open. Null, or why not. */
-  function openZoek({ zoeken: cat, naam }) {
+  function openZoek({ zoeken: cat, naam }: Naar): string | null {
     const source = sources.find((x) => x.cat === cat);
     const hit = source?.items().find((h) => h.naam === naam || h.naam.endsWith(` ${naam}`));
     if (!hit) return 'Niet gevonden';
@@ -1126,10 +1219,10 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   // Zoeken opens on a field over everything and a tile per kind; a tile opens that kind's own page (with
   // its own search and chips, ‹ back to the start). Typing in the field, the tiles give way to the results
   // of every kind, a few each, and a link to see them all on their own page.
-  const CATS = { onderdelen: 'Onderdelen', begrippen: 'Begrippen', borden: 'Borden', markeringen: 'Markeringen', seinen: 'Seinen', vlaggen: 'Vlaggen', lichten: 'Lichten', dagmerken: 'Dagmerken', geluiden: 'Geluidsseinen' };
+  const CATS: Record<string, string> = { onderdelen: 'Onderdelen', begrippen: 'Begrippen', borden: 'Borden', markeringen: 'Markeringen', seinen: 'Seinen', vlaggen: 'Vlaggen', lichten: 'Lichten', dagmerken: 'Dagmerken', geluiden: 'Geluidsseinen' };
   const HITS = 6;                                                // results per kind on the start page
   let page = 'home';
-  function goto(cat) {
+  function goto(cat: string): void {
     if (cat === page) return;
     release();
     page = cat;
@@ -1142,19 +1235,19 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     if (cat === 'dagmerken') drawDagmerken();
   }
   // back on the start page the focus goes to the tile it came from (not to the field: on a phone that brings up the keyboard)
-  let fromTile = null;
+  let fromTile: HTMLElement | null = null;
   $('zoek-terug').addEventListener('click', () => { goto('home'); fromTile?.focus({ preventScroll: true }); });
   // the tile that had the focus is gone with the start page: the focus goes on to ‹ (not to a search field, which
   // on a phone would bring up the keyboard)
-  for (const tile of ui.querySelectorAll('.zoek-tegel')) tile.addEventListener('click', () => { fromTile = tile; goto(tile.dataset.cat); $('zoek-terug').focus({ preventScroll: true }); });
+  for (const tile of ui.querySelectorAll<HTMLElement>('.zoek-tegel')) tile.addEventListener('click', () => { fromTile = tile; goto(tile.dataset.cat!); $('zoek-terug').focus({ preventScroll: true }); });
 
-  const field = $('zoek-alles'); const results = $('zoek-resultaten'); const tiles = $('zoek-tegels');
+  const field = $<HTMLInputElement>('zoek-alles'); const results = $('zoek-resultaten'); const tiles = $('zoek-tegels');
   const findAll = () => {
     const query = fold(field.value.trim());
     tiles.hidden = Boolean(query); results.hidden = !query;
     if (!query) { results.replaceChildren(); return; }
     drawPictures(); drawLights(); drawDagmerken();               // their pictures, the first time they are needed
-    const groups = [];
+    const groups: HTMLElement[] = [];
     for (const source of sources) {
       const hits = source.items().filter((h) => h.key.includes(query) && (!cwoOnly || h.cwo !== false));
       if (!hits.length) continue;
@@ -1184,7 +1277,7 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
   cwoPanes.push(findAll);                                        // the CWO chip of a page counts for what is found here too
 
   return {
-    update(dt) {
+    update(dt: number) {
       if (!shown?.object) return;
       t += dt;
       shown.object.userData.update?.(t, darkK, camera);
@@ -1211,16 +1304,16 @@ export function initZoeken({ ui, renderer, scene, camera, boat, lookFromHelm, wa
     get pagina() { return page; },
     get kaart() { return kaartNu; },
     /** Whether it has that page ('home' or a kind). */
-    kan: (cat) => cat === 'home' || Object.hasOwn(CATS, cat),
+    kan: (cat: string): boolean => cat === 'home' || Object.hasOwn(CATS, cat),
     /** Open the item with that id on that page (as kaart gives it); false when there is none. */
-    openItem: (cat, id) => openers.get(cat)?.(id) ?? false,
+    openItem: (cat: string, id: string): boolean => openers.get(cat)?.(id) ?? false,
     /** The viewer taken down: no sound signal goes on after it. */
     destroy() { hoorn.close(); },
     /**
      * The parts of the boat for the field over everything (main.js has their list): [{ key, naam, open }],
      * `search` the field of their own page.
      */
-    parts(list, search) { sources.unshift({ cat: 'onderdelen', search, items: () => list.map((p) => ({ ...p, open: () => { goto('onderdelen'); p.open(); } })) }); },
+    parts(list: ZoekBron[], search: HTMLInputElement) { sources.unshift({ cat: 'onderdelen', search, items: () => list.map((p) => ({ ...p, open: () => { goto('onderdelen'); p.open(); } })) }); },
     /** A tab was opened: the pictures of the marks are drawn the first time theirs is. */
   };
 }

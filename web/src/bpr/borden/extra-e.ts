@@ -1,23 +1,23 @@
-// @ts-nocheck
 // Signs of BPR bijlage 7 group E beyond those of tekens.js, drawn after the BPR's own drawings
 // (reference/bpr/tekens/bpr_img) like e.js, each with what the viewer needs to list and explain it.
 // Most are not asked about in CWO; the few the Katwijk CWO book teaches say cwo: true.
 // See kader.js for the conventions every group follows.
-import { svg, aanwijzing, tekst, WIT, BLAUW } from './kader.ts';
+import { svg, aanwijzing, tekst, WIT, BLAUW, type Punt } from './kader.ts';
+import type { Bord, ExtraBord } from './index.ts';
 import { glad } from './symbolen.ts';
 
 /** A number in units, rounded for the SVG. */
-const n = (v) => +v.toFixed(1);
-const xy = ([x, y]) => `${n(x)},${n(y)}`;
+const n = (v: number): number => +v.toFixed(1);
+const xy = ([x, y]: Punt): string => `${n(x)},${n(y)}`;
 
 /** A white shape: a path, a polygon through [x, y] points, a rectangle, a circle. */
-const wit = (d) => `<path d="${d}" fill="${WIT}"/>`;
-const vlak = (pts, fill = WIT) => `<polygon points="${pts.map(xy).join(' ')}" fill="${fill}"/>`;
-const blok = (x, y, w, h, rx = 0) => `<rect x="${x}" y="${y}" width="${w}" height="${h}"${rx ? ` rx="${rx}"` : ''} fill="${WIT}"/>`;
-const rond = (cx, cy, r, fill = WIT) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
+const wit = (d: string): string => `<path d="${d}" fill="${WIT}"/>`;
+const vlak = (pts: Punt[], fill = WIT): string => `<polygon points="${pts.map(xy).join(' ')}" fill="${fill}"/>`;
+const blok = (x: number, y: number, w: number, h: number, rx = 0): string => `<rect x="${x}" y="${y}" width="${w}" height="${h}"${rx ? ` rx="${rx}"` : ''} fill="${WIT}"/>`;
+const rond = (cx: number, cy: number, r: number, fill = WIT): string => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
 
 /** The curve segments of a smooth open line through `pts` (Catmull-Rom as cubic Béziers), without its M. */
-function bochten(pts) {
+function bochten(pts: Punt[]): string {
   let d = '';
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[Math.max(i - 1, 0)]; const b = pts[i]; const c = pts[i + 1]; const e = pts[Math.min(i + 2, pts.length - 1)];
@@ -30,16 +30,16 @@ function bochten(pts) {
  * A white line `w` wide through one or more runs of points: smooth within a run, a sharp corner
  * where one run ends and the next begins (the wake of E.21 and E.24 meeting the waves).
  */
-const band = (runs, w, cap = 'butt') => `<path d="M${xy(runs[0][0])}${runs.map(bochten).join('')}" fill="none" stroke="${WIT}" stroke-width="${w}" stroke-linecap="${cap}" stroke-linejoin="round"/>`;
+const band = (runs: Punt[][], w: number, cap = 'butt'): string => `<path d="M${xy(runs[0][0])}${runs.map(bochten).join('')}" fill="none" stroke="${WIT}" stroke-width="${w}" stroke-linecap="${cap}" stroke-linejoin="round"/>`;
 
 /** An arc of a circle round (cx, cy), `w` wide, from angle a0 to a1 in degrees (clockwise on screen when a1 > a0). */
-function boog(cx, cy, r, a0, a1, w) {
-  const p = (a) => [cx + r * Math.cos((a * Math.PI) / 180), cy + r * Math.sin((a * Math.PI) / 180)];
+function boog(cx: number, cy: number, r: number, a0: number, a1: number, w: number): string {
+  const p = (a: number): Punt => [cx + r * Math.cos((a * Math.PI) / 180), cy + r * Math.sin((a * Math.PI) / 180)];
   return `<path d="M${xy(p(a0))} A${r},${r} 0 ${Math.abs(a1 - a0) > 180 ? 1 : 0} ${a1 > a0 ? 1 : 0} ${xy(p(a1))}" fill="none" stroke="${WIT}" stroke-width="${w}"/>`;
 }
 
 /** An arrowhead: base `breed` wide centred on (x, y), its point `lang` further on in direction `hoek` (degrees). */
-function kop(x, y, hoek, breed, lang) {
+function kop(x: number, y: number, hoek: number, breed: number, lang: number): string {
   const ux = Math.cos((hoek * Math.PI) / 180); const uy = Math.sin((hoek * Math.PI) / 180);
   return vlak([[x - uy * breed / 2, y + ux * breed / 2], [x + ux * lang, y + uy * lang], [x + uy * breed / 2, y - ux * breed / 2]]);
 }
@@ -59,12 +59,15 @@ const tussen = svg(1320, 600, `<rect width="1320" height="600" fill="${BLAUW}"/>
 // E.5.4 to E.5.15, the reserved berths of art. 7.06: a white triangle point up (duwvaart), point down
 // (other ships than duwvaart) or a diamond (both), 0.67 of the side across, with in it the blue cones
 // (point down) those ships must carry: one, two or three, smaller when there are three
-const VORM = {
+/** Who a reserved berth is for: duwvaart, other ships, or all. */
+type Vorm = 'duw' | 'ander' | 'alle';
+
+const VORM: Record<Vorm, { pts: Punt[]; midden: number[] }> = {
   duw: { pts: [[300, 126], [501, 474], [99, 474]], midden: [348, 354, 339] },
   ander: { pts: [[99, 126], [501, 126], [300, 474]], midden: [261, 261, 287] },
   alle: { pts: [[300, 99], [501, 300], [300, 501], [99, 300]], midden: [318, 318, 321] },
 };
-function ligplaats(vorm, kegels) {
+function ligplaats(vorm: Vorm, kegels: number): string {
   const { pts, midden } = VORM[vorm];
   let s = vlak(pts);
   if (kegels) {
@@ -178,7 +181,7 @@ const waterscooter = aanwijzing(rond(171, 131, 22)
 const walstroom = aanwijzing(blok(72, 208, 111, 49) + blok(72, 343, 111, 49) + blok(194, 173, 99, 251)
   + vlak([[307, 187], [446, 199], [446, 401], [307, 413]]) + blok(458, 262, 93, 76));
 
-const vierkant = (s) => ({ w: 600, h: 600, svg: s });
+const vierkant = (s: string): Bord => ({ w: 600, h: 600, svg: s });
 
 export default {
   'E.3': vierkant(stuw),
@@ -209,25 +212,25 @@ export default {
 };
 
 // The reserved berths, E.5.4 to E.5.15: who may lie there, and what the cones mean (art. 3.14, 7.06, 7.07)
-const KEGELS = [
+const KEGELS: { aantal?: string; lading?: string; afstand?: number }[] = [
   {},
   { aantal: 'één blauwe kegel of één blauw licht', lading: 'bepaalde brandbare stoffen', afstand: 10 },
   { aantal: 'twee blauwe kegels of twee blauwe lichten', lading: 'voor de gezondheid schadelijke stoffen', afstand: 50 },
   { aantal: 'drie blauwe kegels of drie blauwe lichten', lading: 'ontplofbare stoffen', afstand: 100 },
 ];
 // who may lie there, and the words that go with them (duwvaart takes the singular)
-const WIE = {
+const WIE: Record<Vorm, Record<'naam' | 'wie' | 'die' | 'hoeft' | 'moet' | 'ze' | 'vervoert', string>> = {
   duw: { naam: 'duwvaart', wie: 'mag alleen duwvaart ligplaats nemen: een duwboot met bakken ervoor', die: 'duwvaart', hoeft: 'hoeft', moet: 'moet', ze: 'die', vervoert: 'vervoert' },
   ander: { naam: 'andere schepen', wie: 'mogen alleen andere schepen dan duwvaart ligplaats nemen', die: 'schepen', hoeft: 'hoeven', moet: 'moeten', ze: 'ze', vervoert: 'vervoeren' },
   alle: { naam: 'alle schepen', wie: 'mogen duwvaart en andere schepen ligplaats nemen', die: 'schepen', hoeft: 'hoeven', moet: 'moeten', ze: 'ze', vervoert: 'vervoeren' },
 };
 const KORT = ['geen blauwe kegel', 'één blauwe kegel', 'twee blauwe kegels', 'drie blauwe kegels'];
-function gereserveerd(code, vorm, k) {
+function gereserveerd(code: string, vorm: Vorm, k: number): ExtraBord {
   const w = WIE[vorm]; const kegel = KEGELS[k];
   const betekenis = `Aan deze kant van de vaarweg ${w.wie}. ` + (k === 0
     ? `Dat geldt alleen voor ${w.die} die geen blauwe kegel of blauw licht ${w.hoeft} te voeren.`
     : `Dat geldt alleen voor ${w.die} die ${kegel.aantal} ${w.moet} voeren, omdat ${w.ze} ${kegel.lading} ${w.vervoert}.`);
-  let lelievlet;
+  let lelievlet: string;
   if (k === 0) lelievlet = vorm === 'duw' ? 'Een lelievlet is geen duwvaart, dus hier mag je geen ligplaats nemen.'
     : 'Een lelievlet voert geen blauwe kegel, dus je mag hier ligplaats nemen, zo dicht mogelijk bij de oever.';
   else lelievlet = `Hier mag een lelievlet niet liggen. Neem ook nergens ligplaats binnen ${kegel.afstand} meter van een schip met ${KORT[k]}.`;
@@ -240,7 +243,7 @@ export const EXTRA = [
     lelievlet: 'Blijf ruim weg van de stuw: de stroming trekt een boot zonder motor er makkelijk naartoe.' },
   { code: 'E.5.2', naam: 'Ligplaats toegestaan tussen de afstanden', kleur: 'blauw', groep: 'Met een teken',
     betekenis: 'Je mag ligplaats nemen tussen de twee afstanden op het bord, in meters gerekend vanaf het bord. Bij 30-60 dus tussen 30 en 60 meter.' },
-  ...[['duw', 4], ['ander', 8], ['alle', 12]].flatMap(([vorm, eerste]) => [0, 1, 2, 3].map((k) => gereserveerd(`E.5.${eerste + k}`, vorm, k))),
+  ...([['duw', 4], ['ander', 8], ['alle', 12]] as const).flatMap(([vorm, eerste]) => [0, 1, 2, 3].map((k) => gereserveerd(`E.5.${eerste + k}`, vorm, k))),
   { code: 'E.6.1', naam: 'Spudpalen toegestaan', kleur: 'blauw', groep: 'Met een teken',
     betekenis: 'Aan de kant van de vaarweg waar dit bord staat, mag je spudpalen gebruiken. Een spudpaal is een paal die een schip in de bodem zet om stil te liggen.' },
   { code: 'E.7.1', naam: 'Meren om een auto aan of van boord te zetten', kleur: 'blauw', groep: 'Met een teken',

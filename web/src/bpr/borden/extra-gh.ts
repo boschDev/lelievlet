@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Signs of BPR bijlage 7 that are not asked about in CWO: the over-/onderhoogte plates, the dieptebord,
 // the kilometer and hectometer boards and the wegwijzers and name boards of H.2. Drawn after the BPR's
 // own drawings (reference/bpr/tekens/bpr_img); see kader.js for the conventions.
@@ -10,11 +9,11 @@ import { svg, tekst, pijl, ROOD, WIT, ZWART, BLAUW, GROEN, GEEL } from './kader.
 const ORANJE = '#f39a12';   // the omleiding board as the BPR prints it (neither the BPR nor the RST gives a RAL)
 
 /** A line of text with its capitals centred on y; `anchor` 'start' sets it from x, `spacing` spaces it out. */
-const regel = (x, y, text, size, fill, spacing = 0, anchor = 'start') =>
+const regel = (x: number, y: number, text: string, size: number, fill: string, spacing = 0, anchor = 'start'): string =>
   tekst(x, y, text, size, fill).replace('text-anchor="middle"', `text-anchor="${anchor}" letter-spacing="${spacing}"`);
 
 /** A field from x0 to the point at x1, between y0 and y1: square at the left, a 90° point at the right. */
-function puntveld(x0, y0, x1, y1, fill) {
+function puntveld(x0: number, y0: number, x1: number, y1: number, fill: string): string {
   const half = (y1 - y0) / 2;
   return `<polygon points="${x0},${y0} ${x1 - half},${y0} ${x1},${y0 + half} ${x1 - half},${y1} ${x0},${y1}" fill="${fill}"/>`;
 }
@@ -22,7 +21,7 @@ function puntveld(x0, y0, x1, y1, fill) {
 // ---- G.5.1c: over- and onderhoogte, two yellow plates pointing down at the spot -----------------
 
 /** One plate (420 wide, 456 high) at y: yellow, a black field that points down, the figure on top. */
-function hoogteplaat(y, text) {
+function hoogteplaat(y: number, text: string): string {
   return `<polygon points="0,${y} 420,${y} 420,${y + 246} 210,${y + 456} 0,${y + 246}" fill="${GEEL}"/>`
     + `<polygon points="28,${y + 176} 392,${y + 176} 392,${y + 228} 210,${y + 410} 28,${y + 228}" fill="${ZWART}"/>`
     + regel(210, y + 80, text, 118, ZWART, 4, 'middle');
@@ -30,32 +29,32 @@ function hoogteplaat(y, text) {
 
 // ---- G.5.3: the dieptebord, the hoogtebord (G.5.2) the other way up ------------------------------
 
-const dieptebord = () => svg(600, 600, `<rect width="600" height="600" fill="${GEEL}"/><rect x="42" y="42" width="516" height="516" fill="${ZWART}"/>`
+const dieptebord = (): string => svg(600, 600, `<rect width="600" height="600" fill="${GEEL}"/><rect x="42" y="42" width="516" height="516" fill="${ZWART}"/>`
   + regel(300, 184, '2,40', 215, GEEL, 6, 'middle') + `<polygon points="153,540 447,540 300,398" fill="${GEEL}"/>`);
 
 // ---- H.1: kilometrering, white boards with a thin black edge ---------------------------------
 
-const kmBord = (w, h, text, y, size) => svg(w, h,
+const kmBord = (w: number, h: number, text: string, y: number, size: number): string => svg(w, h,
   `<rect x="7" y="7" width="${w - 14}" height="${h - 14}" fill="${WIT}" stroke="${ZWART}" stroke-width="14"/>${tekst(w / 2, y, text, size)}`);
 
 // ---- H.2: bewegwijzering ---------------------------------------------------------------------
 
 /** A green board 940 x 600 with a thin white keyline just inside its edge. */
-const groenBord = (body) => svg(940, 600, `<rect width="940" height="600" fill="${GROEN}"/>`
+const groenBord = (body: string): string => svg(940, 600, `<rect width="940" height="600" fill="${GROEN}"/>`
   + `<rect x="8" y="8" width="924" height="584" fill="none" stroke="${WIT}" stroke-width="8"/>${body}`);
 
 const ARM = 24;   // the arms and arrows on the green boards
 const KOP = 70;
 
 /** H.2.1a: ahead to Tilburg and Eindhoven, right to Breda; Oosterhout to the left, the red bar where you are. */
-const vooraanduidingHoofd = () => groenBord(
+const vooraanduidingHoofd = (): string => groenBord(
   regel(522, 62, 'Tilburg', 66, WIT, 5.5) + regel(522, 145, 'Eindhoven', 66, WIT, 4.5)
   + regel(45, 248, 'Oosterhout', 66, WIT, 5.5) + regel(594, 494, 'Breda', 66, WIT, 5.5)
   + pijl(561, 414, 561, 206, ARM, KOP, WIT) + `<rect x="${431 - ARM / 2}" y="330" width="${ARM}" height="224" fill="${WIT}"/>`
   + pijl(431 - ARM / 2, 402, 768, 402, ARM, KOP, WIT) + `<rect x="402" y="307" width="59" height="33" fill="${ROOD}"/>`);
 
 /** H.2.2a: ahead to ’s-Hertogenbosch, right to the Rietveldhaven on its white plate. */
-const vooraanduidingSpecifiek = () => groenBord(
+const vooraanduidingSpecifiek = (): string => groenBord(
   regel(150, 129, '’s-Hertogenbosch', 66, WIT, 5.5)
   + pijl(187, 531, 187, 188, ARM, KOP, WIT) + pijl(187, 383, 390, 383, ARM, KOP, WIT)
   + `<rect x="248" y="430" width="559" height="91" fill="${WIT}"/>${regel(260, 470, 'Rietveldhaven', 64, ZWART, 7.5)}`);

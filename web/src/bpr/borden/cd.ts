@@ -1,29 +1,28 @@
-// @ts-nocheck
 // Signs of group(s) CD of BPR bijlage 7, drawn after the BPR's own drawings (reference/bpr/tekens/bpr_img).
 // See kader.js for the conventions every group follows.
-import { svg, gebod, aanwijzing, tekst, WIT, ZWART, GROEN, GEEL } from './kader.ts';
+import { svg, gebod, aanwijzing, tekst, WIT, ZWART, GROEN, GEEL, type Punt } from './kader.ts';
 
 /** A black polygon through the given [x, y] points. */
-const vlak = (pts, fill = ZWART) => `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="${fill}"/>`;
+const vlak = (pts: Punt[], fill = ZWART): string => `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="${fill}"/>`;
 
 // The C triangles are roughly right-angled and isosceles in the BPR, their base on the border.
 /** A triangle standing on the bottom of the field, `depth` high and `half` half wide (C.1: the bottom rises). */
-const opBodem = (depth, half) => vlak([[300 - half, 540], [300, 540 - depth], [300 + half, 540]]);
+const opBodem = (depth: number, half: number): string => vlak([[300 - half, 540], [300, 540 - depth], [300 + half, 540]]);
 /** A triangle hanging from the top of the field, apex down (C.2: limited headroom). */
-const vanBoven = (depth, half) => vlak([[300 - half, 60], [300 + half, 60], [300, 60 + depth]]);
+const vanBoven = (depth: number, half: number): string => vlak([[300 - half, 60], [300 + half, 60], [300, 60 + depth]]);
 /** A pair of triangles on the left and right edges, apexes toward each other at height cy (C.3). */
-const vanZijden = (cy, depth = 140) =>
+const vanZijden = (cy: number, depth = 140): string =>
   vlak([[60, cy - depth], [60 + depth, cy], [60, cy + depth]]) + vlak([[540, cy - depth], [540 - depth, cy], [540, cy + depth]]);
 
 /** A diamond board with its points on the middles of the sides of a 600 square at (x, 0), outline inside. */
-function ruitBord(x, fill, stroke, sw, extra = '') {
+function ruitBord(x: number, fill: string, stroke: string, sw: number, extra = ''): string {
   const i = sw / Math.SQRT2;  // keep the outline's corners inside the 600 square
   const pts = [[300, i], [600 - i, 300], [300, 600 - i], [i, 300]].map(([a, b]) => `${a + x},${b}`).join(' ');
   return `${extra}<polygon points="${pts}" fill="${fill === 'none' ? 'none' : fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="miter"/>`;
 }
 
 /** A white arrow pointing right on D.3a: broad shaft, head with bevelled, swept-back barbs (65515); D.3b stands it up. */
-export const witPijl = () => vlak([[100, 259], [608, 259], [592, 176], [618, 170], [792, 300], [618, 430], [592, 424], [608, 341], [100, 341]], WIT);
+export const witPijl = (): string => vlak([[100, 259], [608, 259], [592, 176], [618, 170], [792, 300], [618, 430], [592, 424], [608, 341], [100, 341]], WIT);
 
 export default {
   // C.1: depth limited; the plain sign and the one with the depth in cm above the triangle (BPR: 220)

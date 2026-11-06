@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Signs of group(s) E of BPR bijlage 7, drawn after the BPR's own drawings (reference/bpr/tekens/bpr_img).
 // See kader.js for the conventions every group follows.
 import { svg, verbod, gebod, aanwijzing, ruit, tekst, pijl, lamp, ROOD, WIT, ZWART, BLAUW, GROEN, GEEL, RAND } from './kader.ts';
@@ -7,16 +6,16 @@ import * as symbool from './symbolen.ts';
 // --- E.1 to E.11 ---
 
 /** A number in units, rounded for the SVG. */
-const n = (v) => +v.toFixed(1);
+const n = (v: number): number => +v.toFixed(1);
 
 /** A path in white; `transform` mirrors a half-drawn symbol. */
-const wit = (d, transform = '') => `<path d="${d}" fill="${WIT}"${transform ? ` transform="${transform}"` : ''}/>`;
+const wit = (d: string, transform = ''): string => `<path d="${d}" fill="${WIT}"${transform ? ` transform="${transform}"` : ''}/>`;
 
 /** A symbol drawn as its right half against x = 300, and that half mirrored. */
-const symmetrisch = (d) => wit(d) + wit(d, 'translate(600,0) scale(-1,1)');
+const symmetrisch = (d: string): string => wit(d) + wit(d, 'translate(600,0) scale(-1,1)');
 
 /** Scale the fractions (of the side of a 600 sign) in a path string to units. */
-const f = (strings, ...values) => strings.reduce((s, str, i) => s + str + (i < values.length ? n(values[i] * 600) : ''), '');
+const f = (strings: TemplateStringsArray, ...values: number[]): string => strings.reduce((s, str, i) => s + str + (i < values.length ? n(values[i] * 600) : ''), '');
 
 // E.4: the ferry in side view, a deckhouse on a hull with raked ends
 const veerpont = wit(f`M${0.406},${0.356} H${0.598} V${0.502} H${0.406} Z`)
@@ -25,22 +24,25 @@ const veerpont = wit(f`M${0.406},${0.356} H${0.598} V${0.502} H${0.406} Z`)
 // E.9, E.10: a waterway junction seen from above, own channel entering from the bottom edge. Each
 // channel is a white band [x0, y0, x1, y1] in fractions of the side; 0 and 1 run it into the keyline,
 // so the blue that is left reads as the banks.
-const vaarwegen = (banen) => aanwijzing(banen.map(([x0, y0, x1, y1]) => {
-  const k = (v) => Math.min(Math.max(v, 0.03), 0.97) * 600;
+const vaarwegen = (banen: Baan[]): string => aanwijzing(banen.map(([x0, y0, x1, y1]) => {
+  const k = (v: number): number => Math.min(Math.max(v, 0.03), 0.97) * 600;
   return `<rect x="${n(k(x0))}" y="${n(k(y0))}" width="${n(k(x1) - k(x0))}" height="${n(k(y1) - k(y0))}" fill="${WIT}"/>`;
 }).join(''));
 /** The same junction mirrored left to right (the BPR draws the pairs as mirror images). */
-const spiegel = (banen) => banen.map(([x0, y0, x1, y1]) => [1 - x1, y0, 1 - x0, y1]);
+const spiegel = (banen: Baan[]): Baan[] => banen.map(([x0, y0, x1, y1]) => [1 - x1, y0, 1 - x0, y1]);
+
+/** A channel: a band [x0, y0, x1, y1] in fractions of the side. */
+type Baan = [number, number, number, number];
 
 // measured on the BPR drawings; thick = main waterway (~0.27 of the side), thin = side waterway (~0.145)
-const E9 = {
+const E9: Record<string, Baan[]> = {
   a: [[0.35, 0, 0.646, 1], [0, 0.429, 1, 0.569]],                                        // crossing
   b: [[0.325, 0, 0.592, 1], [0.592, 0.425, 1, 0.571]],                                   // side channel right
   d: [[0.329, 0.328, 0.593, 1], [0.329, 0.328, 1, 0.592], [0.383, 0, 0.529, 0.33]],      // main turns right, thin ahead
   f: [[0.328, 0.326, 0.593, 1], [0.328, 0.326, 1, 0.586], [0, 0.385, 0.33, 0.531]],      // main turns right, thin left
   h: [[0.329, 0.5, 0.593, 1], [0.383, 0.328, 1, 0.592], [0.383, 0, 0.529, 0.33], [0, 0.387, 0.4, 0.534]],
 };
-const E10 = {
+const E10: Record<string, Baan[]> = {
   a: [[0.427, 0, 0.573, 1], [0, 0.354, 1, 0.648]],                                       // thin crosses the main
   b: [[0.427, 0.5, 0.571, 1], [0, 0.325, 1, 0.591]],                                     // thin ends on the main
   c: [[0.328, 0, 0.591, 0.672], [0.328, 0.411, 1, 0.672], [0.39, 0.6, 0.535, 1]],        // main from ahead bends right
@@ -61,7 +63,7 @@ const P = `<path fill-rule="evenodd" fill="${WIT}" d="${f`M${0.218},${0.829} V${
   + f`M${0.337},${0.296} H${0.561} A${0.104},${0.104} 0 0 1 ${0.561},${0.504} H${0.337} Z`}"/>`;
 
 // E.5.1: the figures 20 as even strokes, E.5.3: the Roman IV
-const lijn = (d, w) => `<path d="${d}" fill="none" stroke="${WIT}" stroke-width="${w}"/>`;
+const lijn = (d: string, w: number): string => `<path d="${d}" fill="none" stroke="${WIT}" stroke-width="${w}"/>`;
 const twintig = lijn('M100,240 C100,205 128,186 163,186 C200,186 225,208 225,242 C225,272 208,292 185,315 L112,410 H250', 40)
   + `<ellipse cx="426" cy="297" rx="82" ry="109" fill="none" stroke="${WIT}" stroke-width="40"/>`;
 const vier = wit(f`M${0.18},${0.21} H${0.276} V${0.79} H${0.18} Z`)

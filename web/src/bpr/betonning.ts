@@ -1,6 +1,41 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { character } from './lichtkarakter.ts';
+
+/** A turned body's profile: [radius, height] from the bottom up (m). */
+type Profiel = [number, number][];
+
+/** The body of a mark: what it is made of, and how high its top stands (m). */
+interface Lichaam {
+  top: number;
+  profile?: Profiel;          // turned round the y axis
+  sphere?: number;            // a ball of this radius
+  float?: boolean;            // a drijfbaken: a float with a pole
+  pole?: number;              // a kopbaken: a pole of this radius
+  twig?: boolean;             // a steekbaken
+  bank?: boolean;             // on the wal
+  lantaarn?: boolean;         // a sector light's lantern on top
+  lijn?: undefined;
+}
+/** A pair in line on the bank: the vormen of the front and the rear one, and how far (m) the rear stands behind. */
+interface LijnLichaam { lijn: [string, string]; achter: number }
+
+/** A sector of a sector light: [kleur, from, to] in degrees off the line straight out over the water. */
+export type Sector = [kleur: string, from: number, to: number];
+
+/** A mark of the lessons, as MARKS describes it. */
+export interface Mark {
+  id: string;
+  naam: string;
+  vorm: string;
+  banden: string[];
+  top?: string;
+  licht?: [kleur: string, karakter: string];
+  sectoren?: Sector[];
+  cwo?: boolean;              // false: not asked by CWO (a mark is CWO unless it says so)
+}
+
+/** A topteken built standing on y = 0, and how tall it is. */
+type Topteken = [THREE.Object3D, number];
 
 // Betonning en markering (BPR bijlage 8, the Dutch IALA-A system, Richtlijnen Scheepvaarttekens 2023):
 // every mark as a small model built here. A mark stands on the waterline at its own origin, y up; what
@@ -9,13 +44,13 @@ import { character } from './lichtkarakter.ts';
 // Sizes from the RWS guideline and the RWS and Fryslân datasets (reference/bpr/BETONNING.md); how far a
 // buoy stands out of the water no Dutch source gives, so those heights are estimates.
 
-export const KLEUR = {
+export const KLEUR: Record<string, number> = {
   rood: 0xc1121c, groen: 0x0f8a3c, geel: 0xf2c200, zwart: 0x161616, wit: 0xf2f2ee, hout: 0x7a5a3a,
 };
-const LICHT = { rood: 0xff3322, groen: 0x33ff66, geel: 0xffd23a, wit: 0xfff4d8, blauw: 0x4a7dff };
+const LICHT: Record<string, number> = { rood: 0xff3322, groen: 0x33ff66, geel: 0xffd23a, wit: 0xfff4d8, blauw: 0x4a7dff };
 
 // the bodies, as a profile turned round the y axis: [radius, height] from the bottom up (m)
-const BODY = {
+const BODY: Record<string, Lichaam | LijnLichaam> = {
   stompeTon: { profile: [[0.5, -0.3], [0.6, 0], [0.42, 1.2], [0, 1.2]], top: 1.2 },
   spitseTon: { profile: [[0.5, -0.3], [0.6, 0], [0.03, 1.5], [0, 1.52]], top: 1.52 },
   sparStomp: { profile: [[0.3, -0.8], [0.315, 0], [0.315, 2.2], [0, 2.2]], top: 2.2 },
@@ -41,7 +76,7 @@ const BODY = {
  * entry: all of it), `top` the topteken, `licht` the colour and character of its light, `sectoren` the
  * colours of a sector light, each [kleur, from, to] in degrees off the line straight out over the water.
  */
-export const MARKS = [
+export const MARKS: Mark[] = [
   { id: 'lateraal-rechts-stompe-ton', naam: 'Stompe ton (rood), rechterzijde', vorm: 'stompeTon', banden: ['rood'], top: 'cilinder', licht: ['rood', 'Iso 4s'] },
   { id: 'lateraal-links-spitse-ton', naam: 'Spitse ton (groen), linkerzijde', vorm: 'spitseTon', banden: ['groen'], top: 'kegel', licht: ['groen', 'Iso 4s'] },
   { id: 'lateraal-rechts-sparboei', naam: 'Sparboei rood (stomp)', vorm: 'sparStomp', banden: ['rood'], top: 'cilinder' },
@@ -81,14 +116,14 @@ export const MARKS = [
   { id: 'bpr-haveningang-stuurboord', naam: 'Haveningang, stuurboordszijde', vorm: 'haveningang', banden: ['groen', 'wit', 'groen', 'wit', 'groen', 'wit'], top: 'kegel', licht: ['groen', 'F'] },
 ];
 
-const materials = new Map();
-const paint = (name) => {
+const materials = new Map<string, THREE.MeshStandardMaterial>();
+const paint = (name: string): THREE.MeshStandardMaterial => {
   if (!materials.has(name)) materials.set(name, new THREE.MeshStandardMaterial({ color: KLEUR[name] ?? 0xcccccc, roughness: 0.6 }));
-  return materials.get(name);
+  return materials.get(name)!;
 };
 
 /** The radius of a turned profile at height y. */
-function radiusAt(profile, y) {
+function radiusAt(profile: Profiel, y: number): number {
   for (let i = 1; i < profile.length; i++) {
     const [r0, y0] = profile[i - 1]; const [r1, y1] = profile[i];
     if (y <= y1 + 1e-9) return y1 === y0 ? r1 : r0 + (r1 - r0) * ((y - y0) / (y1 - y0));
@@ -97,14 +132,14 @@ function radiusAt(profile, y) {
 }
 
 /** A turned body in bands: the part above water split evenly between the colours, the part under it the last colour. */
-function turned(profile, banden) {
+function turned(profile: Profiel, banden: string[]): THREE.Group {
   const group = new THREE.Group();
   const top = profile[profile.length - 1][1]; const bottom = profile[0][1];
   const cuts = [top, ...banden.slice(1).map((_, i) => top - (top * (i + 1)) / banden.length), bottom];
   cuts.sort((a, b) => b - a);
   for (let i = 0; i < cuts.length - 1; i++) {
     const [hi, lo] = [cuts[i], cuts[i + 1]];
-    const points = [];
+    const points: THREE.Vector2[] = [];
     const ys = [lo, ...profile.map(([, y]) => y).filter((y) => y > lo && y < hi), hi];
     for (const y of ys) points.push(new THREE.Vector2(Math.max(radiusAt(profile, y), 0.001), y));
     if (i === 0 && profile[profile.length - 1][0] === 0) points.push(new THREE.Vector2(0.0001, hi));   // closed on top
@@ -115,16 +150,16 @@ function turned(profile, banden) {
 }
 
 /** A sphere striped red and white from pole to pole: the midvaarwater mark. */
-function stripedBall(r) {
+function stripedBall(r: number): THREE.Mesh {
   const canvas = Object.assign(document.createElement('canvas'), { width: 256, height: 16 });
-  const g = canvas.getContext('2d');
+  const g = canvas.getContext('2d')!;
   for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#f2f2ee' : '#c1121c'; g.fillRect(i * 32, 0, 32, 16); }
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
   return new THREE.Mesh(new THREE.SphereGeometry(r, 32, 20), new THREE.MeshStandardMaterial({ map: texture, roughness: 0.6 }));
 }
 
 /** A sphere in horizontal bands. */
-function bandedBall(r, banden) {
+function bandedBall(r: number, banden: string[]): THREE.Object3D {
   if (banden[0] === 'rood-wit verticaal') return stripedBall(r);
   const group = new THREE.Group();
   const n = banden.length;
@@ -136,13 +171,13 @@ function bandedBall(r, banden) {
 }
 
 // -- toptekens: each built standing on y = 0, as tall as it says it is
-const TOP = {
+const TOP: Record<'cilinder' | 'kegel' | 'bol', (kleur: string) => Topteken> = {
   cilinder: (kleur) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.34, 20), paint(kleur)); m.position.y = 0.17; return [m, 0.34]; },
   kegel: (kleur) => { const m = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.32, 20), paint(kleur)); m.position.y = 0.16; return [m, 0.32]; },
   bol: (kleur) => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 14), paint(kleur)); m.position.y = 0.16; return [m, 0.32]; },
 };
 /** Two black cones, one above the other, pointing up (1) or down (-1) each. */
-const cones = (a, b) => () => {
+const cones = (a: number, b: number) => (): Topteken => {
   const g = new THREE.Group();
   [[a, 0.18], [b, 0.56]].forEach(([dir, y]) => {
     const c = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 20), paint('zwart'));
@@ -150,7 +185,7 @@ const cones = (a, b) => () => {
   });
   return [g, 0.74];
 };
-const TOPTEKENS = {
+const TOPTEKENS: Record<string, (m: Mark) => Topteken> = {
   cilinder: (m) => TOP.cilinder(m.banden[0]),
   kegel: (m) => TOP.kegel(m.banden[0]),
   noord: cones(1, 1), zuid: cones(-1, -1), oost: cones(-1, 1), west: cones(1, -1),
@@ -164,7 +199,8 @@ const TOPTEKENS = {
   // the verbodsteken A.1 as a cylinder, red, white and red: a verboden gebied (bijlage 8 §4)
   verbod: () => {
     const g = new THREE.Group();
-    for (const [kleur, lo, hi] of [['rood', 0, 0.12], ['wit', 0.12, 0.22], ['rood', 0.22, 0.34]]) {
+    const banden: [string, number, number][] = [['rood', 0, 0.12], ['wit', 0.12, 0.22], ['rood', 0.22, 0.34]];
+    for (const [kleur, lo, hi] of banden) {
       const band = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, hi - lo, 20), paint(kleur)); band.position.y = (lo + hi) / 2; g.add(band);
     }
     return [g, 0.34];
@@ -192,7 +228,7 @@ const TOPTEKENS = {
 };
 
 /** A walbaken's board: a triangle, point up or down, 0.9 m on a side, standing on its lower edge or point. */
-function triangle(kleur, dir) {
+function triangle(kleur: string, dir: number): THREE.Mesh {
   const s = 0.9; const h = (s * Math.sqrt(3)) / 2;
   const shape = new THREE.Shape();
   if (dir > 0) { shape.moveTo(-s / 2, 0); shape.lineTo(s / 2, 0); shape.lineTo(0, h); }
@@ -203,9 +239,9 @@ function triangle(kleur, dir) {
 }
 
 const D = Math.SQRT1_2;                          // m: half the diagonal of a square board 1 m on a side, on its point
-const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+const rect = (x0: number, y0: number, x1: number, y1: number): [number, number][] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 /** A board in coloured pieces, each [kleur, points] with x from its middle and y up from its foot, beside the pole as a walbaken's. */
-function board(pieces) {
+function board(pieces: [kleur: string, points: [number, number][]][]): THREE.Group {
   const g = new THREE.Group();
   for (const [kleur, points] of pieces) {
     const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y)));
@@ -216,7 +252,7 @@ function board(pieces) {
 }
 
 /** The dagmerk of a geleidelicht (§5.3): a round board with a cross, black left and right of it, white above and below. */
-function disc() {
+function disc(): THREE.Group {
   const r = 0.35; const g = new THREE.Group();
   const back = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.02, r + 0.02, 0.03, 32), paint('zwart'));
   back.rotation.x = Math.PI / 2; back.position.set(0, r + 0.02, 0.055); g.add(back);
@@ -231,7 +267,7 @@ function disc() {
  * The lantern of a sector light, standing on y = 0: its glass in the colours of its sectors towards the water
  * (+z), dark where it shows no light. Returns [lantern, height, glass].
  */
-function lantern(sectoren) {
+function lantern(sectoren: Sector[]): [THREE.Group, number, THREE.Mesh] {
   const g = new THREE.Group();
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.08, 24), paint('zwart')); base.position.y = 0.04;
   const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 24), paint('zwart')); glass.position.y = 0.23;
@@ -246,7 +282,7 @@ function lantern(sectoren) {
 }
 
 /** The sectors of a sector light on the water before it, each in its colour, from the bank out. */
-function fans(sectoren) {
+function fans(sectoren: Sector[]): THREE.Group {
   const g = new THREE.Group();
   for (const [kleur, from, to] of sectoren) {
     const deg = THREE.MathUtils.degToRad;
@@ -258,7 +294,7 @@ function fans(sectoren) {
 }
 
 /** The bit of bank a mark on the wal stands on; `long` m more of it behind, for a pair in line. */
-function mound(long = 0) {
+function mound(long = 0): THREE.Mesh {
   const bank = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.2, 0.4, 16), new THREE.MeshStandardMaterial({ color: 0x6f8f4e, roughness: 1 }));
   bank.position.set(0, 0.05, -long / 2); bank.scale.z = 1 + long / 2.4;
   return bank;
@@ -268,16 +304,16 @@ function mound(long = 0) {
  * A pair in line on one bank, the rear one higher (§5.2.3, §5.3), their lights in step: seen one above the
  * other, you are on the line they give.
  */
-function markLine(spec, body) {
+function markLine(spec: Mark, body: LijnLichaam): THREE.Group {
   const group = new THREE.Group(); group.name = spec.id;
   const pair = body.lijn.map((vorm, i) => { const m = makeMark({ ...spec, vorm }, { bare: true }); m.position.z = -i * body.achter; group.add(m); return m; });
   group.add(mound(body.achter));
-  group.userData = { spec, height: pair[1].userData.height, update: (t, night) => { for (const m of pair) m.userData.update(t, night); } };
+  group.userData = { spec, height: pair[1].userData.height, update: (t: number, night: number) => { for (const m of pair) m.userData.update(t, night); } };
   return group;
 }
 
 /** Twigs at the top of a steekbaken: spread out (stomp), or bound together into a point (spits). */
-function twigs(bound) {
+function twigs(bound: boolean): THREE.Group {
   const g = new THREE.Group();
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2; const len = 0.55 + 0.15 * ((i * 7) % 3) / 2;
@@ -295,7 +331,7 @@ function twigs(bound) {
  * A small glow that can be lit: a lens and a sprite round it. set(on, night) each frame. `strength`:
  * how brightly the lens burns - less keeps the colour of a large lens, which would burn out to white.
  */
-export function makeLamp(kleur, size = 1, strength = 3, { day = false, weg = false } = {}) {
+export function makeLamp(kleur: string, size = 1, strength = 3, { day = false, weg = false }: { day?: boolean; weg?: boolean } = {}): THREE.Group {
   const hex = LICHT[kleur] ?? LICHT.wit;
   const group = new THREE.Group();
   const lens = new THREE.Mesh(new THREE.SphereGeometry(0.05 * size, 12, 8), new THREE.MeshStandardMaterial({ color: 0x222222, emissive: hex, emissiveIntensity: 0 }));
@@ -305,7 +341,7 @@ export function makeLamp(kleur, size = 1, strength = 3, { day = false, weg = fal
   // in daylight a lamp is no more than a bright lens; its glow comes up with the dark. A light that is there to be
   // seen by day (`day`: a signal at a bridge or lock, a flikkerlicht) burns full and keeps some of its glow. `weg`: a
   // lamp that is out is not there at all - a ship's light by day (or out of sight), no dark ball on her
-  group.userData.set = (on, night) => {
+  group.userData.set = (on: boolean, night: number) => {
     const k = on ? 1 : 0; const dusk = night * night * (3 - 2 * night);
     lens.material.emissiveIntensity = strength * k * (day ? 1 : 0.4 + 0.6 * dusk);
     glow.material.opacity = k * (day ? 0.3 + 0.7 * dusk : 0.15 + 0.85 * dusk);
@@ -314,11 +350,11 @@ export function makeLamp(kleur, size = 1, strength = 3, { day = false, weg = fal
   };
   return group;
 }
-let glowMap = null;
-function glowTexture() {
+let glowMap: THREE.CanvasTexture | null = null;
+function glowTexture(): THREE.CanvasTexture {
   if (glowMap) return glowMap;
   const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 });
-  const g = c.getContext('2d'); const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  const g = c.getContext('2d')!; const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.25, 'rgba(255,255,255,0.6)'); r.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = r; g.fillRect(0, 0, 64, 64);
   glowMap = new THREE.CanvasTexture(c); glowMap.userData.shared = true;   // one for every lamp: never disposed with one
@@ -330,7 +366,7 @@ function glowTexture() {
  * flashes its light (t in seconds, night 0..1), and bobs it a little if it floats. `bare`: one on the wal
  * without its own bit of bank, for a pair that shares one.
  */
-export function makeMark(spec, { bare = false } = {}) {
+export function makeMark(spec: Mark, { bare = false }: { bare?: boolean } = {}): THREE.Group {
   const body = BODY[spec.vorm];
   if (body.lijn) return markLine(spec, body);
   const inner = new THREE.Group();                                    // what bobs on the water
@@ -361,21 +397,23 @@ export function makeMark(spec, { bare = false } = {}) {
     mark.position.y = body.bank ? top - Math.max(0.9, height) : top + lift; inner.add(mark);
     if (!body.bank) top += lift + height;
   }
-  let eye = null;                                                    // where the sector light was last looked at from
-  let glassAt = null;                                                // the middle of its glass: its lamps burn there
+  let eye: THREE.Vector3 | null = null;                                                    // where the sector light was last looked at from
+  let glassAt: number | null = null;                                                // the middle of its glass: its lamps burn there
   if (body.lantaarn) {
-    const [l, height, glass] = lantern(spec.sectoren); l.position.y = top; inner.add(l, fans(spec.sectoren));
+    const [l, height, glass] = lantern(spec.sectoren!);   // a sectorlicht has its sectoren l.position.y = top; inner.add(l, fans(spec.sectoren!));
     glassAt = top + glass.position.y; top += height;
     eye = new THREE.Vector3(0, 0, 1);
-    glass.onBeforeRender = (renderer, scene, camera) => { eye.setFromMatrixPosition(camera.matrixWorld); };
+    glass.onBeforeRender = (renderer, scene, camera) => { eye!.setFromMatrixPosition(camera.matrixWorld); };
   }
-  let flash = null; let lamp = null; let sectors = null;
+  let flash: ((t: number) => boolean) | null = null; let lamp: THREE.Group | null = null;
+  let sectors: { lamp: THREE.Group; from: number; to: number }[] | null = null;
   if (spec.licht) flash = character(spec.licht[1]);
   // a sector light has a lamp for each sector, and the one lit is that of the sector you look from
   if (spec.sectoren) {
     sectors = spec.sectoren.map(([kleur, from, to]) => {
       const l = makeLamp(kleur); l.position.y = glassAt ?? top + 0.08; inner.add(l);
-      const glow = l.children[1]; glow.material.depthTest = false; glow.renderOrder = 5;   // seen through its own glass
+      const glow = l.children[1] as THREE.Sprite; glow.material.depthTest = false; glow.renderOrder = 5;   // seen through its own glass
+      // (makeLamp's second child is its glow, a sprite)
       return { lamp: l, from, to };
     });
   } else if (spec.licht) { lamp = makeLamp(spec.licht[0]); lamp.position.y = top + 0.08; inner.add(lamp); }
@@ -383,11 +421,12 @@ export function makeMark(spec, { bare = false } = {}) {
   const seen = new THREE.Vector3();
   group.userData = {
     spec, height: top + 0.2,
-    update(t, night) {
-      lamp?.userData.set(night > 0.3 && flash(t + phase), night);   // a daylight switch: lit only in the dark
+    update(t: number, night: number) {
+      // flash is there whenever there is a lamp: a mark with a light, or with sectoren (which have a light too)
+      lamp?.userData.set(night > 0.3 && flash!(t + phase), night);   // a daylight switch: lit only in the dark
       if (sectors) {
-        inner.worldToLocal(seen.copy(eye)); const bearing = THREE.MathUtils.radToDeg(Math.atan2(seen.x, seen.z));
-        for (const s of sectors) s.lamp.userData.set(night > 0.3 && bearing >= s.from && bearing < s.to && flash(t + phase), night);
+        inner.worldToLocal(seen.copy(eye!)); const bearing = THREE.MathUtils.radToDeg(Math.atan2(seen.x, seen.z));
+        for (const s of sectors) s.lamp.userData.set(night > 0.3 && bearing >= s.from && bearing < s.to && flash!(t + phase), night);
       }
       if (floats) { inner.position.y = 0.03 * Math.sin(t * 1.3 + phase); inner.rotation.z = 0.04 * Math.sin(t * 0.9 + phase); inner.rotation.x = 0.03 * Math.sin(t * 1.1 + phase * 2); }
     },

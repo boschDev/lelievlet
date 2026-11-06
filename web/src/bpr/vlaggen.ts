@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { makeLamp } from './betonning.ts';
 import { character } from './lichtkarakter.ts';
@@ -15,53 +14,110 @@ import { character } from './lichtkarakter.ts';
 // translation of Pub. 102 (eigenVertaling: true), kept short and plain. The race signals follow the
 // official Dutch RvW, the BPR signs the law.
 
+// ---------------------------------------------------------------- types
+/** A point of a design: [x, y], x from the hoist (0) to the vlucht (1), y from the top (0) to the bottom (1). */
+type Punt = [number, number];
+
+/** One field of a design, painted in order; a colour (k) is a name of KLEUREN or a colour of its own. */
+export type Veld =
+  | { t: 'vlak'; k?: string; kleur?: string }
+  | { t: 'banden'; staand: boolean; kleuren: string[]; delen?: number[] }
+  | { t: 'rh'; x: number; y: number; b: number; h: number; k: string }
+  | { t: 'veelhoek'; punten: Punt[]; k: string }
+  | { t: 'schijf'; cx: number; cy: number; r: number; k: string }
+  | { t: 'balk'; van: Punt; naar: Punt; breedte: number; k: string }
+  | { t: 'blokken'; kolommen: number; rijen: number; kleuren: string[] }
+  | { t: 'schuin'; aantal: number; kleuren: string[] }
+  | { t: 'tekst'; woord: string; k: string; cx: number; cy: number; hoogte: number };
+
+/** The shape of a design. */
+export type Vorm = 'vlag' | 'zwaluwstaart' | 'wimpel' | 'puntwimpel' | 'bord';
+
+/** A design: its shape, `l` its length ÷ height, its outline, its fields. */
+export interface Ontwerp { vorm: Vorm; l: number; omtrek: Punt[]; velden: Veld[] }
+
+/** An entry as it is listed, before compleet() fills in what it takes from its flags. */
+export interface VlagBasis {
+  id: string;
+  soort: string;
+  groep: string;
+  naam: string;
+  betekenis: string;
+  lelievlet?: string;
+  cwo?: boolean;
+  bron?: string;
+  spelwoord?: string;
+  eigenVertaling?: boolean;
+  geluid?: string;
+  ontwerp?: Ontwerp;                  // one design, or
+  vlaggen?: string[];                 // the ids of its flags, top down
+  naast?: boolean;                    // its flags side by side, each on its own halyard
+  ook?: Ontwerp;                      // a second design that goes with it
+  tafereel?: string;                  // a scene: heen-en-weer, rond, bol, werktuig, licht
+  patroon?: string;
+  kleuren?: string[];
+  vorm?: string;
+}
+
+/** A flag of the Seinboek: it has its own design and pattern. */
+interface SeinboekVlag extends VlagBasis { ontwerp: Ontwerp; patroon: string }
+
+/** An entry of VLAGGEN, its colours, pattern and shape filled in. */
+export interface Vlag extends VlagBasis { kleuren: string[]; patroon: string; vorm: string; cwo: boolean }
+
+/** What vlagSvg draws an entry from. */
+type VlagTekening = Pick<VlagBasis, 'vlaggen' | 'naast' | 'ontwerp' | 'ook' | 'tafereel'>;
+
+/** A function of time (s) run every frame: a cloth waving, a stick swung. */
+type Beweging = (t: number) => void;
+
 // ---------------------------------------------------------------- colours, patterns, shapes (the zoek chips)
 /** The RvW palette (md "Colours"); lichtblauw has no published value, ours is a guess. */
-export const KLEUREN = {
+export const KLEUREN: Record<string, string> = {
   rood: '#e31f27', blauw: '#005c8e', geel: '#ffe600', zwart: '#000000', wit: '#ffffff',
   oranje: '#f26322', groen: '#00a060', lichtblauw: '#86c8ec',
 };
 const GRIJS = '#c9ccd0';                                   // the klassenvlag: its colours are the event's own
 
 export const VLAG_KLEUREN = [['rood', 'Rood'], ['wit', 'Wit'], ['blauw', 'Blauw'], ['geel', 'Geel'], ['zwart', 'Zwart'],
-  ['oranje', 'Oranje'], ['groen', 'Groen'], ['lichtblauw', 'Lichtblauw']].map(([key, label]) => [key, label, KLEUREN[key]]);
-export const PATRONEN = [
+  ['oranje', 'Oranje'], ['groen', 'Groen'], ['lichtblauw', 'Lichtblauw']].map(([key, label]): [string, string, string] => [key, label, KLEUREN[key]]);
+export const PATRONEN: [string, string][] = [
   ['effen', 'Effen'], ['gedeeld', 'In tweeën'], ['banden', 'Strepen'], ['kruis', 'Kruis'], ['schuin kruis', 'Schuin kruis'],
   ['ruit', 'Ruit'], ['vlak in vlak', 'Vlak in vlak'], ['schijf', 'Bol of schijf'], ['blokken', 'Blokken'], ['driehoeken', 'Driehoeken'],
   ['tekst', 'Letter of woord'], ['gezwaaid', 'Gezwaaid'], ['met bol', 'Met een bol'], ['samengesteld', 'Meer vlaggen'], ['variabel', 'Wisselt'],
 ];
-export const VORMEN = [['vlag', 'Vlag'], ['zwaluwstaart', 'Zwaluwstaart'], ['wimpel', 'Wimpel'], ['puntwimpel', 'Puntwimpel'],
+export const VORMEN: [string, string][] = [['vlag', 'Vlag'], ['zwaluwstaart', 'Zwaluwstaart'], ['wimpel', 'Wimpel'], ['puntwimpel', 'Puntwimpel'],
   ['bord', 'Bord'], ['meer vlaggen', 'Meer vlaggen']];
 
 // ---------------------------------------------------------------- designs
-const RECHT = [[0, 0], [1, 0], [1, 1], [0, 1]];
-const OMTREK = {
+const RECHT: Punt[] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+const OMTREK: Record<Vorm | 'driehoek', Punt[]> = {
   vlag: RECHT, bord: RECHT,
   zwaluwstaart: [[0, 0], [1, 0], [0.75, 0.5], [1, 1], [0, 1]],   // the notch a quarter of the length deep
   wimpel: [[0, 0], [1, 0.3], [1, 0.7], [0, 1]],                    // tapered, blunt: the fly 0.4 of the hoist
   puntwimpel: [[0, 0], [1, 0.5], [0, 1]],
   driehoek: [[0.5, 0], [1, 1], [0, 1]],                            // a board, point up
 };
-const VERHOUDING = { vlag: 1.25, zwaluwstaart: 1.25, wimpel: 2.5, puntwimpel: 1.6, bord: 0.8 };   // length : height
+const VERHOUDING: Record<Vorm, number> = { vlag: 1.25, zwaluwstaart: 1.25, wimpel: 2.5, puntwimpel: 1.6, bord: 0.8 };   // length : height
 /** A design: its shape, its fields painted in order; `l` length ÷ height, `omtrek` another outline. */
-const ontwerp = (vorm, velden, { l = VERHOUDING[vorm], omtrek = OMTREK[vorm] } = {}) => ({ vorm, l, omtrek, velden });
+const ontwerp = (vorm: Vorm, velden: Veld[], { l = VERHOUDING[vorm], omtrek = OMTREK[vorm] }: { l?: number; omtrek?: Punt[] } = {}): Ontwerp => ({ vorm, l, omtrek, velden });
 
-const vlak = (k) => ({ t: 'vlak', k });
-const staand = (kleuren, delen) => ({ t: 'banden', staand: true, kleuren, delen });     // side by side, hoist first
-const liggend = (kleuren, delen) => ({ t: 'banden', staand: false, kleuren, delen });   // top down
-const rh = (x, y, b, h, k) => ({ t: 'rh', x, y, b, h, k });
-const veelhoek = (punten, k) => ({ t: 'veelhoek', punten, k });
-const schijf = (cx, cy, r, k) => ({ t: 'schijf', cx, cy, r, k });                       // r: of the height, a true circle
-const balk = (van, naar, breedte, k) => ({ t: 'balk', van, naar, breedte, k });         // breedte: of the height
-const blokken = (kolommen, rijen, kleuren) => ({ t: 'blokken', kolommen, rijen, kleuren });   // first colour top left
-const schuin = (aantal, kleuren) => ({ t: 'schuin', aantal, kleuren });                 // "/" bands, first at hoist-top
-const tekst = (woord, k, cx, cy, hoogte) => ({ t: 'tekst', woord, k, cx, cy, hoogte });
-const kruis = (k, x, b, y, h) => [rh(x, 0, b, 1, k), rh(0, y, 1, h, k)];
-const zes = (a, b) => [a, b, a, b, a, b];
+const vlak = (k: string): Veld => ({ t: 'vlak', k });
+const staand = (kleuren: string[], delen?: number[]): Veld => ({ t: 'banden', staand: true, kleuren, delen });     // side by side, hoist first
+const liggend = (kleuren: string[], delen?: number[]): Veld => ({ t: 'banden', staand: false, kleuren, delen });   // top down
+const rh = (x: number, y: number, b: number, h: number, k: string): Veld => ({ t: 'rh', x, y, b, h, k });
+const veelhoek = (punten: Punt[], k: string): Veld => ({ t: 'veelhoek', punten, k });
+const schijf = (cx: number, cy: number, r: number, k: string): Veld => ({ t: 'schijf', cx, cy, r, k });                       // r: of the height, a true circle
+const balk = (van: Punt, naar: Punt, breedte: number, k: string): Veld => ({ t: 'balk', van, naar, breedte, k });         // breedte: of the height
+const blokken = (kolommen: number, rijen: number, kleuren: string[]): Veld => ({ t: 'blokken', kolommen, rijen, kleuren });   // first colour top left
+const schuin = (aantal: number, kleuren: string[]): Veld => ({ t: 'schuin', aantal, kleuren });                 // "/" bands, first at hoist-top
+const tekst = (woord: string, k: string, cx: number, cy: number, hoogte: number): Veld => ({ t: 'tekst', woord, k, cx, cy, hoogte });
+const kruis = (k: string, x: number, b: number, y: number, h: number): Veld[] => [rh(x, 0, b, 1, k), rh(0, y, 1, h, k)];
+const zes = <T>(a: T, b: T): T[] => [a, b, a, b, a, b];
 
 // ---------------------------------------------------------------- Seinboek: letters, cijfers, vervangers, OW
 // [letter, spelwoord, design, patroon, meaning (own translation of Pub. 102)]
-const LETTERS = [
+const LETTERS: [id: string, spelwoord: string, ontwerp: Ontwerp, patroon: string, betekenis: string][] = [
   ['A', 'Alfa', ontwerp('zwaluwstaart', [staand(['wit', 'blauw'])]), 'gedeeld', 'Ik heb een duiker onder water. Houd ruim afstand en vaar langzaam.'],
   ['B', 'Bravo', ontwerp('zwaluwstaart', [vlak('rood')]), 'effen', 'Ik laad, los of vervoer gevaarlijke stoffen.'],
   ['C', 'Charlie', ontwerp('vlag', [liggend(['blauw', 'wit', 'rood', 'wit', 'blauw'])]), 'banden', 'Ja: het antwoord is bevestigend.'],
@@ -92,13 +148,13 @@ const LETTERS = [
     veelhoek([[0, 1], [0.5, 0.5], [1, 1]], 'rood'), veelhoek([[1, 0], [1, 1], [0.5, 0.5]], 'blauw'),
   ]), 'driehoeken', 'Ik heb een sleepboot nodig. Bij vissersschepen: ik zet mijn netten uit.'],
 ];
-const LETTER_EXTRA = {
+const LETTER_EXTRA: Record<string, { lelievlet: string }> = {
   A: { lelievlet: 'Dit is ook de duikvlag uit het BPR: blijf ruim uit de buurt, want er zwemt iemand onder water.' },
   O: { lelievlet: 'Deze vlag zit vaak aan een man-over-boord-boei.' },
   T: { lelievlet: 'Niet verwarren met de Nederlandse vlag: die heeft liggende banen rood, wit en blauw.' },
 };
 
-const CIJFERS = [
+const CIJFERS: [id: string, spelwoord: string, velden: Veld[], patroon: string][] = [
   ['1', 'Unaone', [vlak('wit'), schijf(0.24, 0.5, 0.27, 'rood')], 'schijf'],
   ['2', 'Bissotwo', [vlak('blauw'), schijf(0.24, 0.5, 0.27, 'wit')], 'schijf'],
   ['3', 'Terrathree', [staand(['rood', 'wit', 'blauw'])], 'banden'],
@@ -111,7 +167,7 @@ const CIJFERS = [
   ['0', 'Nadazero', [staand(['geel', 'rood', 'geel'])], 'banden'],
 ];
 
-const SEINBOEK = [
+const SEINBOEK: SeinboekVlag[] = [
   ...LETTERS.map(([id, spelwoord, o, patroon, betekenis]) => ({
     id, soort: 'letter', groep: 'Seinboek: letters', naam: `Vlag ${id}`, spelwoord, ontwerp: o, patroon, betekenis,
     eigenVertaling: true, bron: 'Internationaal Seinboek', ...LETTER_EXTRA[id],
@@ -144,7 +200,7 @@ const SEINBOEK = [
 const UITSTEL = 'Wedstrijd: uitstel en afbreken';
 const START = 'Wedstrijd: start';
 const BAAN = 'Wedstrijd: op de baan';
-const WEDSTRIJD = [
+const WEDSTRIJD: VlagBasis[] = [
   { id: 'wed-OW', groep: UITSTEL, naam: 'Uitstel (OW)', vlaggen: ['onderscheidingswimpel'], geluid: '↑ •• ↓ •', bron: 'RvW Wedstrijdseinen, 27.3',
     betekenis: 'Wedstrijden die nog niet zijn gestart, zijn uitgesteld. Omhoog met twee geluidsseinen; omlaag met één, en een minuut later volgt het waarschuwingssein.',
     lelievlet: 'Op het NK Lelievlet hangt de OW ook op de wal, in de vlaggenmast.' },
@@ -218,7 +274,7 @@ const WEDSTRIJD = [
 // `tafereel`: what the BPR describes, built as a small scene: 'heen-en-weer' and 'rond' (a flag swung by
 // hand), 'bol' (a flag with a ball below it), 'werktuig' (two boards on a yard: red on the closed
 // side, red over white on the free side), 'licht' (a board with a white flashing light).
-const BPR_LIJST = [
+const BPR_LIJST: VlagBasis[] = [
   { id: 'bpr-3.30-rondzwaaien', naam: 'Noodsein: vlag rondzwaaien', ontwerp: ontwerp('vlag', [vlak('rood')]), tafereel: 'rond', patroon: 'gezwaaid', cwo: true,
     bron: 'BPR 3.30', betekenis: 'Dit schip is in nood en vraagt om hulp. ’s Nachts zwaait het een licht in het rond; met de hoorn geeft het herhaalde lange stoten.',
     lelievlet: 'Ben je zelf in nood, dan mag je ook een vlag of iets anders in het rond zwaaien.' },
@@ -262,20 +318,22 @@ const BPR_LIJST = [
 
 // ---------------------------------------------------------------- the list
 const BY_ID = new Map(SEINBOEK.map((v) => [v.id, v]));
-const unique = (list) => [...new Set(list)];
+const unique = <T>(list: T[]): T[] => [...new Set(list)];
 /** The colours a design shows, in the order they are painted. */
-const kleurenVan = (o) => unique(o.velden.flatMap((f) => f.kleuren ?? [f.k]).filter((k) => k in KLEUREN));
+const kleurenVan = (o: Ontwerp): string[] => unique(o.velden.flatMap((f: { kleuren?: string[]; k?: string }) => f.kleuren ?? [f.k])
+  .filter((k): k is string => k! in KLEUREN));   // (a field without k gives undefined: not in it)
 
 /** Fill in what a signal of other flags takes from them: its designs, its colours, its pattern and shape. */
-function compleet(v) {
-  const flags = v.vlaggen?.map((id) => BY_ID.get(id).ontwerp);
-  const designs = flags ?? [v.ontwerp, ...(v.ook ? [v.ook] : [])];
-  const one = flags?.length === 1 ? BY_ID.get(v.vlaggen[0]) : null;
+function compleet(v: VlagBasis): Vlag {
+  const flags = v.vlaggen?.map((id) => BY_ID.get(id)!.ontwerp);
+  // an entry without vlaggen has its own ontwerp
+  const designs = flags ?? [v.ontwerp!, ...(v.ook ? [v.ook] : [])];
+  const one = flags?.length === 1 ? BY_ID.get(v.vlaggen![0]) : null;
   return {
     lelievlet: undefined, cwo: false, ...v,
     kleuren: v.kleuren ?? unique([...designs.flatMap(kleurenVan), ...(v.tafereel === 'bol' ? ['zwart'] : [])]),
     patroon: v.patroon ?? (one ? one.patroon : 'samengesteld'),
-    vorm: v.vorm ?? (flags && !one ? 'meer vlaggen' : (one?.ontwerp ?? v.ontwerp).vorm),
+    vorm: v.vorm ?? (flags && !one ? 'meer vlaggen' : (one?.ontwerp ?? v.ontwerp!).vorm),
   };
 }
 
@@ -285,21 +343,21 @@ function compleet(v) {
  * draws it: `ontwerp` (one design) or `vlaggen` (ids, top down, `naast` side by side), `tafereel` for
  * a scene. eigenVertaling: the meaning is our own translation of the Seinboek.
  */
-export const VLAGGEN = [...SEINBOEK, ...WEDSTRIJD, ...BPR_LIJST].map(compleet);
+export const VLAGGEN: Vlag[] = [...SEINBOEK, ...WEDSTRIJD, ...BPR_LIJST].map(compleet);
 export const VLAG_GROEPEN = unique(VLAGGEN.map((v) => v.groep));
 
 // ---------------------------------------------------------------- the picture
-const r1 = (n) => Math.round(n * 10) / 10;
-const pts = (list, w, h) => list.map(([x, y]) => `${r1(x * w)},${r1(y * h)}`).join(' ');
-const fill = (k) => KLEUREN[k] ?? k;
+const r1 = (n: number): number => Math.round(n * 10) / 10;
+const pts = (list: Punt[], w: number, h: number): string => list.map(([x, y]) => `${r1(x * w)},${r1(y * h)}`).join(' ');
+const fill = (k: string): string => KLEUREN[k] ?? k;
 const LIJN = '#2b2b2b';
 
 /** One field of a design, w × h px. Bands overlap their neighbour a little: no hairline between them. */
-function veld(f, w, h) {
+function veld(f: Veld, w: number, h: number): string {
   switch (f.t) {
-    case 'vlak': return `<rect x="-1" y="-1" width="${r1(w + 2)}" height="${r1(h + 2)}" fill="${fill(f.k ?? f.kleur)}"/>`;
+    case 'vlak': return `<rect x="-1" y="-1" width="${r1(w + 2)}" height="${r1(h + 2)}" fill="${fill((f.k ?? f.kleur)!)}"/>`;   // a vlak has the one or the other
     case 'banden': {
-      const n = f.kleuren.length; const delen = f.delen ?? Array(n).fill(1 / n);
+      const n = f.kleuren.length; const delen: number[] = f.delen ?? Array(n).fill(1 / n);
       let at = 0;
       return f.kleuren.map((k, i) => {
         const from = at; at += delen[i]; const more = i < n - 1 ? 0.6 : 1;
@@ -314,7 +372,7 @@ function veld(f, w, h) {
       const [ax, ay] = [f.van[0] * w, f.van[1] * h]; const [bx, by] = [f.naar[0] * w, f.naar[1] * h];
       const len = Math.hypot(bx - ax, by - ay); const [dx, dy] = [(bx - ax) / len, (by - ay) / len];
       const [nx, ny] = [-dy * f.breedte * h / 2, dx * f.breedte * h / 2]; const e = w + h;
-      const p = [[ax - dx * e + nx, ay - dy * e + ny], [bx + dx * e + nx, by + dy * e + ny], [bx + dx * e - nx, by + dy * e - ny], [ax - dx * e - nx, ay - dy * e - ny]];
+      const p: Punt[] = [[ax - dx * e + nx, ay - dy * e + ny], [bx + dx * e + nx, by + dy * e + ny], [bx + dx * e - nx, by + dy * e - ny], [ax - dx * e - nx, ay - dy * e - ny]];
       return `<polygon points="${p.map(([x, y]) => `${r1(x)},${r1(y)}`).join(' ')}" fill="${fill(f.k)}"/>`;
     }
     case 'blokken': {
@@ -339,30 +397,30 @@ function veld(f, w, h) {
 
 let clips = 0;
 /** A design h px high at (x, y), clipped by its outline; `lijn`: its edge drawn, so white reads on white. */
-function stuk(o, x, y, h, lijn = true) {
+function stuk(o: Ontwerp, x: number, y: number, h: number, lijn = true): string {
   const w = h * o.l; const id = `c${++clips}`; const outline = pts(o.omtrek, w, h);
   return `<g transform="translate(${r1(x)} ${r1(y)})"><clipPath id="${id}"><polygon points="${outline}"/></clipPath>`
     + `<g clip-path="url(#${id})">${o.velden.map((f) => veld(f, w, h)).join('')}</g>`
     + (lijn ? `<polygon points="${outline}" fill="none" stroke="${LIJN}" stroke-width="1.5" stroke-linejoin="round"/>` : '') + '</g>';
 }
-const doc = (w, h, body) => `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(w)}" height="${Math.ceil(h)}" viewBox="0 0 ${Math.ceil(w)} ${Math.ceil(h)}">${body}</svg>`;
-const staffSvg = (x, y0, y1, width = 4) => `<rect x="${r1(x - width / 2)}" y="${r1(y0)}" width="${width}" height="${r1(y1 - y0)}" rx="${width / 2}" fill="#8a7a62"/>`;
+const doc = (w: number, h: number, body: string): string => `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(w)}" height="${Math.ceil(h)}" viewBox="0 0 ${Math.ceil(w)} ${Math.ceil(h)}">${body}</svg>`;
+const staffSvg = (x: number, y0: number, y1: number, width = 4): string => `<rect x="${r1(x - width / 2)}" y="${r1(y0)}" width="${width}" height="${r1(y1 - y0)}" rx="${width / 2}" fill="#8a7a62"/>`;
 
 /** An arrow head at (x, y) pointing along angle a (radians, SVG axes). */
-const head = (x, y, a, s = 9, kleur = LIJN) => {
-  const p = [[x, y], [x - s * Math.cos(a - 0.45), y - s * Math.sin(a - 0.45)], [x - s * Math.cos(a + 0.45), y - s * Math.sin(a + 0.45)]];
+const head = (x: number, y: number, a: number, s = 9, kleur = LIJN): string => {
+  const p: Punt[] = [[x, y], [x - s * Math.cos(a - 0.45), y - s * Math.sin(a - 0.45)], [x - s * Math.cos(a + 0.45), y - s * Math.sin(a + 0.45)]];
   return `<polygon points="${p.map(([px, py]) => `${r1(px)},${r1(py)}`).join(' ')}" fill="${kleur}"/>`;
 };
 
 /** The design only, w × h px, no edge: the face of the cloth in the model. */
-function doekSvg(o, w, h) { return doc(w, h, stuk({ ...o, l: w / h }, 0, 0, h, false)); }
+function doekSvg(o: Ontwerp, w: number, h: number): string { return doc(w, h, stuk({ ...o, l: w / h }, 0, 0, h, false)); }
 
 /** The SVG of one entry (its own document): the flag with its hoist on the left, a hoist of flags, or the BPR's scene. */
-export function vlagSvg(v) {
+export function vlagSvg(v: VlagTekening): string {
   clips = 0;
   const pad = 4;
   if (v.vlaggen) {
-    const designs = v.vlaggen.map((id) => BY_ID.get(id).ontwerp);
+    const designs = v.vlaggen.map((id) => BY_ID.get(id)!.ontwerp);
     if (designs.length === 1) return vlagSvg({ ontwerp: designs[0] });
     const h = 120; const gap = v.naast ? 34 : 16;
     if (v.naast) {                                 // each on its own halyard, in rows of four
@@ -376,12 +434,12 @@ export function vlagSvg(v) {
     const bottom = pad + 8 + designs.length * (h + gap) - gap;
     return doc(x + w + pad, bottom + pad + 8, staffSvg(pad + 2, pad, bottom + 8) + body);
   }
-  const o = v.ontwerp;
+  const o = v.ontwerp!;                           // without vlaggen: its own design
   switch (v.tafereel) {
     case 'heen-en-weer': {                         // the flag on a stick, swung from side to side
       const [px, py, len, h] = [130, 250, 170, 78];
-      const stick = (angle, opacity) => `<g transform="rotate(${angle} ${px} ${py})" opacity="${opacity}">${staffSvg(px, py - len, py, 5)}${stuk(o, px + 2, py - len, h)}</g>`;
-      const R = len + 26; const arc = (deg) => [px + R * Math.sin(deg * Math.PI / 180), py - R * Math.cos(deg * Math.PI / 180)];
+      const stick = (angle: number, opacity: number): string => `<g transform="rotate(${angle} ${px} ${py})" opacity="${opacity}">${staffSvg(px, py - len, py, 5)}${stuk(o, px + 2, py - len, h)}</g>`;
+      const R = len + 26; const arc = (deg: number): Punt => [px + R * Math.sin(deg * Math.PI / 180), py - R * Math.cos(deg * Math.PI / 180)];
       const [a0, a1] = [arc(-34), arc(34)];
       const body = stick(-26, 0.25) + stick(26, 0.25) + stick(0, 1)
         + `<path d="M${r1(a0[0])},${r1(a0[1])} A${R},${R} 0 0 1 ${r1(a1[0])},${r1(a1[1])}" fill="none" stroke="${LIJN}" stroke-width="3" stroke-dasharray="8 6"/>`
@@ -408,7 +466,7 @@ export function vlagSvg(v) {
         + `<path d="M0,282 q15,-6 30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0 t30,0" fill="none" stroke="#3d7fb0" stroke-width="3"/>`
         + staffSvg(190, 30, 246, 6) + `<rect x="${left - 8}" y="${yard - 3}" width="${right - left + 16}" height="6" rx="3" fill="#8a7a62"/>`
         + `<line x1="${left}" y1="${yard}" x2="${left}" y2="${yard + 12}" stroke="${LIJN}" stroke-width="2"/><line x1="${right}" y1="${yard}" x2="${right}" y2="${yard + 12}" stroke="${LIJN}" stroke-width="2"/>`
-        + stuk(v.ook, left - bw / 2, yard + 12, bh) + stuk(o, right - bw / 2, yard + 12, bh);
+        + stuk(v.ook!, left - bw / 2, yard + 12, bh) + stuk(o, right - bw / 2, yard + 12, bh);
       return doc(380, 292, body);
     }
     case 'licht': {                                // the board, a white flashing light in front of it
@@ -434,28 +492,28 @@ export function vlagSvg(v) {
 // colour and the light stays out.
 const HAS_DOM = typeof document !== 'undefined';
 const STAF = 3.6;                                  // m: the staff above the water
-const HOOGTE = { vlag: 0.72, zwaluwstaart: 0.72, wimpel: 0.5, puntwimpel: 0.6 };   // m at the hoist: a flag 0.9 × 0.72
+const HOOGTE: Record<string, number> = { vlag: 0.72, zwaluwstaart: 0.72, wimpel: 0.5, puntwimpel: 0.6 };   // m at the hoist: a flag 0.9 × 0.72
 const BORD = 0.8;                                  // m: the longer side of a board
 const STAF_R = 0.03;
-const mat = (color, roughness = 0.8) => new THREE.MeshStandardMaterial({ color, roughness });
+const mat = (color: number, roughness = 0.8): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({ color, roughness });
 const M = {
   staf: mat(0xe6dfcc, 0.6), stok: mat(0x8a6a44), kader: mat(0x2a2a2a, 0.6), bol: mat(0x111111, 0.5),
   romp: mat(0xeeeeea, 0.6), ponton: mat(0x575d63), mens: mat(0x26385a), huid: mat(0xd9a982),
 };
-const cylinder = (r, h, m, y = h / 2) => { const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 10), m); c.position.y = y; return c; };
-const box = (w, h, d, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b; };
+const cylinder = (r: number, h: number, m: THREE.Material, y = h / 2): THREE.Mesh => { const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 10), m); c.position.y = y; return c; };
+const box = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number): THREE.Mesh => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b; };
 
-const maps = new WeakMap();                        // design -> its texture, one for every flag that shows it
+const maps = new WeakMap<Ontwerp, THREE.CanvasTexture>();                        // design -> its texture, one for every flag that shows it
 /** The face of a design: its own SVG, rasterised once it has loaded. */
-function texture(o) {
+function texture(o: Ontwerp): THREE.CanvasTexture | null {
   if (!HAS_DOM) return null;
-  if (maps.has(o)) return maps.get(o);
+  if (maps.has(o)) return maps.get(o)!;
   const h = 256; const w = Math.min(1024, Math.round(h * o.l));
   const c = Object.assign(document.createElement('canvas'), { width: w, height: h });
   const map = new THREE.CanvasTexture(c); map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 4;
   map.userData.shared = true;                      // never disposed with one flag
   const img = new Image();
-  img.onload = () => { c.getContext('2d').drawImage(img, 0, 0, w, h); map.needsUpdate = true; URL.revokeObjectURL(img.src); };
+  img.onload = () => { c.getContext('2d')!.drawImage(img, 0, 0, w, h); map.needsUpdate = true; URL.revokeObjectURL(img.src); };
   img.src = URL.createObjectURL(new Blob([doekSvg(o, w, h)], { type: 'image/svg+xml' }));
   maps.set(o, map);
   return map;
@@ -465,7 +523,7 @@ function texture(o) {
  * A cloth h m high: its hoist on x = 0, its top on y = 0. With `waves` (a list) it is cut finely and
  * a function that waves it at time t is added to it; without, it stays flat (a board).
  */
-function doek(o, h, waves, phase = 0) {
+function doek(o: Ontwerp, h: number, waves: Beweging[] | null, phase = 0): THREE.Mesh {
   const l = h * o.l;
   const geo = new THREE.PlaneGeometry(l, h, waves ? 20 : 1, waves ? 8 : 1);
   geo.translate(l / 2, -h / 2, 0);
@@ -477,7 +535,7 @@ function doek(o, h, waves, phase = 0) {
   if (waves) {
     const pos = geo.attributes.position; const base = Float32Array.from(pos.array);
     const amp = 0.035 + 0.05 * l; const k = (2 * Math.PI) / 0.95;
-    waves.push((t) => {
+    waves.push((t: number) => {
       for (let i = 0; i < pos.count; i++) {
         const x = base[3 * i]; const y = base[3 * i + 1]; const u = x / l;
         pos.array[3 * i + 2] = amp * u * (Math.sin(k * x - 3.1 * t + phase) + 0.35 * Math.sin(2.3 * k * x + 2 * y - 4.6 * t + 1.7 * phase));
@@ -489,7 +547,7 @@ function doek(o, h, waves, phase = 0) {
 }
 
 /** A rigid board, its longer side `size` m, centred on its origin, in a dark frame when it is square-cornered. */
-function bord(o, size = BORD) {
+function bord(o: Ontwerp, size = BORD): THREE.Group {
   const w = o.l >= 1 ? size : size * o.l; const h = w / o.l;
   const g = new THREE.Group();
   const face = doek(o, h, null); face.position.set(-w / 2, h / 2, 0.016); g.add(face);
@@ -499,7 +557,7 @@ function bord(o, size = BORD) {
 }
 
 /** A staff `height` m above the water, standing in it a little, with a knob on top. */
-function staf(g, x, height) {
+function staf(g: THREE.Object3D, x: number, height: number): void {
   const pole = cylinder(STAF_R, height + 0.8, M.staf, (height - 0.8) / 2); pole.position.x = x; g.add(pole);
   const knob = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), M.staf); knob.position.set(x, height + 0.03, 0); g.add(knob);
 }
@@ -508,7 +566,12 @@ function staf(g, x, height) {
  * Designs hoisted one above the other at the top of a staff at x. They hang from a vane on the staff:
  * turned round it, they fly the way the wind blows (userData.wind).
  */
-function hijs(g, designs, ctx, x = 0) {
+/** What makeVlag collects as it builds: what moves, what is lit, what turns with the wind. */
+interface VlagCtx {
+  waves: Beweging[]; anims: Beweging[]; lamps: { lamp: THREE.Group; lit: (t: number) => boolean }[]; vanes: THREE.Group[]; phase: number;
+}
+
+function hijs(g: THREE.Object3D, designs: Ontwerp[], ctx: VlagCtx, x = 0): void {
   staf(g, x, STAF);
   const vane = new THREE.Group(); vane.position.x = x; g.add(vane); ctx.vanes.push(vane);
   let y = STAF - 0.05;
@@ -520,7 +583,7 @@ function hijs(g, designs, ctx, x = 0) {
 }
 
 /** A small open boat with someone standing in it; returns the point by the shoulder where the stick is held. */
-function bootMetIemand(g) {
+function bootMetIemand(g: THREE.Object3D): THREE.Vector3 {
   g.add(box(3.2, 0.5, 1.3, M.romp, 0, 0.1, 0));
   const deck = 0.35; const x = -0.35;
   const legs = cylinder(0.11, 0.85, M.mens, deck + 0.425); legs.position.x = x; g.add(legs);
@@ -530,7 +593,7 @@ function bootMetIemand(g) {
 }
 
 /** A stick held at `hand`, the cloth at its tip; returns the arm (turns round z) and the cloth's mount (turns round the stick). */
-function stokMetVlag(g, hand, o, ctx) {
+function stokMetVlag(g: THREE.Object3D, hand: THREE.Vector3, o: Ontwerp, ctx: VlagCtx): { arm: THREE.Group; tip: THREE.Group } {
   const arm = new THREE.Group(); arm.position.copy(hand); g.add(arm);
   arm.add(cylinder(0.016, 1.25, M.stok, 0.5));
   const tip = new THREE.Group(); tip.position.y = 1.12; arm.add(tip);
@@ -539,19 +602,19 @@ function stokMetVlag(g, hand, o, ctx) {
 }
 
 /** One entry as a model. userData.update(t, night) waves the cloth, swings what is swung, flashes a light. */
-export function makeVlag(v) {
+export function makeVlag(v: VlagBasis): THREE.Group {
   const g = new THREE.Group(); g.name = v.id;
   const phase = ([...v.id].reduce((s, ch) => s + ch.charCodeAt(0), 0) * 0.37) % (2 * Math.PI);
-  const ctx = { waves: [], anims: [], lamps: [], vanes: [], phase };
+  const ctx: VlagCtx = { waves: [], anims: [], lamps: [], vanes: [], phase };
   let height = STAF + 0.2;
   if (v.vlaggen) {
-    const designs = v.vlaggen.map((id) => BY_ID.get(id).ontwerp);
+    const designs = v.vlaggen.map((id) => BY_ID.get(id)!.ontwerp);
     if (v.naast) {                                 // each on its own staff, the row centred on the origin
       const step = Math.max(...designs.map((o) => (HOOGTE[o.vorm] ?? HOOGTE.vlag) * o.l)) + 0.5;
       designs.forEach((o, i) => hijs(g, [o], { ...ctx, phase: phase + i }, (i - (designs.length - 1) / 2) * step - step / 2 + 0.25));
     } else hijs(g, designs, ctx);
   } else {
-    const o = v.ontwerp;
+    const o = v.ontwerp!;                         // without vlaggen: its own design
     switch (v.tafereel) {
       case 'heen-en-weer': {
         const { arm, tip } = stokMetVlag(g, bootMetIemand(g), o, ctx);
@@ -580,7 +643,8 @@ export function makeVlag(v) {
         g.add(box(5, 0.8, 2.4, M.ponton, 0, 0.2, -0.6));
         const top = 4.2; const mast = cylinder(0.05, top - 0.6, M.staf, 0.6 + (top - 0.6) / 2); g.add(mast);
         g.add(box(2.7, 0.06, 0.06, M.staf, 0, top - 0.2, 0));
-        for (const [x, design] of [[-1.15, v.ook], [1.15, o]]) {
+        const borden: [number, Ontwerp][] = [[-1.15, v.ook!], [1.15, o]];
+        for (const [x, design] of borden) {
           const b = bord(design); b.position.set(x, top - 0.28 - b.userData.h / 2, 0.06); g.add(b);
         }
         height = top + 0.2;
@@ -606,8 +670,8 @@ export function makeVlag(v) {
     height,
     // what flies from a staff turns to fly downwind: `down`, the way the wind blows, in this group's own frame
     // (a flag swung by hand, or a board, does not). Absent when there is nothing to turn.
-    wind: ctx.vanes.length ? (down) => { const a = Math.atan2(-down.z, down.x); for (const v of ctx.vanes) v.rotation.y = a; } : undefined,
-    update(t, night) {
+    wind: ctx.vanes.length ? (down: THREE.Vector3) => { const a = Math.atan2(-down.z, down.x); for (const v of ctx.vanes) v.rotation.y = a; } : undefined,
+    update(t: number, night: number) {
       for (const wave of ctx.waves) wave(t);
       for (const anim of ctx.anims) anim(t);
       for (const { lamp, lit } of ctx.lamps) lamp.userData.set(lit(t), night);
@@ -623,7 +687,7 @@ export function makeVlag(v) {
 // is for other ships or for the shore.
 const ZELF = new Set(['bpr-3.38-duiker', 'bva-NC-noodsein', 'bpr-3.30-vlag-bol']);
 const SEINBOEK_SOORTEN = new Set(['letter', 'cijfer', 'vervanger', 'onderscheiding']);
-export const aanBoord = (v) => SEINBOEK_SOORTEN.has(v.soort) || ZELF.has(v.id);
+export const aanBoord = (v: VlagBasis): boolean => SEINBOEK_SOORTEN.has(v.soort) || ZELF.has(v.id);
 const KLEIN = 0.42;                                // a set of signal flags for a small boat: a flag 0.38 x 0.3 m
 
 /**
@@ -631,11 +695,11 @@ const KLEIN = 0.42;                                // a set of signal flags for 
  * hoist on x = 0 and flying towards +x, no staff (the line is the want they are made fast to).
  * userData: { length, update(t) }.
  */
-export function makeHijs(v) {
+export function makeHijs(v: VlagBasis): THREE.Group {
   const g = new THREE.Group(); g.name = `hijs:${v.id}`;
   const phase = ([...v.id].reduce((s, ch) => s + ch.charCodeAt(0), 0) * 0.37) % (2 * Math.PI);
-  const waves = [];
-  const designs = v.vlaggen ? v.vlaggen.map((id) => BY_ID.get(id).ontwerp) : [v.ontwerp];
+  const waves: Beweging[] = [];
+  const designs = v.vlaggen ? v.vlaggen.map((id) => BY_ID.get(id)!.ontwerp) : [v.ontwerp!];
   let y = 0;
   designs.forEach((o, i) => {
     const h = (HOOGTE[o.vorm] ?? HOOGTE.vlag) * KLEIN;
@@ -646,7 +710,7 @@ export function makeHijs(v) {
     const r = 0.12; const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), M.bol);
     ball.position.set(r + 0.01, y - 0.04 - r, 0); g.add(ball); y -= 0.08 + 2 * r;
   }
-  g.userData = { length: -y, update: (t) => { for (const wave of waves) wave(t); } };
+  g.userData = { length: -y, update: (t: number) => { for (const wave of waves) wave(t); } };
   g.userData.update(0);
   return g;
 }

@@ -1,29 +1,28 @@
-// @ts-nocheck
 // Signs of BPR bijlage 7 groups A to D beyond those of tekens.js, drawn after the BPR's own drawings
 // (reference/bpr/tekens/bpr_img) like the rest. See kader.js for the conventions. Most are not asked
 // about in CWO; the few the Katwijk CWO book teaches say cwo: true.
-import { verbod, gebod, aanwijzing, tekst, WIT, ZWART } from './kader.ts';
+import { verbod, gebod, aanwijzing, tekst, WIT, ZWART, type Punt } from './kader.ts';
 import { witPijl } from './cd.ts';
 
-const f = (v) => +v.toFixed(1);
-const punten = (pts) => pts.map(([x, y]) => `${f(x)},${f(y)}`).join(' ');
-const vlak = (pts, fill = ZWART) => `<polygon points="${punten(pts)}" fill="${fill}"/>`;
+const f = (v: number): number => +v.toFixed(1);
+const punten = (pts: Punt[]): string => pts.map(([x, y]) => `${f(x)},${f(y)}`).join(' ');
+const vlak = (pts: Punt[], fill = ZWART): string => `<polygon points="${punten(pts)}" fill="${fill}"/>`;
 
 /**
  * An arrowhead with its tip at (x, y) pointing along (ux, uy): `len` long, `wide` wide at its base,
  * the barbs cut off and swept back a little as in the BPR's B arrows (as pijlR in b.js); `shaft` is
  * the width of the shaft it sits on; with `sweep` false the base is straight.
  */
-function kop(x, y, ux, uy, len, wide, shaft, sweep = true) {
+function kop(x: number, y: number, ux: number, uy: number, len: number, wide: number, shaft: number, sweep = true): string {
   const n = Math.hypot(ux, uy); const ax = ux / n; const ay = uy / n;
-  const at = (a, b) => [x - ax * a - ay * b, y - ay * a + ax * b];  // a back from the tip, b to the side
+  const at = (a: number, b: number): Punt => [x - ax * a - ay * b, y - ay * a + ax * b];  // a back from the tip, b to the side
   const h = wide / 2; const s = shaft / 2;
   if (!sweep) return vlak([at(0, 0), at(len, h), at(len, -h)]);
   return vlak([at(0, 0), at(len, h), at(len * 1.1, h * 0.95), at(len * 1.03, s), at(len * 1.03, -s), at(len * 1.1, -h * 0.95), at(len, -h)]);
 }
 
 /** A centre line through `pts`, its corners rounded off over `r` units either side, as a path. */
-function bocht(pts, r) {
+function bocht(pts: Punt[], r: number): string {
   let d = `M${pts[0].join(',')}`;
   for (let i = 1; i < pts.length - 1; i++) {
     const [p, q, n] = [pts[i - 1], pts[i], pts[i + 1]];
@@ -38,22 +37,22 @@ function bocht(pts, r) {
  * The B arrow along the centre line `pts` (tail first, the last point the tip): a shaft 62 wide
  * with rounded bends and the head; `dash` gives the stroke-dasharray of a dashed one.
  */
-function looppijl(pts, dash = '') {
+function looppijl(pts: Punt[], dash = ''): string {
   const [p, q] = pts.slice(-2); const len = 134;
-  const n = Math.hypot(q[0] - p[0], q[1] - p[1]); const base = [q[0] - ((q[0] - p[0]) * len) / n, q[1] - ((q[1] - p[1]) * len) / n];
+  const n = Math.hypot(q[0] - p[0], q[1] - p[1]); const base: Punt = [q[0] - ((q[0] - p[0]) * len) / n, q[1] - ((q[1] - p[1]) * len) / n];
   const line = [...pts.slice(0, -1), base];
   return `<path d="${bocht(line, 46)}" fill="none" stroke="${ZWART}" stroke-width="62"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`
     + kop(q[0], q[1], q[0] - p[0], q[1] - p[1], len, 176, 62);
 }
 
 /** Mirror a symbol on an upright sign left to right (the b sign of an a sign). */
-const spiegel = (symbol, w = 600) => `<g transform="matrix(-1 0 0 1 ${w} 0)">${symbol}</g>`;
+const spiegel = (symbol: string, w = 600): string => `<g transform="matrix(-1 0 0 1 ${w} 0)">${symbol}</g>`;
 
 /**
  * A vertical convoy arrow (A.3, A.4.1): a shaft from `tail` to the first tip `tip`, and an arrowhead
  * at each of the `tips` (two stacked heads stand for a samenstel).
  */
-function konvooi(x, tail, tips, shaft, len, wide, sweep = true) {
+function konvooi(x: number, tail: number, tips: number[], shaft: number, len: number, wide: number, sweep = true): string {
   const d = Math.sign(tips[0] - tail);
   return `<rect x="${x - shaft / 2}" y="${Math.min(tail, tips[0] - d * len)}" width="${shaft}" height="${Math.abs(tips[0] - d * len - tail)}" fill="${ZWART}"/>`
     + tips.map((t) => kop(x, t, 0, d, len, wide, shaft, sweep)).join('');
@@ -64,9 +63,9 @@ function konvooi(x, tail, tips, shaft, len, wide, sweep = true) {
  * on screen when a1 > a0), with a head at a1: its base on the radius, `off` further out, its tip
  * `len` along the arc and turned `turn` degrees inward (A.8).
  */
-function boogpijl(cx, cy, r, a0, a1, width, base, len, off = 0, turn = 0) {
-  const cw = a1 > a0; const rad = (a) => (a * Math.PI) / 180;
-  const pt = (a, rr = r) => [cx + rr * Math.cos(rad(a)), cy + rr * Math.sin(rad(a))];
+function boogpijl(cx: number, cy: number, r: number, a0: number, a1: number, width: number, base: number, len: number, off = 0, turn = 0): string {
+  const cw = a1 > a0; const rad = (a: number): number => (a * Math.PI) / 180;
+  const pt = (a: number, rr = r): Punt => [cx + rr * Math.cos(rad(a)), cy + rr * Math.sin(rad(a))];
   const end = a1 + (cw ? 2 : -2);  // run the band a little into the head, so no seam shows
   const [x0, y0] = pt(a0); const [x1, y1] = pt(end);
   const arc = `<path d="M${f(x0)},${f(y0)} A${r},${r} 0 ${Math.abs(end - a0) > 180 ? 1 : 0} ${cw ? 1 : 0} ${f(x1)},${f(y1)}" fill="none" stroke="${ZWART}" stroke-width="${width}"/>`;
@@ -127,7 +126,7 @@ const stekker = () => `<g fill="${ZWART}">`
   + '</g>';
 
 /** "VHF", with a channel number below it or not. */
-const vhf = (y) => `<g transform="translate(300,0) scale(1.1,1) translate(-300,0)">${tekst(300, y, 'VHF', 175)}</g>`;
+const vhf = (y: number): string => `<g transform="translate(300,0) scale(1.1,1) translate(-300,0)">${tekst(300, y, 'VHF', 175)}</g>`;
 
 // B.3: the own track solid on one side, the oncoming track dashed on the other
 const houden = looppijl([[212, 770], [212, 108]])

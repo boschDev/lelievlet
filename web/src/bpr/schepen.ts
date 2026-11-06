@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { makeLamp, KLEUR } from './betonning.ts';
 import { character } from './lichtkarakter.ts';
@@ -15,26 +14,77 @@ import { character } from './lichtkarakter.ts';
 // a boordlicht's screen lets it show a few degrees across the bow, so from dead ahead both are seen
 // (COLREG annex I: 1 to 3 degrees); without that a light off the centreline would go out head on
 const ACROSS = 3;
-const ARC = {
+const ARC: Record<string, [number, number] | null> = {
   toplicht: [-112.5, 112.5], sb: [-ACROSS, 112.5], bb: [-112.5, ACROSS], heklicht: [112.5, 247.5],
   rondom: null, flikker: null, flikkerlicht: null, zwaaiRond: null, zwaaiHeen: null,
 };
 // 'flikker' flickers fast (BPR 1.01 C 6°, 100-150 a minute), 'flikkerlicht' is the plain flikkerlicht
 // (C 5°, 50-60 a minute); both are shown by day as well where the BPR has them
-const BLINK = { flikker: 'VQ', flikkerlicht: 'Q' };
+const BLINK: Record<string, string> = { flikker: 'VQ', flikkerlicht: 'Q' };
 // what a hand swings: in a circle (nood, 3.30) or to and fro (onmanoeuvreerbaar, 3.18)
-const SWING = { zwaaiRond: 'rond', zwaaiHeen: 'heen' };
+const SWING: Record<string, 'rond' | 'heen'> = { zwaaiRond: 'rond', zwaaiHeen: 'heen' };
 // signs that stay up by night: the A flag is lit (3.38), and so are the verbodsborden on board (3.31 to 3.33),
 // the lichtblauw bord may go with its light (6.04a), a buoy is a buoy
 const NIGHT_TOO = new Set(['vlagA', 'bordToegang', 'bordRoken', 'bordLigplaats', 'bordBlauw', 'boei']);
 const LICHTBLAUW = 0x86c8ec; const VLAGBLAUW = 0x005c8e;
 
-const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, ...extra });
-const box = (w, h, d, color) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
-const lampSize = (length) => (length > 100 ? 4 : length > 15 ? 2.2 : 1);
+/** A place on a ship, [x, y, z] (m): the bow towards +x, starboard towards +z. */
+export type Plek = [number, number, number];
+
+/** A ship (or samenstel) as SHIPS builds it: its group, its places, the posts it may need, its length. */
+interface Schip {
+  group: THREE.Group;
+  at: Record<string, Plek>;
+  palen?: Record<string, number>;     // places with nothing to stand on yet: the height a post for them starts from
+  sizes?: Record<string, number>;     // in a samenstel: the size of a lamp per place, after the craft it is on
+  length: number;
+}
+
+/** What a hull of SHIPS can be asked for: a shorter or narrower motorschip, a yard on its mast, a rowing boat's riemen in. */
+export interface SchipOpties { lengte?: number; breedte?: number; ra?: boolean; riemen?: boolean }
+
+/** A light of a configuration: [kleur, soort, where, height above that place, { facultatief }]. */
+export type Licht = [kleur: string, soort: string, where: string, dy?: number, extra?: { facultatief?: boolean }];
+/** A dagmerk of a configuration: [vorm, kleur, where, height, klein]. */
+export type DagmerkSpec = [vorm: string, kleur: string, where: string, dy?: number, klein?: boolean];
+
+/** A configuration of BPR hoofdstuk 3 or 10 (CONFIGS). */
+export interface ShipConfig extends SchipOpties {
+  id: string;
+  naam: string;
+  artikel: string;
+  cwo?: boolean;
+  schip: string;
+  lichten?: Licht[];
+  dagmerken?: DagmerkSpec[];
+  kabel?: boolean;
+  kade?: boolean;
+  anker?: boolean | number;
+}
+
+/** A light as makeShip puts it on a ship (userData.lights). */
+export interface ScheepsLicht {
+  kleur: string; soort: string; plaats: string; lamp: THREE.Group;
+  arc: [number, number] | null; blink: ((t: number) => boolean) | null; byDay: boolean; facultatief: boolean;
+  swing: 'rond' | 'heen' | null; rest: THREE.Vector3; glow: THREE.Sprite; r: number;
+  hidden?: boolean;
+}
+
+/** A dagmerk as makeShip puts it on a ship (userData.dagmerken). */
+export interface ScheepsDagmerk { shape: THREE.Group; nacht: boolean; vorm: string; kleur: string; h: number }
+
+/** A mesh with the material of mat(), as every mesh of a ship is. */
+type ScheepsMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+const isMesh = (o: THREE.Object3D): o is ScheepsMesh => (o as THREE.Mesh).isMesh;
+
+const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({ color, roughness: 0.75, ...extra });
+const box = (w: number, h: number, d: number, color: number): THREE.Mesh => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+const lampSize = (length: number): number => (length > 100 ? 4 : length > 15 ? 2.2 : 1);
 
 /** A hull in plan: a square stern, straight sides and a bow drawn in over the forward `bow` of it. */
-function hull({ length, beam, freeboard, draft = 0.5, bow = 0.18, color = 0x2b3740, deck = 0x6d6a60, sheer = 0.3 }) {
+function hull({ length, beam, freeboard, draft = 0.5, bow = 0.18, color = 0x2b3740, deck = 0x6d6a60, sheer = 0.3 }: {
+  length: number; beam: number; freeboard: number; draft?: number; bow?: number; color?: number; deck?: number; sheer?: number;
+}): THREE.Group {
   const shape = new THREE.Shape(); const half = beam / 2; const start = length * (1 - bow);
   shape.moveTo(0, -half); shape.lineTo(start, -half);
   shape.quadraticCurveTo(length, -half, length, 0); shape.quadraticCurveTo(length, half, start, half);
@@ -49,20 +99,20 @@ function hull({ length, beam, freeboard, draft = 0.5, bow = 0.18, color = 0x2b37
 }
 
 /** A mast or post from `at` up `height`. */
-function post(group, x, height, base = 0, r = 0.06, color = 0xd9d9d9, z = 0) {
+function post(group: THREE.Object3D, x: number, height: number, base = 0, r = 0.06, color = 0xd9d9d9, z = 0): void {
   const p = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, height, 8), mat(color));
   p.position.set(x, base + height / 2, z); group.add(p);
 }
 
 /** A sail: a triangle from tack to head to clew, in the plane of the ship. */
-function sail(group, points, color) {
+function sail(group: THREE.Object3D, points: Plek[], color: number): void {
   const g = new THREE.BufferGeometry().setFromPoints(points.map((p) => new THREE.Vector3(...p)));
   g.setIndex([0, 1, 2]); g.computeVertexNormals();
   group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide })));
 }
 
 /** A rope, cable or chain, straight from `a` to `b` ([x, y, z]). */
-function rope(group, a, b, r = 0.035, color = 0x2a2a2a) {
+function rope(group: THREE.Object3D, a: Plek, b: Plek, r = 0.035, color = 0x2a2a2a): void {
   const from = new THREE.Vector3(...a); const to = new THREE.Vector3(...b);
   const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, from.distanceTo(to), 6), mat(color, { metalness: 0.3 }));
   m.position.copy(from).add(to).multiplyScalar(0.5);
@@ -74,8 +124,9 @@ function rope(group, a, b, r = 0.035, color = 0x2a2a2a) {
  * Several craft in one group: parts [name, ship, x, z], each ship's places then 'name.place'; ropes
  * [from, to] between places (or points). The length is from the origin to the foremost bow.
  */
-function fleet(parts, ropes = []) {
-  const group = new THREE.Group(); const at = {}; const palen = {}; const sizes = {}; let length = 0;
+function fleet(parts: [name: string, ship: Schip, x?: number, z?: number][], ropes: [Plek | string, Plek | string][] = []): Schip {
+  const group = new THREE.Group(); const at: Record<string, Plek> = {}; const palen: Record<string, number> = {};
+  const sizes: Record<string, number> = {}; let length = 0;
   for (const [name, s, x = 0, z = 0] of parts) {
     s.group.position.set(x, 0, z); s.group.userData.deel = name; group.add(s.group);   // which of them: Leren › Regels finds the sleper
     for (const [k, p] of Object.entries(s.at)) { at[`${name}.${k}`] = [p[0] + x, p[1], p[2] + z]; sizes[`${name}.${k}`] = lampSize(s.length); }
@@ -91,7 +142,9 @@ function fleet(parts, ropes = []) {
  * its koker a third from the bow, set or lying down, sails up or not, oars out, an outboard on the transom,
  * a short stick aft for a light (bijlage 3 schets 30).
  */
-function vlet({ mast = true, zeil = false, riemen = false, motor = false, stok = false } = {}) {
+function vlet({ mast = true, zeil = false, riemen = false, motor = false, stok = false }: {
+  mast?: boolean; zeil?: boolean; riemen?: boolean; motor?: boolean; stok?: boolean;
+} = {}): Schip {
   const L = 5.6; const B = 1.85; const F = 0.55;
   const g = hull({ length: L, beam: B, freeboard: F, draft: 0.3, color: 0x24425e, deck: 0x9a7a55, bow: 0.35, sheer: 0.2 });
   const mx = L * 0.68; const top = F + 5.2;
@@ -118,7 +171,7 @@ function vlet({ mast = true, zeil = false, riemen = false, motor = false, stok =
 // -- the ships: each builds its hull and says where its lights go ([x, y, z] on the ship). `palen`: places
 // with nothing to stand on yet, and the height a post for them starts from - drawn only when a
 // configuration puts something there.
-const SHIPS = {
+const SHIPS: Record<string, (opts?: SchipOpties) => Schip> = {
   // a binnenvaartschip, a Kempenaar of some 55 m: toplicht on a mast on the voorschip, the boordlichten
   // on the wheelhouse, the heklicht on the stern. `ra`: a yard across the mast aft, for signs on either side.
   // `dek`: on the hatch in the lengte-as, forward of the light on 'sbPaal' (not behind it from the other side).
@@ -129,7 +182,7 @@ const SHIPS = {
     const house = box(3.2, 2.6, B - 1.6, 0xe8e4da); house.position.set(4.2, F + 1.3, 0); g.add(house);
     const roof = box(3.6, 0.15, B - 1.2, 0x333333); roof.position.set(4.2, F + 2.65, 0); g.add(roof);
     post(g, L * 0.95, 5, F, 0.08); post(g, 3.2, 5.2, F + 2.7, 0.06);
-    const at = { voor: [L * 0.95, F + 5, 0], sb: [4.2, F + 2.9, B / 2 - 0.9], bb: [4.2, F + 2.9, -(B / 2 - 0.9)], hek: [0.3, F + 1.2, 0],
+    const at: Record<string, Plek> = { voor: [L * 0.95, F + 5, 0], sb: [4.2, F + 2.9, B / 2 - 0.9], bb: [4.2, F + 2.9, -(B / 2 - 0.9)], hek: [0.3, F + 1.2, 0],
       achter: [3.2, F + 7.9, 0], mast: [3.2, F + 5.5, 0], mid: [L * 0.5, F + 3.5, 0],
       sbPaal: [L * 0.5, F, B / 2 - 0.3], bordSb: [5.6, F + 3.9, B / 2 - 0.75], dek: [L * 0.65, F + 3, 0], trosVoor: [L, F + 0.4, 0], trosAchter: [0.4, F + 0.4, 0] };
     if (opts.ra) {
@@ -438,13 +491,14 @@ const SHIPS = {
 // -- dagmerken, each standing on y = 0 (sizes from BPR 3.03 and 3.04: bol 60, kegel 60 x 60, cilinder 80 x
 // 50, ruit 80 x 50 cm, bord 1 x 1 m, wimpel 1 m long; a klein schip may carry them smaller: `klein` halves
 // them). A bord stands across the ship, to be seen from ahead and astern; a flag or wimpel flies aft.
-function flat(points, color) {
+function flat(points: [number, number][], color: number): THREE.Mesh {
   const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y)));
   return new THREE.Mesh(new THREE.ShapeGeometry(shape), mat(color, { side: THREE.DoubleSide }));
 }
 // a sign lit by night: its colours glow when it is dark (update)
-function lit(g) {
-  g.traverse((o) => { if (o.material) { o.material.emissive.set(o.material.color); o.material.emissiveIntensity = 0; o.userData.verlicht = true; } });
+function lit<T extends THREE.Object3D>(g: T): T {
+  // what has a material in a sign is a mesh of mat(), a MeshStandardMaterial
+  g.traverse((o) => { if ((o as ScheepsMesh).material) { const m = (o as ScheepsMesh).material; m.emissive.set(m.color); m.emissiveIntensity = 0; o.userData.verlicht = true; } });
   return g;
 }
 /**
@@ -452,7 +506,10 @@ function lit(g) {
  * one, up between the two): `back` the board itself, `parts` the flat shapes of a face, [geometry, colour, x, y,
  * turned], each laid a hair in front of the one before.
  */
-function tweezijdig(back, parts, depth) {
+/** A flat shape of the face of a verbodsbord: [geometry, colour, x, y, turned]. */
+type Vlak = [geometry: THREE.BufferGeometry, color: number, x: number, y: number, turn?: number];
+
+function tweezijdig(back: THREE.Object3D, parts: Vlak[], depth: number): THREE.Group {
   const g = new THREE.Group(); g.add(back);
   for (const side of [1, -1]) {
     const face = new THREE.Group(); face.rotation.y = side > 0 ? 0 : Math.PI;
@@ -463,8 +520,8 @@ function tweezijdig(back, parts, depth) {
   }
   return g;
 }
-const plane = (w, h) => new THREE.PlaneGeometry(w, h);
-function dagmerk(vorm, kleur, klein) {
+const plane = (w: number, h: number): THREE.PlaneGeometry => new THREE.PlaneGeometry(w, h);
+function dagmerk(vorm: string, kleur: string, klein: boolean): [THREE.Object3D, number] {
   const k = klein ? 0.5 : 1; const c = KLEUR[kleur] ?? (kleur === 'blauw' ? 0x1f4fd1 : 0x161616);
   const m = mat(c);
   switch (vorm) {
@@ -482,14 +539,15 @@ function dagmerk(vorm, kleur, klein) {
       return [g, 1.2 * k];
     }
     case 'sleepcilinder': {                                        // yellow, with a black and a white band at each end
-      const g = new THREE.Group(); const parts = [['wit', 0.05], ['zwart', 0.1], ['geel', 0.5], ['zwart', 0.1], ['wit', 0.05]];
+      const g = new THREE.Group(); const parts: [string, number][] = [['wit', 0.05], ['zwart', 0.1], ['geel', 0.5], ['zwart', 0.1], ['wit', 0.05]];
       let y = 0.8 * k;
       for (const [col, h] of parts) { const s = new THREE.Mesh(new THREE.CylinderGeometry(0.25 * k, 0.25 * k, h * k, 16), mat(KLEUR[col])); y -= h * k; s.position.y = y + (h * k) / 2; g.add(s); }
       return [g, 0.8 * k];
     }
     case 'bordRoodWit': {
       const g = new THREE.Group();
-      for (const [col, y] of [['rood', 0.75], ['wit', 0.25]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.5 * k, 1 * k), mat(KLEUR[col])); b.position.y = y * k; g.add(b); }
+      const banden: [string, number][] = [['rood', 0.75], ['wit', 0.25]];
+      for (const [col, y] of banden) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.5 * k, 1 * k), mat(KLEUR[col])); b.position.y = y * k; g.add(b); }
       return [g, 1 * k];
     }
     case 'bord': { const b = new THREE.Mesh(new THREE.BoxGeometry(0.02, 1 * k, 1 * k), m); b.position.y = 0.5 * k; return [b, 1 * k]; }
@@ -523,10 +581,10 @@ function dagmerk(vorm, kleur, klein) {
       const r = 0.3; const D = 0.15;
       const back = new THREE.Mesh(new THREE.CylinderGeometry(r, r, D, 32), mat(0x666666)); back.rotation.x = Math.PI / 2;
       const vlam = new THREE.ShapeGeometry(new THREE.Shape([[0, -0.04], [0.03, 0], [0, 0.09], [-0.03, 0]].map(([x, y]) => new THREE.Vector2(x, y))));
-      const teken = vorm === 'bordToegang'
-        ? [[plane(0.13, 0.13), 0, -0.035], ...[-0.05, -0.017, 0.017, 0.05].map((x) => [plane(0.027, 0.11), x, 0.07]), [plane(0.027, 0.09), -0.08, -0.005, 0.6], [plane(0.09, 0.07), 0, -0.12]]
+      const teken: [geometry: THREE.BufferGeometry, x: number, y: number, turn?: number][] = vorm === 'bordToegang'
+        ? [[plane(0.13, 0.13), 0, -0.035], ...[-0.05, -0.017, 0.017, 0.05].map((x): [THREE.BufferGeometry, number, number] => [plane(0.027, 0.11), x, 0.07]), [plane(0.027, 0.09), -0.08, -0.005, 0.6], [plane(0.09, 0.07), 0, -0.12]]
         : [[plane(0.024, 0.24), 0.02, -0.05, 0.3], [new THREE.CircleGeometry(0.022, 12), -0.016, 0.065], [vlam, -0.025, 0.12]];
-      const g = tweezijdig(back, [[new THREE.CircleGeometry(r * 0.98, 40), KLEUR.wit, 0, 0], ...teken.map(([geometry, x, y, turn]) => [geometry, KLEUR.zwart, x, y, turn]),
+      const g = tweezijdig(back, [[new THREE.CircleGeometry(r * 0.98, 40), KLEUR.wit, 0, 0], ...teken.map(([geometry, x, y, turn]): Vlak => [geometry, KLEUR.zwart, x, y, turn]),
         [plane(0.48, 0.045), KLEUR.rood, 0, 0, -Math.PI / 4], [new THREE.RingGeometry(0.24, r, 40), KLEUR.rood, 0, 0]], D);
       g.scale.setScalar(k); g.position.y = r * k;
       return [g, 2 * r * k];
@@ -534,7 +592,7 @@ function dagmerk(vorm, kleur, klein) {
     case 'bordLigplaats': {                                        // 3.33: a square board, white with a red rand and bar and a black P, a white triangle below with the metres (10)
       const D = 0.15; const back = new THREE.Group();
       const square = box(1, 1, D, 0x666666); square.position.y = 1; back.add(square);
-      const point = (pts) => new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+      const point = (pts: [number, number][]): THREE.Shape => new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
       const prism = new THREE.Mesh(new THREE.ExtrudeGeometry(point([[-0.5, 0.5], [0.5, 0.5], [0, 0]]), { depth: D, bevelEnabled: false }), mat(0x666666));
       prism.position.z = -D / 2; back.add(prism);
       const nul = new THREE.Shape(); nul.absellipse(0, 0, 0.065, 0.085, 0, Math.PI * 2);
@@ -567,28 +625,28 @@ function dagmerk(vorm, kleur, klein) {
  * `cwo`: what CWO asks about, the articles in the theory of Kielboot III or V (reference/bpr/LICHTEN.md, CWO
  * scope) and the lelievlet's own; left out for the rest.
  */
-const TOP = ['wit', 'toplicht'];
-const MOTOR = [[...TOP, 'voor'], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['wit', 'heklicht', 'hek']];
-const on = (prefix, list) => list.map(([k, s, w, ...rest]) => [k, s, `${prefix}.${w}`, ...rest]);
+const TOP: [string, string] = ['wit', 'toplicht'];
+const MOTOR: Licht[] = [[...TOP, 'voor'], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['wit', 'heklicht', 'hek']];
+const on = (prefix: string, list: Licht[]): Licht[] => list.map(([k, s, w, ...rest]) => [k, s, `${prefix}.${w}`, ...rest]);
 // the sleepboot at the kop of a sleep, or helping a ship along (3.09 lid 1), and a groot schip in a sleep (lid 3, 4)
-const SLEPER = (p) => on(p, [[...TOP, 'voor'], [...TOP, 'voor', -1], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['geel', 'heklicht', 'hek']]);
-const SLEPER_DAG = (p) => [['sleepcilinder', 'geel', `${p}.mast`]];
-const GESLEEPT = (p, laatste) => on(p, [['wit', 'rondom', 'voor'], ...(laatste ? [['wit', 'heklicht', 'hek', 1]] : [])]);
-const GESLEEPT_DAG = (p) => [['bol', 'geel', `${p}.voor`, -1.6]];
+const SLEPER = (p: string): Licht[] => on(p, [[...TOP, 'voor'], [...TOP, 'voor', -1], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['geel', 'heklicht', 'hek']]);
+const SLEPER_DAG = (p: string): DagmerkSpec[] => [['sleepcilinder', 'geel', `${p}.mast`]];
+const GESLEEPT = (p: string, laatste?: boolean): Licht[] => on(p, [['wit', 'rondom', 'voor'], ...(laatste ? [['wit', 'heklicht', 'hek', 1]] satisfies Licht[] : [])]);
+const GESLEEPT_DAG = (p: string): DagmerkSpec[] => [['bol', 'geel', `${p}.voor`, -1.6]];
 // a duwstel of four bakken (3.10 lid 1): the triangle on the front bak to port, a toplicht on the one beside it,
 // the boordlichten on the widest part by the duwboot, three heklichten side by side on the duwboot
-const DUWSTEL_KOP = [[...TOP, 'b3.voor', 5.5], [...TOP, 'b3.voorBb', 4.4], [...TOP, 'b3.voorSb', 4.4], [...TOP, 'b4.voor', 2.5]];
-const HEKLICHTEN = (kleur, p) => on(p, [[kleur, 'heklicht', 'hekBb'], [kleur, 'heklicht', 'hek'], [kleur, 'heklicht', 'hekSb']]);
-const DUWSTEL = (hek = 'wit') => [...DUWSTEL_KOP, ['groen', 'sb', 'b2.achterSb', 1.5], ['rood', 'bb', 'b1.achterBb', 1.5], ...HEKLICHTEN(hek, 'duwboot')];
+const DUWSTEL_KOP: Licht[] = [[...TOP, 'b3.voor', 5.5], [...TOP, 'b3.voorBb', 4.4], [...TOP, 'b3.voorSb', 4.4], [...TOP, 'b4.voor', 2.5]];
+const HEKLICHTEN = (kleur: string, p: string): Licht[] => on(p, [[kleur, 'heklicht', 'hekBb'], [kleur, 'heklicht', 'hek'], [kleur, 'heklicht', 'hekSb']]);
+const DUWSTEL = (hek = 'wit'): Licht[] => [...DUWSTEL_KOP, ['groen', 'sb', 'b2.achterSb', 1.5], ['rood', 'bb', 'b1.achterBb', 1.5], ...HEKLICHTEN(hek, 'duwboot')];
 // a gekoppeld samenstel (3.11 lid 1): a toplicht on each, the boordlichten on the outer sides, a heklicht on each
-const GEKOPPELD = [[...TOP, 'motor.voor'], [...TOP, 'bak.voor', -0.9], ['groen', 'sb', 'bak.sb', 2.9], ['rood', 'bb', 'motor.bb'],
+const GEKOPPELD: Licht[] = [[...TOP, 'motor.voor'], [...TOP, 'bak.voor', -0.9], ['groen', 'sb', 'bak.sb', 2.9], ['rood', 'bb', 'motor.bb'],
   ['wit', 'heklicht', 'motor.hek'], ['wit', 'heklicht', 'bak.hek', 1.2]];
-const KLEIN_MOTOR_A = (p) => on(p, [[...TOP, 'voor'], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['wit', 'heklicht', 'hek']]);
-const ZEESCHIP = [[...TOP, 'voor'], [...TOP, 'achter'], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['wit', 'heklicht', 'hek']];
+const KLEIN_MOTOR_A = (p: string): Licht[] => on(p, [[...TOP, 'voor'], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['wit', 'heklicht', 'hek']]);
+const ZEESCHIP: Licht[] = [[...TOP, 'voor'], [...TOP, 'achter'], ['groen', 'sb', 'sb'], ['rood', 'bb', 'bb'], ['wit', 'heklicht', 'hek']];
 // a groot schip moored, its light on the side of the water (3.20 lid 1)
-const GEMEERD = [['wit', 'rondom', 'sbPaal', 3]];
+const GEMEERD: Licht[] = [['wit', 'rondom', 'sbPaal', 3]];
 
-export const CONFIGS = [
+export const CONFIGS: ShipConfig[] = [
   // -- grote schepen
   { id: 'groot_motorschip', naam: 'Groot motorschip, varend', artikel: '3.08 lid 1', cwo: true, schip: 'motor', lichten: MOTOR },
   { id: 'groot_motorschip_tweede_toplicht', naam: 'Groot motorschip met tweede toplicht', artikel: '3.08 lid 2', cwo: true, schip: 'motor',
@@ -647,7 +705,7 @@ export const CONFIGS = [
   { id: 'klein_schip_gesleept', naam: 'Klein schip langszij meegevoerd', artikel: '3.13 lid 4', cwo: true, schip: 'motorKleinLangszij',
     lichten: [...KLEIN_MOTOR_A('m'), ['wit', 'rondom', 'roei.rondom']] },
   { id: 'drijvend_voorwerp_varend', naam: 'Drijvend voorwerp, varend', artikel: '3.19', schip: 'pontonSleep',
-    lichten: [...SLEPER('sleper'), ...['hoekVSb', 'hoekVBb', 'hoekASb', 'hoekABb'].map((h) => ['wit', 'rondom', `p.${h}`, 2.2])], dagmerken: SLEPER_DAG('sleper') },
+    lichten: [...SLEPER('sleper'), ...['hoekVSb', 'hoekVBb', 'hoekASb', 'hoekABb'].map((h): Licht => ['wit', 'rondom', `p.${h}`, 2.2])], dagmerken: SLEPER_DAG('sleper') },
 
   // -- veerponten
   { id: 'veerpont_niet_vrijvarend', naam: 'Niet-vrijvarende veerpont', artikel: '3.16 lid 1', cwo: true, schip: 'pont', kabel: true,
@@ -664,7 +722,7 @@ export const CONFIGS = [
   { id: 'groot_schip_geankerd', naam: 'Groot schip voor anker', artikel: '3.20 lid 2', cwo: true, schip: 'motor', anker: true,
     lichten: [['wit', 'rondom', 'voor'], ['wit', 'rondom', 'hek', 1]], dagmerken: [['bol', 'zwart', 'voor', -0.9]] },   // the aft one at 3.5 m, 2.8 m under the forward one (3.20 lid 2: at least 2 m lower)
   { id: 'duwstel_geankerd', naam: 'Duwstel voor anker', artikel: '3.20 lid 3', cwo: true, schip: 'duwstel4',
-    lichten: [['wit', 'rondom', 'duwboot.mast'], ...['b1', 'b2', 'b3', 'b4'].map((b) => ['wit', 'rondom', `${b}.mid`, 3])],
+    lichten: [['wit', 'rondom', 'duwboot.mast'], ...['b1', 'b2', 'b3', 'b4'].map((b): Licht => ['wit', 'rondom', `${b}.mid`, 3])],
     dagmerken: [['bol', 'zwart', 'duwboot.mast', -2.2], ['bol', 'zwart', 'b3.voor', 3], ['bol', 'zwart', 'b4.voor', 3]] },
   { id: 'klein_schip_stilliggend', naam: 'Klein schip voor anker', artikel: '3.20 lid 4', cwo: true, schip: 'sloep', anker: true,
     lichten: [['wit', 'rondom', 'rondom']], dagmerken: [['bol', 'zwart', 'mast', 0.35, true]] },
@@ -766,7 +824,7 @@ const across = new THREE.Vector3();
 const sight = new THREE.Raycaster(); const eye = new THREE.Vector3(); const lampAt = new THREE.Vector3();
 
 /** A quay along the port side of what `ship` built: concrete for a big ship, a wooden steiger for a small one. */
-function kade(group, ship) {
+function kade(group: THREE.Object3D, ship: Schip): void {
   const bounds = new THREE.Box3().setFromObject(ship.group);
   const groot = ship.length > 15; const top = groot ? 2.2 : 0.7; const wide = groot ? 5 : 1.6; const long = ship.length + (groot ? 20 : 6);
   const k = box(long, top + 2, wide, groot ? 0x8f8c86 : 0x8a6a44);
@@ -781,7 +839,7 @@ function kade(group, ship) {
  * arc [from, to] in degrees from dead ahead (+ to starboard) or null all round; userData.length: from
  * the hindmost stern to the foremost bow, in m.
  */
-export function makeShip(config) {
+export function makeShip(config: ShipConfig): THREE.Group {
   const ship = SHIPS[config.schip](config);
   const group = new THREE.Group(); group.name = config.id; group.add(ship.group);
   const at = { ...ship.at };
@@ -800,20 +858,20 @@ export function makeShip(config) {
     rope(group, bow, [ship.length + scope, -3, out], ship.length > 15 ? 0.06 : 0.02);
     at.boei = [ship.length + scope, 0, out + 1.2];
   }
-  const size = (where) => ship.sizes?.[where] ?? lampSize(ship.length);
-  const tops = {};                                                  // per place, how high a post must go
-  const reach = (where, y) => { tops[where] = Math.max(tops[where] ?? -Infinity, y); };
-  const place = (where) => {
+  const size = (where: string): number => ship.sizes?.[where] ?? lampSize(ship.length);
+  const tops: Record<string, number> = {};                                                 // per place, how high a post must go
+  const reach = (where: string, y: number): void => { tops[where] = Math.max(tops[where] ?? -Infinity, y); };
+  const place = (where: string): Plek => {
     if (!at[where]) console.warn(`schepen: ${config.id} has no place ${where}`);
     return at[where] ?? [0, 2, 0];
   };
-  const lights = [];
+  const lights: ScheepsLicht[] = [];
   for (const [kleur, soort, where, dy = 0, extra = {}] of config.lichten ?? []) {
     const base = place(where);
     const lamp = makeLamp(kleur, size(where), 3, { day: !!BLINK[soort], weg: true });   // a flikkerlicht is there by day too; one that is out, not at all
     // the glow round a light is in the eye that sees it, not out on the water: it lies over a mast or a post
     // in front of it, and is gone only where the light itself is hidden (update)
-    const glow = lamp.children[1]; glow.material.depthTest = false; glow.renderOrder = 5;
+    const glow = lamp.children[1] as THREE.Sprite; glow.material.depthTest = false; glow.renderOrder = 5;   // makeLamp's glow
     lamp.position.set(base[0], base[1] + dy, base[2]);
     group.add(lamp); reach(where, base[1] + dy - 0.06);
     lights.push({
@@ -821,7 +879,7 @@ export function makeShip(config) {
       facultatief: !!extra.facultatief, swing: SWING[soort] ?? null, rest: lamp.position.clone(), glow, r: 0.05 * size(where),
     });
   }
-  const shapes = []; const verlicht = [];
+  const shapes: ScheepsDagmerk[] = []; const verlicht: THREE.MeshStandardMaterial[] = [];
   for (const [vorm, kleur, where, dy = 0, klein = false] of config.dagmerken ?? []) {
     const base = place(where);
     // in a group of its own, so that a shape made of one mesh keeps standing on its place as it was made to
@@ -830,7 +888,7 @@ export function makeShip(config) {
     shape.position.set(base[0], base[1] + dy, base[2]);
     group.add(shape); reach(where, base[1] + dy + h + 0.03);
     shapes.push({ shape, nacht: NIGHT_TOO.has(vorm), vorm, kleur, h });
-    shape.traverse((o) => { if (o.userData.verlicht) verlicht.push(o.material); });
+    shape.traverse((o) => { if (o.userData.verlicht) verlicht.push((o as ScheepsMesh).material); });   // lit() marks only meshes
   }
   for (const [where, top] of Object.entries(tops)) {
     const from = ship.palen?.[where];
@@ -839,25 +897,28 @@ export function makeShip(config) {
     post(group, x, top - from, from, ship.length > 15 ? 0.06 : 0.025, 0xd9d9d9, z);
   }
   // what can stand between the eye and a light: all of her but the lamps (their glow is no wall)
-  const lampParts = new Set(); for (const l of lights) l.lamp.traverse((o) => lampParts.add(o));
+  const lampParts = new Set<THREE.Object3D>(); for (const l of lights) l.lamp.traverse((o) => lampParts.add(o));
   // (not a line or a thin post: narrower than a light, it never hides one)
-  const thin = (o) => o.geometry?.type === 'CylinderGeometry' && Math.max(o.geometry.parameters.radiusTop, o.geometry.parameters.radiusBottom) < 0.045;
-  const solid = []; group.traverse((o) => { if (o.isMesh && !lampParts.has(o) && !thin(o)) solid.push(o); });
+  const thin = (o: ScheepsMesh): boolean => {
+    const g = o.geometry as THREE.CylinderGeometry;          // looked at only when its type says it is one
+    return g?.type === 'CylinderGeometry' && Math.max(g.parameters.radiusTop, g.parameters.radiusBottom) < 0.045;
+  };
+  const solid: THREE.Object3D[] = []; group.traverse((o) => { if (isMesh(o) && !lampParts.has(o) && !thin(o)) solid.push(o); });
   let frame = 0;
   // her middle across, of the craft only (not a kade beside her)
   const mid = new THREE.Box3(); const part = new THREE.Box3(); group.updateMatrixWorld(true);
-  ship.group.traverse((o) => { if (o.isMesh) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); mid.union(part.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld)); } });
+  ship.group.traverse((o) => { if (isMesh(o)) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); mid.union(part.copy(o.geometry.boundingBox!).applyMatrix4(o.matrixWorld)); } });
   const axis = mid.isEmpty() ? 0 : (mid.min.z + mid.max.z) / 2;
   group.userData = {
     config, length: ship.length, lights, axis,
     // the dagmerken, for a picture of what is seen of her by day: [{ shape, vorm, kleur, h, nacht }]
     dagmerken: shapes,
-    update(t, night, camera) {
+    update(t: number, night: number, camera: THREE.Camera) {
       for (const l of lights) {
         let on = night > 0.05 || l.byDay;                            // lit at sundown, out by day; a flikkerlicht shows by day too
         if (l.swing) {
           // swung by hand across the line of sight, in a circle or to and fro
-          tmp.copy(camera.position); l.lamp.parent.worldToLocal(tmp).sub(l.rest);
+          tmp.copy(camera.position); l.lamp.parent!.worldToLocal(tmp).sub(l.rest);
           across.set(-tmp.z, 0, tmp.x).normalize();
           const a = (2 * Math.PI * t) / 1.6;
           l.lamp.position.copy(l.rest).addScaledVector(across, l.swing === 'rond' ? 0.45 * Math.cos(a) : 0.5 * Math.sin(a));
@@ -867,7 +928,7 @@ export function makeShip(config) {
         if (l.arc) {
           // the bearing from the middle of all of her (a samenstel too), as the sector is seen from further off:
           // up close a boordlicht some metres out to the side would otherwise go out for an eye right ahead of her
-          tmp.copy(camera.position); l.lamp.parent.worldToLocal(tmp); tmp.x -= l.rest.x; tmp.z -= axis;
+          tmp.copy(camera.position); l.lamp.parent!.worldToLocal(tmp); tmp.x -= l.rest.x; tmp.z -= axis;
           const bearing = THREE.MathUtils.radToDeg(Math.atan2(tmp.z, tmp.x));            // 0 ahead, + to starboard
           const [from, to] = l.arc;
           const b = to > 180 ? (bearing + 360) % 360 : bearing;

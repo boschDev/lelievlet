@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Geluidsseinen: the sound signals of the BPR, bijlage 6 (sections A to G; F is 'niet overgenomen'),
 // one entry per row of the bijlage, in its order, with the answers where the bijlage gives them.
 // Patterns are read from the bijlage's images and checked against the articles it cites (3.18, 3.30,

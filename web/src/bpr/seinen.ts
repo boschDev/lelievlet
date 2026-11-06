@@ -1,8 +1,7 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { BORDEN } from './borden/index.ts';
-import { SCENE } from './borden/fgh.ts';
-import { ROOD, GROEN, GEEL } from './borden/kader.ts';
+import { SCENE, type Scene } from './borden/fgh.ts';
+import { ROOD, GROEN, GEEL, type LampSoort } from './borden/kader.ts';
 import { makeLamp } from './betonning.ts';
 import { makeBoard, makeSign } from './tekens.ts';
 import { CONFIGS, makeShip } from './schepen.ts';
@@ -17,7 +16,36 @@ import { character } from './lichtkarakter.ts';
 // lamps: top down, the same on both sides of the opening; 'flikker' flashes. geel: lamps over the opening.
 // borden: the sign over (or, A.10 and D.2, either side of) the opening of a fixed bridge; licht: shown as
 // the lights the BPR allows in its place (bijlage 7 G: A.1 red, D.1 yellow fixed lights).
-const SEINEN_LIJST = [
+/** A lamp of a state: its colour, and 'flikker' if it flashes. */
+type SeinLampSpec = [kleur: string, kind?: LampSoort];
+
+/** What makeSein builds a state from: the installation (bouw) and what it shows. */
+export interface SeinBouw {
+  id: string;
+  bouw: string;                       // brug, ophaal, sluis, sluisbrug, sluisophaal, vast, stuw, stuwbrug, spui
+  lampen?: SeinLampSpec[];            // top down, the same on both sides of the opening
+  geel?: number;                      // yellow lamps over the opening
+  open?: boolean;
+  beide?: boolean;                    // a lock standing open at both ends
+  borden?: string;                    // the sign over (or either side of) the opening of a fixed bridge
+  licht?: boolean;                    // shown as the lights the BPR allows in the place of borden
+  driehoek?: 'op' | 'neer' | 'rij';   // the three red lights of a spuisluis
+  vlag?: string;                      // its flag or pennant by day
+}
+
+/** A state as SEINEN_LIJST lists it. */
+interface SeinStaat extends SeinBouw { naam: string; betekenis: string; lelievlet?: string; code?: string; cwo?: boolean }
+
+/** A state as SEINEN gives it: with its group, and the code of its teken (its own, or its group's). */
+export interface Sein extends SeinStaat { groep: string; code: string }
+
+/** A lamp of a model and when it burns. */
+interface SeinLamp { lamp: THREE.Group; lit: (t: number) => boolean }
+
+/** The one of `opties` for `code`, if there is one. */
+const kies = <T>(opties: Record<string, T>, code: string): T | undefined => opties[code];
+
+const SEINEN_LIJST: [groep: string, groepCode: string, list: SeinStaat[]][] = [
   ['Beweegbare brug in bedrijf', 'G.2a', [
     { id: 'brug-rood', naam: 'Eén rood licht', bouw: 'brug', lampen: [['rood']],
       betekenis: 'Doorvaren is verboden. De brug wordt wel bediend.',
@@ -111,31 +139,33 @@ const SEINEN_LIJST = [
   ]],
 ];
 
-export const SEINEN = SEINEN_LIJST.flatMap(([groep, groepCode, list]) => list.map((s) => ({ ...s, groep, code: s.code ?? groepCode })));
+export const SEINEN: Sein[] = SEINEN_LIJST.flatMap(([groep, groepCode, list]) => list.map((s) => ({ ...s, groep, code: s.code ?? groepCode })));
 
 // ---------------------------------------------------------------- the picture, after the BPR's scene
-const KLEUR = { rood: ROOD, groen: GROEN, geel: GEEL };
-const asLights = (lampen) => lampen.map(([k, kind]) => [KLEUR[k], kind]);
+const KLEUR: Record<string, string> = { rood: ROOD, groen: GROEN, geel: GEEL };
+const asLights = (lampen: SeinLampSpec[]): SeinLampSpec[] => lampen.map(([k, kind]): SeinLampSpec => [KLEUR[k], kind]);
 
 /** The SVG of one state: the BPR's little scene of it, on its own. */
-export function seinPlaatje(sein) {
+export function seinPlaatje(sein: Sein): string {
+  // a state of a bridge, lock or weir has its lampen, one of a fixed bridge its borden
+  const lampen = sein.lampen!; const borden = sein.borden!;
   const { tafereel, brug, ophaalbrug, sluis, sluisBrug, sluisOphaal, vasteBrug, stuw, stuwBrug, licht, a10, d2, d1, a1 } = SCENE;
-  const one = (scene) => tafereel([[scene]], 600).svg;
+  const one = (scene: Scene): string => tafereel([[scene]], 600).svg;
   // over the opening: the boards, or the lights in their place
   const boven = sein.licht
     ? { 'A.1': licht(240, 46, 18, ROOD), 'D.1a': licht(240, 48, 18, GEEL), 'D.1b': licht(219, 48, 18, GEEL) + licht(262, 48, 18, GEEL) }
     : { 'A.1': a1(240, 46, 66, 46), 'D.1a': d1(240, 48, 21), 'D.1b': d1(219, 48, 21) + d1(262, 48, 21) };
   switch (sein.bouw) {
-    case 'brug': return one(brug(asLights(sein.lampen), sein.geel ?? 0));
-    case 'ophaal': return one(ophaalbrug(asLights(sein.lampen)));
-    case 'sluis': return one(sluis(sein.lampen.map(([k]) => KLEUR[k])));
-    case 'sluisbrug': return one(sluisBrug(sein.lampen.map(([k]) => KLEUR[k]), sein.geel ?? 0));
+    case 'brug': return one(brug(asLights(lampen), sein.geel ?? 0));
+    case 'ophaal': return one(ophaalbrug(asLights(lampen)));
+    case 'sluis': return one(sluis(lampen.map(([k]) => KLEUR[k])));
+    case 'sluisbrug': return one(sluisBrug(lampen.map(([k]) => KLEUR[k]), sein.geel ?? 0));
     case 'sluisophaal': return one(sluisOphaal());
-    case 'vast': return one(vasteBrug({
+    case 'vast': return one(vasteBrug(kies({
       'A.10': a10(92, 46, 22, true) + a10(393, 46, 22, false), 'D.2': d2(92, 46, 22, false) + d2(393, 46, 22, true), ...boven,
-    }[sein.borden], { gevel: !sein.borden.startsWith('D.1'), bodem: sein.borden.startsWith('A') }));
-    case 'stuw': return one(stuw(sein.lampen.map(([k]) => KLEUR[k]), sein.open ? 72 : 44));
-    case 'stuwbrug': return one(stuwBrug({ 'A.1': a1(286, 52, 92, 64), 'D.1a': d1(288, 52, 30), 'D.1b': d1(248, 57, 30) + d1(327, 57, 30) }[sein.borden]));
+    }, borden)!, { gevel: !borden.startsWith('D.1'), bodem: borden.startsWith('A') }));
+    case 'stuw': return one(stuw(lampen.map(([k]) => KLEUR[k]), sein.open ? 72 : 44));
+    case 'stuwbrug': return one(stuwBrug(kies({ 'A.1': a1(286, 52, 92, 64), 'D.1a': d1(288, 52, 30), 'D.1b': d1(248, 57, 30) + d1(327, 57, 30) }, borden)!));
     default: return BORDEN[sein.code]?.svg ?? '';
   }
 }
@@ -147,12 +177,12 @@ const OPENING = 7;
 const LENS = 1.2;                  // how brightly a signal lens burns: its colour kept, not burnt out
 const HALF = OPENING / 2;
 const BANK = { top: 1.0, front: 3, back: -16, width: 9.5 };
-const mat = (color, roughness = 0.85) => new THREE.MeshStandardMaterial({ color, roughness });
+const mat = (color: number, roughness = 0.85): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({ color, roughness });
 const M = { beton: mat(0x9a9d9f), dek: mat(0x7b7f82), gras: mat(0x6f8f4e, 1), hout: mat(0x6b4a2b), kast: mat(0x1c1c1c, 0.6), wit: mat(0xe9e9e4, 0.7), donker: mat(0x1d2a33, 1) };
-const box = (w, h, d, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b; };
+const box = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number): THREE.Mesh => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b; };
 
 /** The two banks of the canal, `half` out from its middle, concrete faced, grass on top. */
-function banks(g, half = HALF, front = BANK.front, back = BANK.back) {
+function banks(g: THREE.Object3D, half = HALF, front = BANK.front, back = BANK.back): void {
   for (const s of [-1, 1]) {
     const x = s * (half + BANK.width / 2); const depth = front - back; const z = (front + back) / 2;
     g.add(box(BANK.width, BANK.top + 1.2, depth, M.beton, x, (BANK.top - 1.2) / 2, z));
@@ -161,7 +191,7 @@ function banks(g, half = HALF, front = BANK.front, back = BANK.back) {
 }
 
 /** A black housing with lamps one over the other, the top one at `y`; returns the lamps with their character. */
-function head(g, x, y, z, lampen, lamps) {
+function head(g: THREE.Object3D, x: number, y: number, z: number, lampen: SeinLampSpec[], lamps: SeinLamp[]): void {
   const step = 0.42;
   g.add(box(0.42, step * lampen.length + 0.08, 0.22, M.kast, x, y - (step * (lampen.length - 1)) / 2, z));
   lampen.forEach(([kleur, kind], i) => {
@@ -172,13 +202,13 @@ function head(g, x, y, z, lampen, lamps) {
 
 /** Yellow lamps under the middle of a span whose underside is at `y`, at its front `z` - a little bigger than the
  *  red and green at the side: they hang in the shadow of the span, and are what tells you that you may go under it. */
-function yellows(g, n, y, z, lamps) {
+function yellows(g: THREE.Object3D, n: number, y: number, z: number, lamps: SeinLamp[]): void {
   const xs = n === 2 ? [-0.45, 0.45] : n === 1 ? [0] : [];
   for (const x of xs) { const lamp = makeLamp('geel', 3, LENS, { day: true }); lamp.position.set(x, y - 0.2, z + 0.06); g.add(lamp); lamps.push({ lamp, lit: () => true }); }
 }
 
 /** A bascule bridge over the opening at `z`: fixed ends on the banks, the leaf down or standing open. */
-function bascule(g, z, open, under = 2.3) {
+function bascule(g: THREE.Object3D, z: number, open: boolean, under = 2.3): { front: number; under: number } {
   const deep = 2.4; const thick = 0.4;
   for (const s of [-1, 1]) {
     g.add(box(1.1, under - BANK.top, deep - 0.4, M.beton, s * (HALF + 0.55), (under + BANK.top) / 2, z));      // abutment
@@ -193,7 +223,7 @@ function bascule(g, z, open, under = 2.3) {
 }
 
 /** Mitre gates across the opening at `z`, shut in a shallow V or swung back against the walls. */
-function gates(g, z, open) {
+function gates(g: THREE.Object3D, z: number, open?: boolean): void {
   for (const s of [-1, 1]) {
     const pivot = new THREE.Group(); pivot.position.set(s * HALF, 0, z);
     pivot.add(box(HALF + 0.15, 2.5, 0.3, M.hout, -s * (HALF + 0.15) / 2, 0.05, 0));
@@ -203,10 +233,10 @@ function gates(g, z, open) {
 }
 
 /** A flag or pennant with its word, on a pole on the bank. */
-function flag(g, word, x, z) {
+function flag(g: THREE.Object3D, word: string, x: number, z: number): void {
   g.add(box(0.07, 4.2, 0.07, M.wit, x, BANK.top + 2.1, z));
   const c = Object.assign(document.createElement('canvas'), { width: 256, height: 160 });
-  const ctx = c.getContext('2d'); ctx.fillStyle = '#0e4c96';
+  const ctx = c.getContext('2d')!; ctx.fillStyle = '#0e4c96';
   if (word === 'inlaten') { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(256, 80); ctx.lineTo(0, 160); ctx.fill(); }
   else ctx.fillRect(0, 0, 256, 160);
   ctx.fillStyle = '#fff'; ctx.font = `700 ${word === 'inlaten' ? 34 : 46}px system-ui, sans-serif`; ctx.textBaseline = 'middle';
@@ -215,7 +245,7 @@ function flag(g, word, x, z) {
   const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.875), new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide, alphaTest: 0.5, transparent: true }));
   cloth.position.set(x + 0.74, BANK.top + 3.7, z);
   if (word === 'inlaten') {                                       // only the triangle of a pennant
-    const a = Object.assign(document.createElement('canvas'), { width: 256, height: 160 }); const actx = a.getContext('2d');
+    const a = Object.assign(document.createElement('canvas'), { width: 256, height: 160 }); const actx = a.getContext('2d')!;
     actx.fillStyle = '#fff'; actx.beginPath(); actx.moveTo(0, 0); actx.lineTo(256, 80); actx.lineTo(0, 160); actx.fill();
     cloth.material.alphaMap = new THREE.CanvasTexture(a);
   }
@@ -228,19 +258,19 @@ function flag(g, word, x, z) {
  * spuisluis stands ahead of her, so that it stands in the water: a ring of the same stuff on the same edge, so the
  * two are one. water: the viewer's (modes.water).
  */
-export function makeVerWater(water) {
+export function makeVerWater(water: THREE.Mesh): THREE.Mesh {
   const ring = new THREE.Mesh(new THREE.RingGeometry(14, 70, 64, 1), water.material);
   ring.rotation.x = -Math.PI / 2; ring.position.set(2.8, water.position.y, 0); ring.renderOrder = water.renderOrder;
   ring.name = 'ver-water';
   return ring;
 }
 
-export function makeSein(sein) {
+export function makeSein(sein: SeinBouw): THREE.Group {
   const g = new THREE.Group(); g.name = sein.id;
-  const lamps = [];
+  const lamps: SeinLamp[] = [];
   banks(g);
   let height = 3;
-  const sides = (y, z) => { for (const s of [-1, 1]) head(g, s * (HALF + 0.35), y, z, sein.lampen, lamps); };
+  const sides = (y: number, z: number): void => { for (const s of [-1, 1]) head(g, s * (HALF + 0.35), y, z, sein.lampen!, lamps); };   // only for a bouw with lampen
   switch (sein.bouw) {
     case 'brug': case 'ophaal': {
       const b = bascule(g, 0, sein.bouw === 'ophaal');
@@ -280,13 +310,13 @@ export function makeSein(sein) {
         height = 4.4;
         break;
       }
-      const at = (code, x, mirror = false) => {
-        const board = makeBoard(code, { 'D.1b': 1.2, 'A.1': 0.9, 'C.2': 0.66, 'G.5.2': 0.66, 'G.5.3': 0.66, 'G.5.1c': 0.66, 'G.5.1b': 0.62 }[code] ?? 0.6);
+      const at = (code: string, x: number, mirror = false): void => {
+        const board = makeBoard(code, kies({ 'D.1b': 1.2, 'A.1': 0.9, 'C.2': 0.66, 'G.5.2': 0.66, 'G.5.3': 0.66, 'G.5.1c': 0.66, 'G.5.1b': 0.62 }, code) ?? 0.6);
         board.position.set(x, under + 0.35, deep / 2 + 0.02); if (mirror) board.scale.x = -1; g.add(board);
       };
       // the halves of A.10 and D.2 point the way: the board as drawn on the left, mirrored on the right
       if (sein.borden === 'A.10' || sein.borden === 'D.2') { at(sein.borden, -2.9); at(sein.borden, 2.9, true); }
-      else at(sein.borden, 0);
+      else at(sein.borden!, 0);   // a fixed bridge or weir bridge has its borden
       height = 4.4;
       break;
     }
@@ -306,9 +336,9 @@ export function makeSein(sein) {
       for (const x of [-2.3, 0, 2.3]) g.add(box(1.6, 1.0, 0.04, M.donker, x, 0.3, 0.02));          // its openings
       g.add(box(0.12, 1.2, 0.12, M.kast, 0, 2.4 + 0.6, -0.3));
       g.add(box(1.3, 1.1, 0.12, M.kast, 0, 3.75, -0.3));
-      const spots = { op: [[0, 0.3], [-0.38, -0.25], [0.38, -0.25]], neer: [[-0.38, 0.25], [0.38, 0.25], [0, -0.3]], rij: [[-0.42, 0], [0, 0], [0.42, 0]] }[sein.driehoek];
+      const spots = { op: [[0, 0.3], [-0.38, -0.25], [0.38, -0.25]], neer: [[-0.38, 0.25], [0.38, 0.25], [0, -0.3]], rij: [[-0.42, 0], [0, 0], [0.42, 0]] }[sein.driehoek!];   // a spuisluis has its driehoek
       for (const [x, y] of spots) { const lamp = makeLamp('rood', 2.2, LENS, { day: true }); lamp.position.set(x, 3.75 + y, -0.2); g.add(lamp); lamps.push({ lamp, lit: () => true }); }
-      flag(g, sein.vlag, HALF + 1.2, 1.2);
+      flag(g, sein.vlag!, HALF + 1.2, 1.2);
       height = 4.6;
       break;
     }
@@ -316,7 +346,7 @@ export function makeSein(sein) {
   }
   g.userData = {
     height,
-    update(t, night) { for (const { lamp, lit } of lamps) lamp.userData.set(lit(t), night); },
+    update(t: number, night: number) { for (const { lamp, lit } of lamps) lamp.userData.set(lit(t), night); },
   };
   for (const { lamp } of lamps) lamp.userData.set(true, 0);
   return g;
@@ -328,7 +358,7 @@ export function makeSein(sein) {
  * the niet-vrijvarende (E.4a) on its cable to both banks, the vrijvarende (E.4b) free. Its own frame as
  * makeSein's: the water at y = 0, the side the boat comes from towards +z.
  */
-export function makeVeerpont(code) {
+export function makeVeerpont(code: string): THREE.Group {
   const g = new THREE.Group(); g.name = code;
   const HALF_WIDE = 19;                                             // m: half the water, so the cable of a kabelpont reaches the kades
   banks(g, HALF_WIDE, 8, -26);
@@ -339,10 +369,10 @@ export function makeVeerpont(code) {
     stoep.rotation.z = s * 0.35; g.add(stoep);
   }
   const config = CONFIGS.find((c) => c.id === (code === 'E.4a' ? 'veerpont_niet_vrijvarend' : 'veerpont_vrijvarend'));
-  const pont = makeShip(config);
+  const pont = makeShip(config!);   // both are in CONFIGS
   pont.position.set(-pont.userData.length / 2, 0, 0);               // its length across the water, its middle in the middle
   g.add(pont);
-  g.userData = { height: 6, update(t, night, camera) { pont.userData.update?.(t, night, camera); } };
+  g.userData = { height: 6, update(t: number, night: number, camera: THREE.Camera) { pont.userData.update?.(t, night, camera); } };
   return g;
 }
 
@@ -352,20 +382,20 @@ export function makeVeerpont(code) {
 // installation (A.11 rood boven groen, the G and H tekens), shown as that state of a bridge, lock or spuisluis.
 // Zoeken › Borden and Leren › Verkeerstekens both put them out so.
 export const OP_BRUG = new Set(['A.10', 'D.2', 'D.1a', 'D.1b', 'C.2', 'G.5.1b', 'G.5.1c', 'G.5.2', 'G.5.3']);
-const ALS_SEIN = {
+const ALS_SEIN: Record<string, string> = {
   'A.11': 'brug-rood-groen', 'A.11.1': 'brug-rood-groenflikker', 'G.1a': 'vast-a10', 'G.1b': 'vast-d1a', 'G.2a': 'brug-rood', 'G.2b': 'brug-2rood',
   'G.4.1a': 'sluis-rood', 'G.4.1b': 'sluis-2rood', 'G.4.2': 'sluisbrug-rood-groen', 'H.3a': 'spui-spuien', 'H.3b': 'spui-inlaten', 'H.3c': 'spui-straks',
 };
 /** The state of a bridge, lock or spuisluis a teken is shown as, if it is lights or an installation. */
-export const seinVoor = (code) => SEINEN.find((s) => s.id === ALS_SEIN[code]) ?? null;
+export const seinVoor = (code: string): Sein | null => SEINEN.find((s) => s.id === ALS_SEIN[code]) ?? null;
 /** What a teken out on a bridge or as an installation means there: its state of Zoeken › Seinen (as Bruggen and
  *  Sluizen show it), or for a board on a fixed bridge the state with that board. */
-export const staatVoor = (code) => seinVoor(code) ?? (OP_BRUG.has(code) ? SEINEN.find((s) => s.bouw === 'vast' && s.borden === code && !s.licht) ?? null : null);
+export const staatVoor = (code: string): Sein | null => seinVoor(code) ?? (OP_BRUG.has(code) ? SEINEN.find((s) => s.bouw === 'vast' && s.borden === code && !s.licht) ?? null : null);
 /** Where a teken stands: 'brug' (straight ahead, on a bridge or as the installation), 'pont' (on the kades ahead) or 'paal'. */
-export const plaatsVan = (code) => (OP_BRUG.has(code) || ALS_SEIN[code] ? 'brug' : code === 'E.4a' || code === 'E.4b' ? 'pont' : 'paal');
+export const plaatsVan = (code: string): 'brug' | 'pont' | 'paal' => (OP_BRUG.has(code) || ALS_SEIN[code] ? 'brug' : code === 'E.4a' || code === 'E.4b' ? 'pont' : 'paal');
 /** The model of a teken where it really stands (plaatsVan), in makeSein's frame for 'brug' and 'pont'. */
-export function makeTeken(code) {
-  if (ALS_SEIN[code]) return makeSein(seinVoor(code));
+export function makeTeken(code: string): THREE.Group {
+  if (ALS_SEIN[code]) return makeSein(seinVoor(code)!);
   if (OP_BRUG.has(code)) return makeSein({ id: code, bouw: 'vast', borden: code });
   if (code === 'E.4a' || code === 'E.4b') return makeVeerpont(code);
   return makeSign(code);

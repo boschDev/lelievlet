@@ -1,18 +1,20 @@
-// @ts-nocheck
 // Sound signals made audible (BPR bijlage 6): a ship's horn and a ship's bell, from Web Audio alone.
 // A pattern is a string of tokens, as geluiden.js writes them: 'k' korte stoot (about 1 s), 'l' lange
 // stoot (about 4 s), 'z' zeer korte stoot (about a quarter of a second), 'Z' a reeks zeer korte stoten
 // (at least six, a quarter second each, a quarter second between), 'b' a klokslag, 'B' a reeks
 // klokslagen (about 4 s), '|' a longer pause between two groups. Between two stoten about 1 s.
 
-const DUUR = { k: 1, l: 4, z: 0.25 };
+const DUUR: Record<string, number> = { k: 1, l: 4, z: 0.25 };
 const TUSSEN = 1;                    // s between two stoten
 const PAUZE = 2.5;                   // s for '|'
 const REEKS = 8;                     // zeer korte stoten in a reeks (the BPR: at least 6)
 
+/** One sound of a pattern: when it starts and how long it lasts (s), horn or bell, and its token. */
+export interface Stap { at: number; dur: number; kind: 'hoorn' | 'klok'; token: string }
+
 /** The pattern laid out in time: [{ at, dur, kind: 'hoorn' | 'klok' }], and how long it all takes. */
-export function tijdlijn(patroon) {
-  const out = []; let t = 0; let last = null;
+export function tijdlijn(patroon: string): { stappen: Stap[]; duur: number } {
+  const out: Stap[] = []; let t = 0; let last: string | null = null;
   for (const token of patroon.replace(/\s+/g, '')) {
     if (token === '|') { t += PAUZE - (last ? TUSSEN : 0); last = null; continue; }
     if (last) t += last === 'z' || last === 'Z' ? 0.25 : TUSSEN;
@@ -30,7 +32,7 @@ export function tijdlijn(patroon) {
  * The pattern as a picture, its width after time: a block for a stoot (a dot for a zeer korte), a
  * round for a klokslag, and a gap for a pause - read like the BPR's own drawing of it.
  */
-export function patroonSvg(patroon, { h = 28, k = 14, kleur = '#16222e' } = {}) {
+export function patroonSvg(patroon: string, { h = 28, k = 14, kleur = '#16222e' }: { h?: number; k?: number; kleur?: string } = {}): string {
   const { stappen, duur } = tijdlijn(patroon);
   const w = Math.max(1, duur) * k + 8; const y = h / 2;
   const body = stappen.map(({ at, dur, kind, token }) => {
@@ -42,6 +44,18 @@ export function patroonSvg(patroon, { h = 28, k = 14, kleur = '#16222e' } = {}) 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(0)}" height="${h}" viewBox="0 0 ${w.toFixed(1)} ${h}">${body}</svg>`;
 }
 
+/** A window of an older Safari, which has the audio context under its webkit name only. */
+type OudVenster = typeof window & { webkitAudioContext?: typeof AudioContext };
+
+/** The player of makeHoorn. */
+export interface Hoorn {
+  play(patroon: string, opties?: { herhaald?: boolean; klaar?: () => void }): boolean;
+  stop(): void;
+  close(): void;
+  unlock(): void;
+  readonly playing: boolean;
+}
+
 /**
  * One player for the viewer: play(patroon, { herhaald, klaar }) sounds it (twice, a pause between, when
  * it is a signal that is repeated) and calls `klaar` at the end; stop() silences it at once; close() lets the
@@ -49,16 +63,21 @@ export function patroonSvg(patroon, { h = 28, k = 14, kleur = '#16222e' } = {}) 
  * browsers want - or by unlock(), from a click, for a player that plays later without one (Safari keeps a context
  * that was not started from a click silent). `gain`: how loud, 0..1 (a ship far off in the mist is softer).
  */
-export function makeHoorn({ gain = 0.8 } = {}) {
-  let ctx = null; let bus = null; let running = []; let timer = 0; let done = null;
+export function makeHoorn({ gain = 0.8 }: { gain?: number } = {}): Hoorn {
+  let ctx: AudioContext | null = null; let bus: GainNode | null = null; let running: OscillatorNode[] = [];
+  let timer = 0; let done: (() => void) | null = null;
   let wakker = false;                                               // unlocked from a click: kept running from then on
   const maak = () => {
     if (ctx) return true;
-    const Ctx = window.AudioContext ?? window.webkitAudioContext;
+    const venster: OudVenster = window;
+    const Ctx = venster.AudioContext ?? venster.webkitAudioContext;
     if (!Ctx) return false;
     ctx = new Ctx(); bus = ctx.createGain(); bus.gain.value = gain; bus.connect(ctx.destination);
     return true;
   };
+  // ctx and bus once maak() has made them
+  const ctxKlaar = (): AudioContext => ctx!;
+  const busKlaar = (): GainNode => bus!;
   const stop = () => {
     clearTimeout(timer);
     for (const node of running) { try { node.stop(); } catch { /* already over */ } }
@@ -67,19 +86,23 @@ export function makeHoorn({ gain = 0.8 } = {}) {
     const d = done; done = null; d?.();
   };
   /** A horn: a low note with its overtones, through a filter, swelling in and dying away quickly. */
-  const hoorn = (at, dur) => {
+  const hoorn = (at: number, dur: number): void => {
+    // only called from play(), after maak() made ctx and bus
+    const ctx = ctxKlaar(); const bus = busKlaar();
     const g = ctx.createGain(); g.gain.setValueAtTime(0, at);
     g.gain.linearRampToValueAtTime(0.32, at + 0.05); g.gain.setValueAtTime(0.32, at + dur - 0.08); g.gain.linearRampToValueAtTime(0, at + dur);
     const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 1400; filter.Q.value = 0.8;
     g.connect(filter); filter.connect(bus);
-    for (const [f, type, level] of [[196, 'sawtooth', 0.5], [196.8, 'square', 0.25], [294, 'sawtooth', 0.2]]) {
+    const tonen: [number, OscillatorType, number][] = [[196, 'sawtooth', 0.5], [196.8, 'square', 0.25], [294, 'sawtooth', 0.2]];
+    for (const [f, type, level] of tonen) {
       const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
       const lg = ctx.createGain(); lg.gain.value = level; o.connect(lg); lg.connect(g);
       o.start(at); o.stop(at + dur + 0.05); running.push(o);
     }
   };
   /** A bell: a few inharmonic partials, struck and ringing out. */
-  const klok = (at) => {
+  const klok = (at: number): void => {
+    const ctx = ctxKlaar(); const bus = busKlaar();
     for (const [f, level, decay] of [[880, 0.35, 1.6], [1320 * 1.007, 0.18, 1.1], [2160, 0.12, 0.6], [3020, 0.06, 0.35]]) {
       const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
       const g = ctx.createGain(); g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(level, at + 0.004);
@@ -87,9 +110,10 @@ export function makeHoorn({ gain = 0.8 } = {}) {
       o.connect(g); g.connect(bus); o.start(at); o.stop(at + decay + 0.05); running.push(o);
     }
   };
-  const play = (patroon, { herhaald = false, klaar } = {}) => {
+  const play = (patroon: string, { herhaald = false, klaar }: { herhaald?: boolean; klaar?: () => void } = {}): boolean => {
     stop();
     if (!maak()) return false;
+    const ctx = ctxKlaar();
     ctx.resume?.();
     const { stappen, duur } = tijdlijn(patroon);
     const start = ctx.currentTime + 0.08;
@@ -105,6 +129,6 @@ export function makeHoorn({ gain = 0.8 } = {}) {
   };
   const close = () => { stop(); ctx?.close?.(); ctx = null; bus = null; wakker = false; };
   /** From a click: the audio ready for a play that comes later, with no click of its own. */
-  const unlock = () => { if (maak()) { ctx.resume?.(); wakker = true; } };
+  const unlock = () => { if (maak()) { ctxKlaar().resume?.(); wakker = true; } };
   return { play, stop, close, unlock, get playing() { return running.length > 0; } };
 }

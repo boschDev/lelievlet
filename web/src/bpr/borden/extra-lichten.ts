@@ -1,12 +1,12 @@
-// @ts-nocheck
 // The light signs of BPR bijlage 7 that stand on their own on the bank, not at a bridge, lock or weir
 // (those are in seinen.js): B.10, D.3c, E.12a/b, E.12.1 and the lichtpijl F.2b. Drawn after the BPR's own
 // drawings (reference/bpr/tekens/bpr_img) as A.11 is in a.js, a black backplate with the lamps of
 // kader.js, each with what the viewer needs to list and explain it. See kader.js for the conventions.
+import type { LampSoort } from './kader.ts';
 import { svg, lamp, ROOD, WIT, ZWART, GROEN, GEEL } from './kader.ts';
 
 /** A black backplate `w` x `h` with lamps of radius `r`, each [cx, cy, colour, kind]. */
-const kast = (w, h, r, lampen) => svg(w, h,
+const kast = (w: number, h: number, r: number, lampen: [number, number, string, LampSoort?][]): string => svg(w, h,
   `<rect width="${w}" height="${h}" fill="${ZWART}"/>${lampen.map(([cx, cy, kleur, kind]) => lamp(cx, cy, r, kleur, kind)).join('')}`);
 
 // F.2b: a chevron of white light pointing to the haven, beside the lights it goes with: here the BPR's
