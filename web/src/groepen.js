@@ -28,10 +28,12 @@
 //   boeiselBanen            the boeisel in lengthwise bands of these colours, top first (a flag on the sides), for
 //                           the group or one boat: boeiselBanen: VLAG
 //   boeiselVoor             true: the fore half of the boeisel in the bakskleur, the aft half in the boeisel's own
+//   riemBandBlad            true: the band in the bakskleur on the riemen and the wrikriem at the blade, not at the
+//                           handle
 //   roerbeslagKleur         the roerkoning, the roerhaken and the vingerlingen in this colour (left out: the roerkoning
 //                           and the roerhaken the roer's, the vingerlingen the romp's)
-//   beslagKleur             the mikhouders, the wantputtingen and the dolpotten painted in this colour (left out:
-//                           galvanised)
+//   beslagKleur             the mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek and the
+//                           leiogen painted in this colour (left out: galvanised; the kikkers on the mastkoker go with the zwaardkast)
 //   lummelKleur             the lummelbeslag, the mastband with it, and the bands and the wervel at the ends of the
 //                           giek in this colour (left out: the bakskleur)
 //
@@ -239,7 +241,7 @@ export const GROEPEN = [
     },
     zeilkleur: 10,
     spiegelKleur: BAKSKLEUR, roerbeslagKleur: BAKSKLEUR, beslagKleur: BAKSKLEUR,
-    lummelKleur: RVS,
+    lummelKleur: RVS, riemBandBlad: true,
     // the bakskleuren as Epifanes numbers them, where the group gave a number
     boten: [
       { zeilnummer: '286', naam: '', bakskleur: '#e0620a' },             // oranje

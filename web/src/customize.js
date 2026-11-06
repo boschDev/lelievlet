@@ -28,8 +28,8 @@ export const ZONES = [
 
 // zones that go with another unless a group gives them a colour of their own: the voorplecht and the hanenkam with
 // the bakskleur, the roer with the romp, the roerkop with the bakskleur, the outside of the spiegel with the romp, the
-// roerkoning and the roerhaken with the roer, the vingerlingen with the romp, the mikhouders, the wantputtingen and the
-// dolpotten galvanised as they came
+// roerkoning and the roerhaken with the roer, the vingerlingen with the romp, the mikhouders, the wantputtingen, the
+// dolpotten, the kikkers on the voordek and the leiogen galvanised as they came
 // and the steel of the giek - its lummelbeslag, the mastband that takes it, the bands and the wervel at its ends -
 // with the bakskleur (collectZoneMaterials)
 const MEE = ['plecht', 'roer', 'roerkop', 'spiegel', 'roerbeslag', 'vingerlingen', 'beslag', 'lummel'];
@@ -78,7 +78,8 @@ export const DEFAULTS = {
   roerKleur: null,        // the whole roer in one colour, the roerkop too; null: as the romp, the roerkop in the bakskleur. Only from a group
   roerbeslagKleur: null,  // the roerkoning, the roerhaken and the vingerlingen in a colour of their own; null: the roerkoning
                           // and the roerhaken as the rest of the roer, the vingerlingen as the romp. Only from a group
-  beslagKleur: null,      // the mikhouders, the wantputtingen and the dolpotten painted; null: galvanised. Only from a group
+  beslagKleur: null,      // the mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek and the
+                          // leiogen painted; null: galvanised. Only from a group
   lummelKleur: null,      // the lummelbeslag, the mastband with it, and the bands and the wervel at the ends of the giek in a
                           // colour of their own, or RVS; null: the bakskleur. Only from a group
   boeiselBanen: null,     // the boeisel in lengthwise bands of these colours, top first (a flag); null: none. Only from a group
@@ -88,6 +89,7 @@ export const DEFAULTS = {
   spiegelTekstKleur: null, // its colour; null: the colour of the naam
   spiegelBand: null,      // the spiegel above the berghout in this colour, a band like the boeisel; null: none. Only from a group
   spiegelPunt: false,     // that band running on down the middle of the spiegel to a point: only from a group
+  riemBandBlad: false,    // the band in the bakskleur on the riemen at the blade, not at the handle: only from a group
   kleuren: {
     romp: '#0a0a0b', berghout: '#0a0a0b', boeisel: '#f5c20d', dolboord: '#0a0a0b',
     voordek: '#8f9499', achterdek: '#8f9499', kuip: '#8f9499', zwaardkast: '#8f9499',
@@ -120,6 +122,7 @@ function baseOf(config) {
   if (typeof given.spiegelTekstKleur === 'string') base.spiegelTekstKleur = given.spiegelTekstKleur;
   if (typeof given.spiegelBand === 'string') base.spiegelBand = given.spiegelBand;
   if (typeof given.spiegelPunt === 'boolean') base.spiegelPunt = given.spiegelPunt;
+  if (typeof given.riemBandBlad === 'boolean') base.riemBandBlad = given.riemBandBlad;
   return base;
 }
 
@@ -146,6 +149,7 @@ function load(base, opslaan) {
     if (typeof saved.spiegelTekstKleur === 'string' || saved.spiegelTekstKleur === null) config.spiegelTekstKleur = saved.spiegelTekstKleur;
     if (typeof saved.spiegelBand === 'string' || saved.spiegelBand === null) config.spiegelBand = saved.spiegelBand;
     if (typeof saved.spiegelPunt === 'boolean') config.spiegelPunt = saved.spiegelPunt;
+    if (typeof saved.riemBandBlad === 'boolean') config.riemBandBlad = saved.riemBandBlad;
   } catch { /* nothing saved, no storage, or something else under the key: the base */ }
   return config;
 }
@@ -177,6 +181,7 @@ function save(config, base, opslaan) {
   if (config.spiegelTekstKleur !== base.spiegelTekstKleur) own.spiegelTekstKleur = config.spiegelTekstKleur;
   if (config.spiegelBand !== base.spiegelBand) own.spiegelBand = config.spiegelBand;
   if (config.spiegelPunt !== base.spiegelPunt) own.spiegelPunt = config.spiegelPunt;
+  if (config.riemBandBlad !== base.riemBandBlad) own.riemBandBlad = config.riemBandBlad;
   try {
     if (Object.keys(own).length) localStorage.setItem(STORAGE_KEY, JSON.stringify(own));
     else localStorage.removeItem(STORAGE_KEY);
@@ -202,7 +207,7 @@ export function initCustomizePanel(ui, { signal, engaged } = {}) {
  * targets: {
  *   zoneMaterials: Map<zone, Material[]>, sailMaterials: Material[] (collectSailMaterials),
  *   setSailNumber(text), setHullText(key, text, color, { bordje }), setSailInk(white), setSpiegelTekst(text, color),
- *   setBoeiselBanen(colours | null, voor), setSpiegelBand(colour | null, punt),
+ *   setBoeiselBanen(colours | null, voor), setSpiegelBand(colour | null, punt), setRiemBand(blad),
  *   melden(): the report of a group's colours (feedback.js); absent: no button for it
  * }
  */
@@ -273,6 +278,7 @@ export function initCustomize(ui, appConfig, targets) {
     applySails();
     applyMee(); applySpiegel(); targets.setBoeiselBanen?.(config.boeiselBanen, config.boeiselVoor);   // after the bakskleur and the romp
     targets.setSpiegelBand?.(config.spiegelBand, config.spiegelPunt);
+    targets.setRiemBand?.(config.riemBandBlad);
   };
 
   // back to where this viewer started, which is the page's own defaults if it gave any
@@ -328,6 +334,7 @@ function initBekend(ui, { config, base, opslaan, applyAll, melden }) {
       spiegelTekst: g.spiegelTekst ?? '', spiegelTekstKleur: kleur(g.spiegelTekstKleur ?? null),
       boeiselBanen: boat?.boeiselBanen ?? g.boeiselBanen ?? null, boeiselVoor: g.boeiselVoor === true,
       spiegelBand: kleur(boat?.spiegelBand ?? g.spiegelBand ?? null), spiegelPunt: (boat?.spiegelPunt ?? g.spiegelPunt) === true,
+      riemBandBlad: g.riemBandBlad === true,
     };
   };
   // what a boat may have of her own besides her bakskleur
@@ -343,7 +350,8 @@ function initBekend(ui, { config, base, opslaan, applyAll, melden }) {
     && same(config.plechtKleur ?? '', p.plechtKleur ?? '') && same(config.roerKleur ?? '', p.roerKleur ?? '')
     && same(config.spiegelKleur ?? '', p.spiegelKleur ?? '') && same(config.roerbeslagKleur ?? '', p.roerbeslagKleur ?? '')
     && same(config.beslagKleur ?? '', p.beslagKleur ?? '') && same(config.lummelKleur ?? '', p.lummelKleur ?? '') && config.spiegelTekst === p.spiegelTekst
-    && same(config.spiegelTekstKleur ?? '', p.spiegelTekstKleur ?? '') && config.boeiselVoor === p.boeiselVoor && sameOwn(p);
+    && same(config.spiegelTekstKleur ?? '', p.spiegelTekstKleur ?? '') && config.boeiselVoor === p.boeiselVoor
+    && config.riemBandBlad === p.riemBandBlad && sameOwn(p);
   const isGroup = (g) => {
     const plaatsen = g.plaatsIsNummer ? (g.boten ?? []).map((b) => opBoot(g, b)) : [opBoot(g)];
     return plaatsen.some((pl) => same(config.plaats, pl)) && [paintOf(g), ...(g.boten ?? []).map((b) => paintOf(g, b))].some(samePaint);
@@ -354,7 +362,7 @@ function initBekend(ui, { config, base, opslaan, applyAll, melden }) {
     const p = paintOf(g, boat);
     Object.assign(config, { bakskleur: p.bakskleur, zeilkleur: p.zeilkleur, naamKleur: p.naamKleur, plaatsKleur: p.plaatsKleur, plaats: opBoot(g, boat),
       rompnummer: p.rompnummer, naamBordje: p.naamBordje, plechtKleur: p.plechtKleur, roerKleur: p.roerKleur, boeiselBanen: p.boeiselBanen,
-      roerbeslagKleur: p.roerbeslagKleur, beslagKleur: p.beslagKleur, lummelKleur: p.lummelKleur,
+      riemBandBlad: p.riemBandBlad, roerbeslagKleur: p.roerbeslagKleur, beslagKleur: p.beslagKleur, lummelKleur: p.lummelKleur,
       spiegelKleur: p.spiegelKleur, spiegelTekst: p.spiegelTekst, spiegelTekstKleur: p.spiegelTekstKleur,
       boeiselVoor: p.boeiselVoor, spiegelBand: p.spiegelBand, spiegelPunt: p.spiegelPunt });
     Object.assign(config.kleuren, p.kleuren);
@@ -419,12 +427,12 @@ function initBekend(ui, { config, base, opslaan, applyAll, melden }) {
  *  romp's paint), its roerkop ('roerkop', in the bakskleur), the steel of the giek and its lummelbeslag ('lummel',
  *  in the bakskleur), its roerkoning and roerhaken ('roerbeslag', the roer's), the
  *  vingerlingen they hang in ('vingerlingen', the romp's), the outside of the spiegel ('spiegel', the romp's) and the
- *  mikhouders, the wantputtingen and the dolpotten ('beslag', galvanised). */
+ *  mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek and the leiogen ('beslag', galvanised). */
 const PLECHT = ['voorplecht', 'hanekam'];
 const ROER = ['roerblad'];
 const ROERBESLAG = ['roerkoning', 'roerhaken'];
 // the giek's own parts in the bakskleur are its two steel bands, not the varnished wood
-const BESLAG = ['mikhouders', 'wantputting_bb', 'wantputting_sb', 'dolpotten_bb', 'dolpotten_sb'];
+const BESLAG = ['mikhouders', 'wantputting_bb', 'wantputting_sb', 'dolpotten_bb', 'dolpotten_sb', 'kikkers_voordek', 'leiogen_bb', 'leiogen_sb'];
 const LUMMEL = ['lummelbeslag', 'mastband_lummel', 'giek', 'wervel'];
 export function collectZoneMaterials(parts) {
   const zones = new Map([...ZONES.map(([zone]) => [zone, []]), ['bakskleur', []], ...MEE.map((zone) => [zone, []])]);
