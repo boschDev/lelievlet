@@ -1,8 +1,10 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { QUIZ } from './quizdata.ts';
 import { regionAt } from './regions.ts';
+import type { Gebied } from './regions.ts';
 import { quizEntries, TYPING } from './config.ts';
+import type { Config, QuizEntry, RealTarget } from './config.ts';
+import type { ModelDeel } from './bootonderdelen/onderdeel.ts';
 
 // Leren › Quiz › Onderdelen: a quiz over the numbered names of the parts drawing of the class (quizdata.js). Four
 // kinds of exercise, all drawn from the same pool:
@@ -28,8 +30,104 @@ import { quizEntries, TYPING } from './config.ts';
 // not touched at all. Two viewers on one page share that key: a change is laid onto what is stored
 // at that moment, so neither writes away what the other one counted.
 
+/** A part as the quiz gets it from main.ts: one of the model, or a gebied (Boeg, Kleed) among them. */
+export type QuizDeel = ModelDeel | Gebied;
+
+/** What the start panel offers (data-kind), and the exercise a question becomes. */
+type Kind = 'aanwijzen' | 'benoemen' | 'typen' | 'kies' | 'gemengd';
+type Oefening = Exclude<Kind, 'gemengd'>;
+/** ROEIEN, or a niveau of Zeilen. */
+type Level = typeof ROEIEN | number;
+type Mood = 'goed' | 'fout' | 'bijna';
+type Verdict = 'goed' | 'onvolledig' | 'fout' | 'leeg';
+
+/** An entry of quizdata.ts, with what only the standard list has. */
+type Vraag = QuizEntry & { ook?: string[]; roeien?: boolean; zeilen?: boolean };
+
+/** An entry of the pool: resolved against the loaded model. */
+interface Entry {
+  nr: number;
+  naam: string;
+  delen: QuizDeel[];
+  niveau: number | null;
+  roeien: boolean;
+  ids: Set<string>;
+  gebied: Gebied | null;
+  groep: string;
+  woorden: Set<string>;
+  staart: string;
+  keys: string[];
+}
+
+/** Every entry as it was resolved, for debug.quiztabellen. */
+interface TableRow {
+  nr: number; naam: string; niveau: number | null; roeien: boolean; eigen: boolean;
+  delen: { id: string; ok: boolean }[]; ook: { id: string; ok: boolean }[]; gevraagd: boolean;
+}
+
+/** All-time totals, for the panel and the logboek. */
+export interface QuizTotaal { goed: number; fout: number; rondes: number; beste: number }
+interface Stats { goed: number; fout: number; laatst: number; mis?: boolean }
+interface Keuze { kind?: Kind; length?: string; level?: Level }
+interface Store { totaal: QuizTotaal; per: Record<number, Stats>; keuze: Keuze }
+
+interface Round {
+  kind: Kind; length: string; fouten: boolean; queue: Entry[]; index: number;
+  goed: number; fout: number; streak: number; best: number; wrong: Entry[]; done: boolean;
+}
+/** kies: a part lit in a colour of its own, with the letter of its chip. */
+interface Lit { entry: Entry; colour: THREE.Color; letter: string }
+interface Question {
+  entry: Entry; type: Oefening; names: Entry[] | null; lit: Lit[] | null;
+  pending: { part: QuizDeel; hit: THREE.Intersection | null | undefined } | null; answered: boolean;
+}
+
+/** What initQuiz needs from main.ts. */
+export interface QuizOptions {
+  parts: QuizDeel[];
+  scene: THREE.Object3D;
+  select(parts: QuizDeel[], hit?: THREE.Intersection | null): void;
+  flyTo(parts: QuizDeel[]): void;
+  setCovered?(px: number): void;
+  openLearn?(kind: string): void;
+  /** A colour per part, over the selection and the hover; an empty list gives them back. */
+  setHighlights(list: [QuizDeel, THREE.Color][]): void;
+  partVisible(part: QuizDeel): boolean;
+  /** panel id -> close it */
+  closePanel: ReadonlyMap<string, () => void>;
+  opslaan?: boolean;
+  ui: ShadowRoot;
+  wrap: HTMLElement;
+  config: Config;
+  signal: AbortSignal;
+  engaged(): boolean;
+  realTarget: RealTarget;
+  onDestroy?(fn: () => void): void;
+  /** Whether the boat is rowed or sculled (modes.state.mode). */
+  rowing?(): boolean;
+  /** The score changed (the logboek shows it). */
+  veranderd?(): void;
+}
+
+/** The round as it stands, for a feedback report (feedback.ts). */
+export interface QuizInfo {
+  soort: Kind; vraag: string; goed: number; fout: number; fouten: boolean; klaar: boolean;
+  onderdeel: { nr: number; naam: string } | undefined; type: Oefening | undefined;
+  opties: string[] | undefined; beantwoord: boolean | undefined;
+}
+
+/** What initQuiz hands back to main.ts. */
+export interface Quiz {
+  panelToggled(open: boolean): void;
+  click(part: QuizDeel | null, hit?: THREE.Intersection | null): boolean;
+  rings(): boolean;
+  active(): boolean;
+  info(): QuizInfo | null;
+  score(): QuizTotaal;
+}
+
 const STORE = 'lelievlet.quiz.v1';
-const LENGTHS = { 10: 10, 20: 20, alles: Infinity };
+const LENGTHS: Record<string, number> = { 10: 10, 20: 20, alles: Infinity };
 const CHOICES = 4;                     // names offered by benoemen, parts lit by kies
 const ENOUGH = 0.8;                    // below this share of the pool in view the panel says so
 const TOP_LEVEL = 3;                   // Zeilen III: everything, and where an entry without a niveau lands
@@ -44,14 +142,15 @@ const PULSE_DEPTH = 0.55;              // how far towards white it goes
 const KIN = 0.5;                       // a rival of the same groep counts as half as far away
 const KIN_SAMPLES = 24;                // vertices sampled per mesh to say where a part stands
 
-const MARKS = { goed: '✓', fout: '✗' };   // 'bijna' - the name was not wrong, only not enough - gets none
+const MARKS: Record<string, string> = { goed: '✓', fout: '✗' };   // 'bijna' - the name was not wrong, only not enough - gets none
 
 const _v = new THREE.Vector3();
 
-const el = (tag, className, text) => Object.assign(document.createElement(tag), { className: className ?? '', textContent: text ?? '' });
-const hex = (value) => `#${value.toString(16).padStart(6, '0')}`;
-const pct = (goed, total) => (total ? Math.round((goed / total) * 100) : 0);
-const shuffle = (list) => {
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string | null, text?: string) =>
+  Object.assign(document.createElement(tag), { className: className ?? '', textContent: text ?? '' });
+const hex = (value: number) => `#${value.toString(16).padStart(6, '0')}`;
+const pct = (goed: number, total: number) => (total ? Math.round((goed / total) * 100) : 0);
+const shuffle = <T>(list: T[]): T[] => {
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [list[i], list[j]] = [list[j], list[i]];
@@ -63,16 +162,16 @@ const shuffle = (list) => {
 // ones whose first word ends the same way - the …lijk, …hoek and …val families of the drawing.
 const WORD = /[a-zà-ÿ]+/gi;
 const NOISE = new Set(['van', 'de', 'het', 'een', 'of', 'met', 'der']);
-const wordsOf = (naam) => (naam.toLowerCase().match(WORD) ?? []).filter((w) => !NOISE.has(w));
-const tailOf = (naam) => (wordsOf(naam)[0] ?? '').slice(-3);
+const wordsOf = (naam: string) => (naam.toLowerCase().match(WORD) ?? []).filter((w) => !NOISE.has(w));
+const tailOf = (naam: string) => (wordsOf(naam)[0] ?? '').slice(-3);
 
 // ---------------------------------------------------------------- judging a typed name
 // Blind to case, to accents and to punctuation; "de"/"het" in front fall away, and so does the
 // qualifier that tells two names of the same family apart - but only while it is not needed.
-const fold = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
+const fold = (text: string) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
   .replace(/[^a-z0-9\- ]+/g, ' ').replace(/\s+/g, ' ').trim();
-const article = (text) => text.replace(/^(?:de|het|een|den) /, '');
-const stem = (text) => text.replace(/(?:en|s)$/, '').replace(/([bdfgklmnprst])\1$/, '$1');   // dollen -> dol
+const article = (text: string) => text.replace(/^(?:de|het|een|den) /, '');
+const stem = (text: string) => text.replace(/(?:en|s)$/, '').replace(/([bdfgklmnprst])\1$/, '$1');   // dollen -> dol
 const TYPOS_PER = 6;                   // letters per typo that is forgiven
 
 /**
@@ -80,7 +179,7 @@ const TYPOS_PER = 6;                   // letters per typo that is forgiven
  * the alternatives it names itself ("Halshoek of -broek"). A head that
  * several entries share is not enough on its own; `owners` below knows which those are.
  */
-function keysOf(naam, other = []) {
+function keysOf(naam: string, other: string[] = []): string[] {
   const full = fold(naam);
   const head = full.split(/ van (?:de|het|den) | van /)[0];
   const qualifier = full.slice(head.length);                      // " van de fok", or nothing
@@ -99,14 +198,14 @@ function keysOf(naam, other = []) {
 }
 
 /** How far a typed name is from a key: the edit distance, or that of the two without a plural. */
-const distance = (typed, key) => Math.min(levenshtein(typed, key), levenshtein(stem(typed), stem(key)));
+const distance = (typed: string, key: string) => Math.min(levenshtein(typed, key), levenshtein(stem(typed), stem(key)));
 
 /** Edit distance where two neighbours the wrong way round cost one, like the typo they are. */
-function levenshtein(a, b) {
-  let back = [];
+function levenshtein(a: string, b: string): number {
+  let back: number[] = [];
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
-    const row = new Array(b.length + 1);
+    const row = new Array<number>(b.length + 1);
     row[0] = i;
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
@@ -122,7 +221,7 @@ function levenshtein(a, b) {
 }
 
 /** Near enough: the same word up to a plural, or one typo per six letters. */
-function close(typed, key) {
+function close(typed: string, key: string): boolean {
   if (typed === key) return true;
   if (stem(typed) === stem(key)) return true;
   const room = Math.floor(key.length / TYPOS_PER);
@@ -131,22 +230,23 @@ function close(typed, key) {
 
 export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
                            setHighlights, partVisible, closePanel, opslaan = true,
-                           ui, wrap, config, signal, engaged, realTarget, onDestroy, rowing = () => false, veranderd = () => {} }) {
-  const $ = (id) => ui.getElementById(id);
-  const all = (selector) => [...ui.querySelectorAll(selector)];
+                           ui, wrap, config, signal, engaged, realTarget, onDestroy, rowing = () => false, veranderd = () => {} }: QuizOptions): Quiz {
+  // the ids are the viewer's own template's: there, and of the kind asked for
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => ui.getElementById(id) as T;
+  const all = (selector: string) => [...ui.querySelectorAll<HTMLButtonElement>(selector)];
   const touch = window.matchMedia('(pointer: coarse)');     // a finger: tik, and room for the keyboard
 
   // ---------------------------------------------------------------- the pool
   // What this page asks about: the standard list less `quiz.weg`, plus `quiz.erbij`.
-  const asked = quizEntries(config, QUIZ);
+  const asked: Vraag[] = quizEntries(config, QUIZ);
   const byId = new Map(parts.map((p) => [p.extras.id, p]));
-  const pool = [];
-  const dropped = [];
-  const table = [];              // every entry as it was resolved, for the debug tables
+  const pool: Entry[] = [];
+  const dropped: string[] = [];
+  const table: TableRow[] = [];              // every entry as it was resolved, for the debug tables
   for (const q of asked) {
     const { naam } = q;
-    const delen = q.delen.map((id) => byId.get(id)).filter(Boolean);
-    const ook = (q.ook ?? []).map((id) => byId.get(id)).filter(Boolean);
+    const delen = q.delen.map((id) => byId.get(id)).filter((p) => p !== undefined);
+    const ook = (q.ook ?? []).map((id) => byId.get(id)).filter((p) => p !== undefined);
     const niveau = q.zeilen === false ? null : q.niveau ?? TOP_LEVEL;   // null: not asked in Zeilen
     table.push({ nr: q.nr, naam, niveau, roeien: Boolean(q.roeien), eigen: Boolean(q.eigen),
                  delen: q.delen.map((id) => ({ id, ok: byId.has(id) })),
@@ -156,7 +256,8 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     pool.push({
       nr: q.nr, naam, delen, niveau, roeien: Boolean(q.roeien),
       ids: new Set([...delen, ...ook].map((p) => p.extras.id)),   // a click on any of these is right
-      gebied: delen.find((p) => p.extras.gebied) ?? null,         // Boeg, Kleed: an area, not an object
+      // only a Gebied has extras.gebied
+      gebied: (delen.find((p) => (p.extras as { gebied?: true }).gebied) as Gebied | undefined) ?? null,   // Boeg, Kleed: an area, not an object
       groep: delen[0].extras.groep, woorden: new Set(wordsOf(naam)), staart: tailOf(naam),
       keys: keysOf(naam, [...new Set(delen.map((p) => p.extras.naam))].length === 1 && delen[0].extras.naam !== naam ? [delen[0].extras.naam] : []),
     });
@@ -166,7 +267,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   // which entries answer to a given typed name: a head that only one entry has is enough by itself
-  const owners = new Map();
+  const owners = new Map<string, Entry[]>();
   for (const entry of pool) {
     for (const key of entry.keys) owners.set(key, [...(owners.get(key) ?? []), entry]);
   }
@@ -176,13 +277,13 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   // { v: 1, totaal: { goed, fout, rondes, beste }, per: { <nr>: { goed, fout, laatst } },
   //   keuze: { kind, length, level } } - the last choices of the start panel
   const EMPTY = { goed: 0, fout: 0, rondes: 0, beste: 0 };
-  const fresh = () => ({ totaal: { ...EMPTY }, per: {}, keuze: {} });
+  const fresh = (): Store => ({ totaal: { ...EMPTY }, per: {}, keuze: {} });
 
   /** What is stored now, or null: no storage, storage switched off, or something else under the key. */
-  function readStore() {
+  function readStore(): Store | null {
     if (!opslaan) return null;
     try {
-      const raw = JSON.parse(localStorage.getItem(STORE) ?? 'null');
+      const raw: Partial<Store> | null = JSON.parse(localStorage.getItem(STORE) ?? 'null');
       return raw?.totaal ? { totaal: { ...EMPTY, ...raw.totaal }, per: raw.per ?? {}, keuze: raw.keuze ?? {} } : null;
     } catch { return null; }                       // no storage, or it holds something else: start from nothing
   }
@@ -193,7 +294,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
    * on the page may have added to since this one read it - and written back, so only this change is
    * added. What was read becomes this viewer's own copy. Without storage it is made in memory.
    */
-  function change(fn) {
+  function change(fn: (s: Store) => void) {
     const now = readStore() ?? store;
     fn(now);
     store = now;
@@ -204,25 +305,25 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     change((s) => { s.totaal = { ...EMPTY }; s.per = {}; });
   }
 
-  const statsOf = (entry) => store.per[entry.nr] ?? { goed: 0, fout: 0, laatst: 0 };
+  const statsOf = (entry: Entry): Stats => store.per[entry.nr] ?? { goed: 0, fout: 0, laatst: 0 };
 
   // ---------------------------------------------------------------- picking the questions
   /** What can be asked right now: in the model, up to the niveau, there in the mode the boat is in. */
-  const there = (entry) => entry.delen.some(partVisible);
-  const supports = (entry, kind) => (kind === 'kies' ? !entry.gebied : true);
-  const inLevel = (e) => (level === ROEIEN ? e.roeien : e.niveau !== null && e.niveau <= level);
-  const eligible = (kind) => pool.filter((e) => inLevel(e) && supports(e, kind) && there(e));
+  const there = (entry: Entry) => entry.delen.some(partVisible);
+  const supports = (entry: Entry, kind: Kind) => (kind === 'kies' ? !entry.gebied : true);
+  const inLevel = (e: Entry) => (level === ROEIEN ? e.roeien : e.niveau !== null && e.niveau <= level);
+  const eligible = (kind: Kind) => pool.filter((e) => inLevel(e) && supports(e, kind) && there(e));
 
   /** Spaced repetition, light: what went wrong comes back sooner, what goes well comes back later. */
-  function weight(entry) {
+  function weight(entry: Entry) {
     const s = statsOf(entry);
     return (1 + s.fout * 2) / (1 + s.goed);
   }
 
   /** `count` entries without a repeat, until the pool runs out and starts over. */
-  function draw(list, count) {
-    const out = [];
-    let rest = [];
+  function draw(list: Entry[], count: number) {
+    const out: Entry[] = [];
+    let rest: Entry[] = [];
     while (out.length < count) {
       if (!rest.length) rest = [...list];
       if (!rest.length) break;
@@ -241,16 +342,16 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     .sort((a, b) => (statsOf(b).fout - statsOf(b).goed) - (statsOf(a).fout - statsOf(a).goed));
 
   /** Which exercise a question becomes; Gemengd draws one the entry allows. */
-  function typeFor(entry, kind) {
+  function typeFor(entry: Entry, kind: Kind): Oefening {
     if (kind !== 'gemengd') return kind;
-    const options = ['aanwijzen', 'benoemen', 'typen'];
+    const options: Oefening[] = ['aanwijzen', 'benoemen', 'typen'];
     if (!entry.gebied && eligible('kies').length > CHOICES - 1) options.push('kies');
     return options[Math.floor(Math.random() * options.length)];
   }
 
   /** The names to choose from: the right one and three that could be mistaken for it, shuffled. */
-  function namesFor(entry) {
-    const rank = (e) => (e.staart === entry.staart ? 3 : 0)
+  function namesFor(entry: Entry) {
+    const rank = (e: Entry) => (e.staart === entry.staart ? 3 : 0)
       + ([...e.woorden].some((w) => entry.woorden.has(w)) ? 2 : 0)
       + (e.groep === entry.groep ? 1 : 0) + Math.random();
     const own = eligible('gemengd').filter((e) => e !== entry);
@@ -265,7 +366,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   // walking the boat. Where a part stands is averaged over a handful of its vertices: a cached
   // geometry box would be stale on a sail, and computing one would break the picking of that same
   // geometry, while walking every vertex of every candidate costs a third of a second.
-  function centreOf(entry) {
+  function centreOf(entry: Entry) {
     const sum = new THREE.Vector3();
     let n = 0;
     for (const p of entry.delen) {
@@ -283,7 +384,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     return n ? sum.divideScalar(n) : null;
   }
 
-  function partsFor(entry) {
+  function partsFor(entry: Entry) {
     scene.updateMatrixWorld();
     const centre = centreOf(entry);
     if (!centre) return null;
@@ -299,7 +400,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
    * A typed name, judged: 'goed', 'onvolledig' when only the head was given and more than one
    * entry answers to it, or 'fout'. The full name always wins over a shared head.
    */
-  function judge(entry, typed) {
+  function judge(entry: Entry, typed: string): Verdict {
     const answer = article(fold(typed));
     if (!answer) return 'leeg';
     // a plain name given with what it belongs to: "Achterlijk van het grootzeil" for Achterlijk
@@ -325,9 +426,9 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   // ---------------------------------------------------------------- the start panel
   // One list of exercises to pick from, two small segmented choices under it and one Start. What
   // was chosen last is what the panel opens on.
-  const quizToggle = $('learn-toggle');                     // Leren, in the column (main.js, initLearn)
-  const startButton = $('quiz-start');
-  const wrongButton = $('quiz-wrong');
+  const quizToggle = $<HTMLButtonElement>('learn-toggle');                     // Leren, in the column (main.js, initLearn)
+  const startButton = $<HTMLButtonElement>('quiz-start');
+  const wrongButton = $<HTMLButtonElement>('quiz-wrong');
   const totalLine = $('quiz-total');
   const warning = $('quiz-warning');
   const kindButtons = all('#quiz-kind button');
@@ -336,19 +437,20 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   const disciplineButtons = all('#quiz-discipline button');
   const clearButton = $('quiz-clear');
   const clearConfirm = $('quiz-clear-confirm');
-  const known = (buttons, attr, value) => buttons.some((b) => b.dataset[attr] === String(value));
-  let kind = known(kindButtons, 'kind', store.keuze.kind) ? store.keuze.kind : 'aanwijzen';
-  let length = known(lengthButtons, 'length', store.keuze.length) ? store.keuze.length : '10';
+  const known = (buttons: HTMLButtonElement[], attr: string, value: unknown) => buttons.some((b) => b.dataset[attr] === String(value));
+  // known: what was stored is there, so not undefined
+  let kind: Kind = known(kindButtons, 'kind', store.keuze.kind) ? store.keuze.kind! : 'aanwijzen';
+  let length: string = known(lengthButtons, 'length', store.keuze.length) ? store.keuze.length! : '10';
   // the level: ROEIEN, or the niveau of Zeilen; the panel opens on what was chosen last
-  const asLevel = (value) => (value === ROEIEN ? ROEIEN : [1, 2, 3].includes(Number(value)) ? Number(value) : null);
-  let level = asLevel(store.keuze.level) ?? asLevel(config?.quiz?.niveau) ?? TOP_LEVEL;
+  const asLevel = (value: unknown): Level | null => (value === ROEIEN ? ROEIEN : [1, 2, 3].includes(Number(value)) ? Number(value) : null);
+  let level: Level = asLevel(store.keuze.level) ?? asLevel(config?.quiz?.niveau) ?? TOP_LEVEL;
   let zeilLevel = level === ROEIEN ? TOP_LEVEL : level;      // what Zeilen comes back to
   let rowedFor = false;                                      // Roeien set because she was rowing, not by hand
-  let panelPoll = null;
-  onDestroy?.(() => clearInterval(panelPoll));
+  let panelPoll: ReturnType<typeof setInterval> | null = null;
+  onDestroy?.(() => clearInterval(panelPoll!));   // null clears nothing
 
   $('quiz-discipline-row').hidden = !levelled;
-  const press = (buttons, value, attr) => {
+  const press = (buttons: HTMLButtonElement[], value: unknown, attr: string) => {
     for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset[attr] === String(value)));
   };
   const pressLevel = () => {
@@ -361,8 +463,8 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     change((s) => { s.keuze = { kind, length, level: rowedFor ? zeilLevel : level }; });
     refreshPanel();
   };
-  for (const b of kindButtons) b.addEventListener('click', () => { kind = b.dataset.kind; choose(); });
-  for (const b of lengthButtons) b.addEventListener('click', () => { length = b.dataset.length; choose(); });
+  for (const b of kindButtons) b.addEventListener('click', () => { kind = b.dataset.kind as Kind; choose(); });   // data-kind is one of Kind
+  for (const b of lengthButtons) b.addEventListener('click', () => { length = b.dataset.length!; choose(); });
   for (const b of levelButtons) b.addEventListener('click', () => { level = zeilLevel = Number(b.dataset.level); choose(); });
   for (const b of disciplineButtons) {
     b.addEventListener('click', () => { level = b.dataset.discipline === ROEIEN ? ROEIEN : zeilLevel; rowedFor = false; choose(); });
@@ -372,7 +474,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   wrongButton.addEventListener('click', () => startRound(kind, length, true));
 
   // clearing the score asks first, inline: no window.confirm
-  const askConfirm = (on) => { clearConfirm.hidden = !on; clearButton.hidden = on || !(store.totaal.goed + store.totaal.fout); };
+  const askConfirm = (on: boolean) => { clearConfirm.hidden = !on; clearButton.hidden = on || !(store.totaal.goed + store.totaal.fout); };
   clearButton.addEventListener('click', () => askConfirm(true));
   $('quiz-clear-no').addEventListener('click', () => askConfirm(false));
   $('quiz-clear-yes').addEventListener('click', () => {
@@ -409,7 +511,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   // an `erbij` landed where it was meant to.
   const debugPanel = $('quiz-debug');
   const debugBody = $('quiz-debug-body');
-  const showDebug = (on) => { debugPanel.hidden = !on; if (on) buildTables(); };
+  const showDebug = (on: boolean) => { debugPanel.hidden = !on; if (on) buildTables(); };
 
   if (config?.debug?.quiztabellen) {
     $('quiz-tables').hidden = false;
@@ -421,7 +523,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   /** One table, from a header row and the rows under it; a cell may be [text, className]. */
-  function makeTable(headers, body) {
+  function makeTable(headers: string[], body: (string | [string, string | null])[][]) {
     const node = document.createElement('table');
     const head = document.createElement('tr');
     for (const text of headers) head.append(el('th', null, text));
@@ -440,7 +542,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   /** Ids as one cell, each one marked when the model has no such part. */
-  const idCell = (list) => {
+  const idCell = (list: { id: string; ok: boolean }[]) => {
     const span = el('span', null);
     list.forEach(({ id, ok }, i) => {
       if (i) span.append(document.createTextNode(' '));
@@ -490,8 +592,8 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
    * sees the panel gone from view and stops itself, and a question to wipe the score goes with it.
    */
   const quizPanel = $('quiz');
-  function panelToggled(open) {
-    clearInterval(panelPoll);
+  function panelToggled(open: boolean) {
+    clearInterval(panelPoll!);
     panelPoll = null;
     askConfirm(false);
     if (!open) return;
@@ -541,7 +643,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   const cardWatch = new ResizeObserver(coverage);
   cardWatch.observe(card); cardWatch.observe(wrap);
   onDestroy?.(() => cardWatch.disconnect());
-  stop.addEventListener('click', () => (round.done || !(round.goed + round.fout) ? closeRound() : showResults()));
+  stop.addEventListener('click', () => (round!.done || !(round!.goed + round!.fout) ? closeRound() : showResults()));
 
   // the text field keeps every key to itself: no arrows to the camera, no 1-4 to the answers
   typed.addEventListener('keydown', (e) => {
@@ -554,9 +656,9 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   typed.addEventListener('focus', () => { card.classList.toggle('typing', touch.matches); coverage(); });
   typed.addEventListener('blur', () => { card.classList.remove('typing'); coverage(); });
 
-  let onPrimary = null;
-  let onSecondary = null;
-  let onExtra = null;
+  let onPrimary: (() => void) | null = null;
+  let onSecondary: (() => void) | null = null;
+  let onExtra: (() => void) | null = null;
   primary.addEventListener('click', () => onPrimary?.());
   secondary.addEventListener('click', () => onSecondary?.());
   extra.addEventListener('click', () => onExtra?.());
@@ -565,7 +667,8 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
    * The buttons under the card; a label of null leaves that button out, and a main button without
    * a function stands there greyed out - so the card does not grow the moment it becomes of use.
    */
-  function setActions(primaryText, primaryFn, secondaryText, secondaryFn, extraText = null, extraFn = null) {
+  function setActions(primaryText: string | null, primaryFn: (() => void) | null, secondaryText: string | null, secondaryFn: (() => void) | null,
+                      extraText: string | null = null, extraFn: (() => void) | null = null) {
     primary.hidden = !primaryText; primary.textContent = primaryText ?? ''; onPrimary = primaryFn;
     primary.disabled = !primaryFn;
     secondary.hidden = !secondaryText; secondary.textContent = secondaryText ?? ''; onSecondary = secondaryFn;
@@ -573,7 +676,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     actions.hidden = !primaryText && !secondaryText && !extraText;
   }
 
-  function setFeedback(text, mood = null) {
+  function setFeedback(text: string | null, mood: Mood | null = null) {
     feedback.replaceChildren();
     feedback.className = `feedback${mood ? ` ${mood}` : ''}`;
     for (const m of ['goed', 'fout', 'bijna']) card.classList.toggle(m, mood === m);   // the whole card shows it
@@ -581,26 +684,26 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     feedback.hidden = !text && !question;
     feedback.classList.toggle('leeg', !text);
     if (!text) { feedback.textContent = '\u00a0'; return; }
-    if (MARKS[mood]) feedback.append(el('span', 'mark', MARKS[mood]));
+    if (MARKS[mood!]) feedback.append(el('span', 'mark', MARKS[mood!]));   // null: MARKS has no such key
     feedback.append(el('span', 'tekst', text));
   }
 
   function refreshHead() {
-    const done = round.index + (question?.answered ? 1 : 0);
-    count.textContent = `${Math.min(round.index + 1, round.queue.length)} / ${round.queue.length}`;
-    barFill.style.width = `${(done / round.queue.length) * 100}%`;
-    score.textContent = round.streak >= 2 ? `reeks ${round.streak}` : '';   // a streak is worth mentioning from two on
+    const done = round!.index + (question?.answered ? 1 : 0);
+    count.textContent = `${Math.min(round!.index + 1, round!.queue.length)} / ${round!.queue.length}`;
+    barFill.style.width = `${(done / round!.queue.length) * 100}%`;
+    score.textContent = round!.streak >= 2 ? `reeks ${round!.streak}` : '';   // a streak is worth mentioning from two on
   }
 
   // ---------------------------------------------------------------- quiz mode
-  let round = null;        // { kind, length, fouten, queue, index, goed, fout, streak, best, wrong, done }
-  let question = null;     // { entry, type, names, lit, pending, answered }
+  let round: Round | null = null;        // { kind, length, fouten, queue, index, goed, fout, streak, best, wrong, done }
+  let question: Question | null = null;     // { entry, type, names, lit, pending, answered }
 
   /**
    * For as long as the round runs there is only the boat and the card: every panel is closed and
    * .lv.quiz-on takes the buttons away, which also keeps out of reach whatever would name a part.
    */
-  function setQuizOn(on) {
+  function setQuizOn(on: boolean) {
     wrap.classList.toggle('quiz-on', on);
     card.hidden = !on;
     coverage();
@@ -611,11 +714,11 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   // ---------------------------------------------------------------- kies: four parts at once
   // main.js paints the selection and the hover; a colour per part is handed to it through
   // setHighlights, so nothing here writes to a material behind its back.
-  let pulsing = null;      // { entry, colour, since }: the part of the chip under the pointer breathes
+  let pulsing: (Lit & { since: number }) | null = null;      // { entry, colour, since }: the part of the chip under the pointer breathes
   let pulseFrame = 0;
 
   const litColours = () => (question?.lit ?? [])
-    .flatMap(({ entry, colour }) => entry.delen.map((p) => [p, colour]));
+    .flatMap(({ entry, colour }) => entry.delen.map((p): [QuizDeel, THREE.Color] => [p, colour]));
 
   function showLit() {
     setHighlights(litColours());
@@ -627,7 +730,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     pulsing = null;
   }
 
-  function pulse(lit) {
+  function pulse(lit: Lit) {
     if (!lit || question?.answered) return;
     stopPulse();
     pulsing = { ...lit, since: performance.now() };
@@ -637,7 +740,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
       const t = (performance.now() - pulsing.since) / 1000;
       const k = (1 - Math.cos(t * PULSE_HZ * 2 * Math.PI)) / 2 * PULSE_DEPTH;
       const glow = pulsing.colour.clone().lerp(white, k);
-      setHighlights(litColours().map(([p, c]) => [p, pulsing.entry.delen.includes(p) ? glow : c]));
+      setHighlights(litColours().map(([p, c]): [QuizDeel, THREE.Color] => [p, pulsing!.entry.delen.includes(p) ? glow : c]));
       pulseFrame = requestAnimationFrame(step);
     };
     step();
@@ -650,7 +753,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   // ---------------------------------------------------------------- a round
-  function startRound(kind_, length_, fouten) {
+  function startRound(kind_: Kind, length_: string, fouten: boolean) {
     const ready = fouten ? wrongPool() : eligible(kind_);
     if (!ready.length) return;
     const wanted = Math.min(LENGTHS[length_], ready.length);
@@ -677,21 +780,21 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
     setFeedback(null);
   }
 
-  const setHint = (text) => { hint.textContent = text; hint.hidden = !text; };
+  const setHint = (text: string) => { hint.textContent = text; hint.hidden = !text; };
 
   function ask() {
     // what is no longer there (the sails made up after the round began) is not asked about
-    while (round.index < round.queue.length && !there(round.queue[round.index])) round.queue.splice(round.index, 1);
-    if (round.index >= round.queue.length) { showResults(); return; }
-    const entry = round.queue[round.index];
-    let type = typeFor(entry, round.kind);
+    while (round!.index < round!.queue.length && !there(round!.queue[round!.index])) round!.queue.splice(round!.index, 1);
+    if (round!.index >= round!.queue.length) { showResults(); return; }
+    const entry = round!.queue[round!.index];
+    let type = typeFor(entry, round!.kind);
     let lit = type === 'kies' ? partsFor(entry) : null;
     if (type === 'kies' && !lit) type = 'benoemen';           // not enough parts beside it to choose from
-    question = { entry, type, names: null, lit: null, pending: null, answered: false };
+    question = { entry, type, names: null, lit: null, pending: null, answered: false } as Question;   // not narrowed to names: null, lit: null
     clearQuestion();
     refreshHead();
     // the main button is there from the start, greyed out until there is something to do with it
-    setActions({ aanwijzen: 'Bevestigen', typen: 'Nakijken' }[type] ?? 'Volgende', null, null, null);
+    setActions(({ aanwijzen: 'Bevestigen', typen: 'Nakijken' } as Partial<Record<Oefening, string>>)[type] ?? 'Volgende', null, null, null);
 
     if (type === 'aanwijzen') {
       vraag.textContent = `Wijs aan: ${entry.naam}`;
@@ -699,12 +802,12 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
       return;
     }
     if (type === 'kies') {
-      question.lit = lit.map((e, i) => ({ entry: e, colour: new THREE.Color(KIES[i].hex), letter: KIES[i].letter }));
+      question.lit = lit!.map((e, i) => ({ entry: e, colour: new THREE.Color(KIES[i].hex), letter: KIES[i].letter }));
       vraag.textContent = `Welke kleur hoort bij: ${entry.naam}?`;
       setHint('Vier onderdelen lichten op: kies de goede kleur.');
       buildChips();
       showLit();
-      flyTo(lit.flatMap((e) => e.delen));
+      flyTo(lit!.flatMap((e) => e.delen));
       return;
     }
     // benoemen and typen both show the part itself and ask for its name
@@ -725,7 +828,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
 
   function buildAnswers() {
     answers.className = 'answers';
-    answers.replaceChildren(...question.names.map((e, i) => {
+    answers.replaceChildren(...question!.names!.map((e, i) => {
       const button = Object.assign(el('button', 'answer'), { type: 'button' });
       button.append(el('span', 'key', String(i + 1)), el('span', 'naam', e.naam));
       button.addEventListener('click', () => answer(i));
@@ -736,7 +839,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
 
   function buildChips() {
     answers.className = 'answers chips';
-    answers.replaceChildren(...question.lit.map((lit, i) => {
+    answers.replaceChildren(...question!.lit!.map((lit, i) => {
       const button = Object.assign(el('button', 'chip'), { type: 'button' });
       button.style.setProperty('--chip', hex(KIES[i].hex));
       button.append(el('span', 'letter', lit.letter));
@@ -750,13 +853,13 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   /** Benoemen and kies: a choice is made and counts at once. */
-  function answer(i) {
+  function answer(i: number) {
     if (!question || question.answered) return;
     const { entry, type } = question;
-    const list = type === 'kies' ? question.lit.map((l) => l.entry) : question.names;
+    const list = type === 'kies' ? question.lit!.map((l) => l.entry) : question.names;
     if (!list) return;
     const right = list[i] === entry;
-    for (const [j, button] of [...answers.children].entries()) {
+    for (const [j, button] of [...answers.children as HTMLCollectionOf<HTMLButtonElement>].entries()) {
       button.disabled = true;
       if (list[j] === entry) button.classList.add('goed');
       else if (j === i) button.classList.add('fout');
@@ -788,14 +891,14 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
 
   // ---------------------------------------------------------------- aanwijzen
   /** A click on the model while a round runs; true when the quiz took it (so modes.click stays out). */
-  function click(part, hit) {
+  function click(part: QuizDeel | null, hit?: THREE.Intersection | null) {
     if (!round || round.done) return false;
     if (!question || question.type !== 'aanwijzen' || question.answered) return true;
     if (!part) { cancelPick(); return true; }
     question.pending = { part, hit };
     // a kleed: the cloth tapped lights up, not the whole zeil (regions.js) - any kleed is right, so it gives nothing away
     question.entry.gebied?.verberg?.();
-    if (question.entry.gebied?.toon?.(hit)) select([]);
+    if (question.entry.gebied?.toon?.(hit!)) select([]);
     else select([part], hit);                      // the normal selection highlight, and no name
     setFeedback(null);
     setActions('Bevestigen', confirmPick, 'Annuleren', cancelPick);
@@ -811,25 +914,25 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   function confirmPick() {
-    const { part, hit } = question.pending ?? {};
+    const { part, hit } = question!.pending ?? {};
     if (!part) return;
-    const { entry } = question;
+    const { entry } = question!;
     // a gebied is right when the click landed on one of the parts it lies on AND inside the area - for a kleed any
     // cloth of the grootzeil (raak), for the boeg its own triangles
     const right = entry.gebied ? (entry.gebied.raak ? entry.gebied.raak(hit) > 0 : regionAt(entry.gebied, hit)) : entry.ids.has(part.extras.id);
-    question.pending = null;
+    question!.pending = null;
     entry.gebied?.verberg?.();
     if (!right) { select(entry.delen); flyTo(entry.delen); }
     settle(right, right ? 'Goed!' : `Fout. Dit is: ${part.extras.naam}`);
   }
 
   // ---------------------------------------------------------------- the answer is in
-  function settle(right, text) {
-    question.answered = true;
-    round[right ? 'goed' : 'fout']++;
-    round.streak = right ? round.streak + 1 : 0;
-    round.best = Math.max(round.best, round.streak);
-    const { nr } = question.entry; const { best } = round;
+  function settle(right: boolean, text: string) {
+    question!.answered = true;
+    round![right ? 'goed' : 'fout']++;
+    round!.streak = right ? round!.streak + 1 : 0;
+    round!.best = Math.max(round!.best, round!.streak);
+    const { nr } = question!.entry; const { best } = round!;
     change((s) => {
       const stats = s.per[nr] ?? (s.per[nr] = { goed: 0, fout: 0, laatst: 0 });
       stats[right ? 'goed' : 'fout']++;
@@ -838,7 +941,7 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
       s.totaal[right ? 'goed' : 'fout']++;
       s.totaal.beste = Math.max(s.totaal.beste, best);
     });
-    if (!right) round.wrong.push(question.entry);
+    if (!right) round!.wrong.push(question!.entry);
     refreshHead();
     setFeedback(text, right ? 'goed' : 'fout');
     setActions('Volgende', next, null, null);
@@ -846,32 +949,32 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
   }
 
   function next() {
-    round.index++;
-    if (round.index >= round.queue.length) showResults();
+    round!.index++;
+    if (round!.index >= round!.queue.length) showResults();
     else ask();
   }
 
   // ---------------------------------------------------------------- the score of the round
   function showResults() {
-    round.done = true;
+    round!.done = true;
     question = null;
     clearQuestion();
     change((s) => { s.totaal.rondes++; });
-    const total = round.goed + round.fout;
+    const total = round!.goed + round!.fout;
     card.classList.add('results');
     count.textContent = 'Klaar';
     barFill.style.width = '100%';
     score.textContent = '';
     big.hidden = false;
-    big.textContent = `${pct(round.goed, total)}%`;
-    vraag.textContent = `${round.goed} van de ${total} goed`;
-    setHint(round.best >= 2 ? `Beste reeks: ${round.best} goed op rij` : '');
-    const namen = [...new Set(round.wrong.map((e) => e.naam))];
+    big.textContent = `${pct(round!.goed, total)}%`;
+    vraag.textContent = `${round!.goed} van de ${total} goed`;
+    setHint(round!.best >= 2 ? `Beste reeks: ${round!.best} goed op rij` : '');
+    const namen = [...new Set(round!.wrong.map((e) => e.naam))];
     setFeedback(namen.length ? `Nog eens oefenen: ${namen.join(', ')}` : 'Alles goed!', namen.length ? null : 'goed');
     const again = wrongPool();
-    setActions('Nog een ronde', () => startRound(round.kind, round.length, round.fouten), 'Andere oefening', backToPanel,
+    setActions('Nog een ronde', () => startRound(round!.kind, round!.length, round!.fouten), 'Andere oefening', backToPanel,
       again.length ? `Oefen je fouten (${again.length})` : null,
-      again.length ? () => startRound(round.kind, round.length, true) : null);
+      again.length ? () => startRound(round!.kind, round!.length, true) : null);
     primary.focus();
   }
 
@@ -900,11 +1003,11 @@ export function initQuiz({ parts, scene, select, flyTo, setCovered, openLearn,
       const letter = KIES.findIndex((k) => k.letter === e.key.toUpperCase());
       const index = e.key >= '1' && e.key <= String(CHOICES) ? Number(e.key) - 1
         : (question.type === 'kies' && letter >= 0 ? letter : -1);
-      const button = index >= 0 ? answers.children[index] : null;
+      const button = index >= 0 ? (answers.children[index] as HTMLButtonElement | undefined) : null;
       if (button) { button.click(); e.preventDefault(); return; }
     }
     if (e.key === 'Escape' && question?.pending) { cancelPick(); e.preventDefault(); }
-    if (e.key === 'Enter' && from.tagName !== 'BUTTON' && !primary.hidden) { primary.click(); e.preventDefault(); }
+    if (e.key === 'Enter' && (from as Partial<Element>).tagName !== 'BUTTON' && !primary.hidden) { primary.click(); e.preventDefault(); }
   }, { signal });
 
   /**
