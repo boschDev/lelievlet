@@ -1,4 +1,3 @@
-// @ts-nocheck
 // A configuration in an address, after the #: its JSON deflated and written in base64url behind a
 // version mark (`v1.`), about half as long as the JSON written out and without its %22 and %7B. The
 // install link carries the boat this way to the app page, whose installed app starts with it. Plain
@@ -7,19 +6,19 @@
 
 const MARK = 'v1.';
 
-const toBase64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const fromBase64url = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
-const through = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+const toBase64url = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const fromBase64url = (text: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const through = async (bytes: Uint8Array<ArrayBuffer>, stream: CompressionStream | DecompressionStream): Promise<Uint8Array<ArrayBuffer>> => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
 
 /** The configuration as the text to put after the #. */
-export async function packConfig(config) {
+export async function packConfig(config: unknown): Promise<string> {
   const json = JSON.stringify(config);
   if (typeof CompressionStream === 'undefined') return encodeURIComponent(json);
   return MARK + toBase64url(await through(new TextEncoder().encode(json), new CompressionStream('deflate-raw')));
 }
 
 /** The configuration from the text after the # (with or without it): an object, or null. */
-export async function unpackConfig(hash) {
+export async function unpackConfig(hash: string): Promise<Record<string, unknown> | null> {
   const raw = hash.replace(/^#/, '');
   if (!raw) return null;
   try {

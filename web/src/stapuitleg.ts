@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Waarom per stap: what a step of a handeling is for, in one line, shown in the card of a run in
 // place of the doel once it has begun (handelingen.js). Keyed on the name of the procedure and the
 // label of the step as modes.js has them; a step that needs no explaining has none. Drawn up after
@@ -344,4 +343,5 @@ export const WAAROM = {
 };
 
 /** The line for this step of this procedure, or null. */
-export const waaromVan = (procedure, label) => WAAROM[procedure]?.[label] ?? null;
+export const waaromVan = (procedure: string, label: string): string | null =>
+  (WAAROM as Record<string, Record<string, string> | undefined>)[procedure]?.[label] ?? null;

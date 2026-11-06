@@ -1,4 +1,3 @@
-// @ts-nocheck
 import css from './style.css?inline';
 import { TEMPLATE } from './template.ts';
 import { resolveConfig, debugOn } from './config.ts';
@@ -12,8 +11,23 @@ export { packConfig, unpackConfig };   // a configuration after the # of an addr
 // stylesheet cannot reach in and the viewer's cannot reach out. Nothing runs before create() does,
 // and two viewers on one page know nothing of each other.
 
+/** What create() hands the page. */
+export interface Handle {
+  ready: Promise<unknown>;
+  destroy(): void;
+  config: ReturnType<typeof resolveConfig>;
+  fullscreen(on?: boolean): Promise<void>;
+  get(): unknown;
+  set(toestand?: object, options?: { direct?: boolean }): void;
+  debugHandle?: unknown;
+}
+
+declare global {
+  interface Window { vlet?: unknown }
+}
+
 let devHandle = false;      // window.vlet goes to the first viewer only, and only in the dev server
-const live = new WeakMap();  // element -> the viewer running in it: a second create() there replaces it
+const live = new WeakMap<Element, { destroy(): void }>();  // element -> the viewer running in it: a second create() there replaces it
 
 /**
  * create(element, config) -> { ready, destroy, config, fullscreen, get, set }
@@ -28,7 +42,7 @@ const live = new WeakMap();  // element -> the viewer running in it: a second cr
  *               the user had done it; `direct: true` jumps. Called before `ready`, it is applied
  *               together with the configuration's own toestand, at once.
  */
-export function create(element, config = {}) {
+export function create(element: Element, config: object = {}): Handle {
   if (!(element instanceof Element)) {
     throw new TypeError('[lelievlet] create(element, config): het eerste argument is geen element');
   }
@@ -45,7 +59,7 @@ export function create(element, config = {}) {
   ui.append(style, markup.content);
 
   const viewer = mount(ui, element, resolved);
-  const handle = { ready: viewer.ready, destroy: viewer.destroy, config: resolved, fullscreen: viewer.fullscreen,
+  const handle: Handle = { ready: viewer.ready, destroy: viewer.destroy, config: resolved, fullscreen: viewer.fullscreen,
                    get: viewer.get, set: viewer.set };
   live.set(element, viewer);
   if (debugOn(resolved)) handle.debugHandle = viewer.debug;

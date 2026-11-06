@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Other names a part goes by in the lesson material, with the sources that use them (keys as in
 // reference/parts/SOURCES.md and CWO_NIVEAUS.md). Only names the sources give; the name the viewer and
 // the quiz use is the part's own. docs/onderdelen.md lists them, and the Onderdelen search finds a part
@@ -38,6 +37,6 @@ export const ANDERE_NAMEN = {
 };
 
 /** The other names of a part on their own, for searching: no sources, no explanations. */
-export const zoeknamen = (id) => (ANDERE_NAMEN[id] ?? '')
+export const zoeknamen = (id: string): string[] => ((ANDERE_NAMEN as Record<string, string>)[id] ?? '')
   .replace(/\[[^\]]*\]|\([^)]*\)/g, '')
   .split(/[,;≡]/).map((n) => n.trim()).filter(Boolean);

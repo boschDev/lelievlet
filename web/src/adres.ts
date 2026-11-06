@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The address of the page as a way in: what is open in the viewer - a lesson on its onderwerp, a quiz, a manoeuvre,
 // a page or a card of Zoeken, a part - stands after the ? and opens there again. Written only where the viewer has
 // the page to itself (config `adres`: the app page), with replaceState: no step back in the history for every page
@@ -17,18 +16,18 @@
 export const SLEUTELS = ['leren', 'quiz', 'manoeuvre', 'zoeken', 'onderdeel', 'over', 'updates'];
 
 /** What the address asks for: the first of `keys` (in their order) it has, as [key, value], or null. */
-export function lees(keys, search = location.search) {
+export function lees(keys: readonly string[], search: string = location.search): [string, string] | null {
   const asked = new URLSearchParams(search);
   const key = keys.find((k) => asked.has(k));
-  return key ? [key, asked.get(key)] : null;
+  return key ? [key, asked.get(key) ?? ''] : null;
 }
 
 /**
  * Put [key, value] in the address (null: none), in place of whatever of `keys` stood there; what else the page
  * has after the ? stays. A value reads as it is, a / in it too.
  */
-export function zet(entry, keys) {
-  const naam = (p) => { try { return decodeURIComponent(p.split('=')[0]); } catch { return p.split('=')[0]; } };
+export function zet(entry: readonly [string, string | null | undefined] | null | undefined, keys: readonly string[]): void {
+  const naam = (p: string) => { try { return decodeURIComponent(p.split('=')[0]); } catch { return p.split('=')[0]; } };
   const rest = location.search.slice(1).split('&').filter((p) => p && !keys.includes(naam(p)));
   const [key, value] = entry && keys.includes(entry[0]) ? entry : [];
   if (key) rest.unshift(value ? `${key}=${encodeURIComponent(value).replace(/%2F/g, '/')}` : key);
