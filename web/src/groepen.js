@@ -30,9 +30,13 @@
 //   boeiselVoor             true: the fore half of the boeisel in the bakskleur, the aft half in the boeisel's own
 //   roerbeslagKleur         the roerkoning, the roerhaken and the vingerlingen in this colour (left out: the roerkoning
 //                           and the roerhaken the roer's, the vingerlingen the romp's)
-//   mikKleur                the mikhouders painted in this colour (left out: galvanised)
+//   beslagKleur             the mikhouders, the wantputtingen and the dolpotten painted in this colour (left out:
+//                           galvanised)
+//   lummelKleur             the lummelbeslag, the mastband with it, and the bands and the wervel at the ends of the
+//                           giek in this colour (left out: the bakskleur)
 //
-// Any of these colours may be BAKSKLEUR: each boat's own bakskleur.
+// Any of these colours may be BAKSKLEUR: each boat's own bakskleur; the colours of beslag also RVS: bare stainless
+// steel, not painted.
 //
 // Picked in Bekend, a group gives its colours and its plaats on the hull; one of its boats also its zeilnummer,
 // naam and bakskleur. Found by either plaats.
@@ -40,6 +44,8 @@
 const VLAG = ['#ae1c28', '#ffffff', '#21468b'];
 // in place of a colour: the bakskleur of the boat (customize.js paintOf)
 export const BAKSKLEUR = '$bakskleur';
+// in place of a colour: bare stainless steel (customize.js applyZone)
+export const RVS = '$rvs';
 
 export const GROEPEN = [
   {
@@ -232,7 +238,8 @@ export const GROEPEN = [
       voordek: '#8f9499', achterdek: '#8f9499', kuip: '#8f9499', zwaardkast: BAKSKLEUR,
     },
     zeilkleur: 10,
-    spiegelKleur: BAKSKLEUR, roerbeslagKleur: BAKSKLEUR, mikKleur: BAKSKLEUR,
+    spiegelKleur: BAKSKLEUR, roerbeslagKleur: BAKSKLEUR, beslagKleur: BAKSKLEUR,
+    lummelKleur: RVS,
     // the bakskleuren as Epifanes numbers them, where the group gave a number
     boten: [
       { zeilnummer: '286', naam: '', bakskleur: '#e0620a' },             // oranje
