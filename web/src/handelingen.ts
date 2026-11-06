@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Handelingen: the Manoeuvres section of the Leren popover, and the card of a run.
 //
 // The panel lists the operations a group at a time - Zeil, Wenden, Afmeren, Afvaren, Anker, Mast -
@@ -13,9 +12,101 @@
 // round of Oefenen in the quiz, whose card this one looks like.
 
 import { TYPING } from './config.ts';
+import type { RealTarget } from './config.ts';
+import type { Stap } from './procedure.ts';
+import type { waaromVan } from './stapuitleg.ts';
+import type { LesModes } from './lessen/typen.ts';
+
+// What handelingen.ts uses of the viewer's modes (modes.ts initModes) and of main.ts: only that part of it.
+
+/** An operation as run.ops() has it: blocked is the reason it cannot go (null: it can), done that it is done already. */
+export interface HandelingStand { op: string; blocked: string | null; done: boolean }
+/**
+ * The next step of a run that is practised (run.question()): the right answer among the options, what is said about
+ * the step (tip), why a wrong answer asked on purpose is wrong (why, by its text), and before the first step where
+ * she sets out from (context).
+ */
+export interface HandelingVraag { answer: string; options: string[]; tip: string | null; why: Record<string, string>; context: string | null }
+/** modes.run: a run of an operation, watched or practised. */
+export interface HandelingRun {
+  ops(): HandelingStand[];
+  readonly maxTurns: number;
+  /** The number of slagen of the rif chosen for reven. */
+  readonly turns: number;
+  /** Starts an operation; `play` false leaves it standing at its start. False when it cannot. */
+  begin(op: string, opties?: { play?: boolean; turns?: number }): boolean;
+  abandon(): void;
+  question(): HandelingVraag | null;
+  readonly finished: boolean;
+}
+/** A step of the procedure as modes.procedure() gives it: plain data. */
+export type ProcedureStap = Pick<Stap, 'label' | 'back' | 'begin' | 'end'> & { skipped: boolean };
+/** modes.procedure(): the procedure last set going, as plain data (only what is read here). */
+export interface ProcedureStand {
+  t: number;
+  playing: boolean;
+  steps: ProcedureStap[];
+  /** The step on now, what is said about it, and what it is for. */
+  current: (Pick<Stap, 'label' | 'tip'> & { waarom: ReturnType<typeof waaromVan> }) | null;
+}
+/** What handelingen.ts sets and reads of the viewer's modes. */
+export interface HandelingModes extends Pick<LesModes, 'apply' | 'state'> {
+  run: HandelingRun;
+  procedure(): ProcedureStand | null;
+  procedureControl: { pause(): void; scrub(t: number): void };
+  closePopover(): void;
+}
+/** Watched (it plays, a step at a time) or practised (every next step a question). */
+export type Hoe = 'bekijken' | 'oefenen';
+/** What main.ts hands initHandelingen. */
+export interface HandelingenOpties {
+  /** The ShadowRoot the markup is in. */
+  ui: NonElementParentNode;
+  wrap: HTMLElement;
+  modes: HandelingModes;
+  /** One step on (+1) or back (-1), the camera going first. */
+  stepProcedure(direction: number): void;
+  lookAtProcedure?(): void;
+  dismissProcedure?(): void;
+  /** The view a run is looked at from (VIEWS): vogel, dichtbij, boven, schipper. */
+  runView?: { get(): string; set(v: string): void };
+  /** px at the bottom that the card covers. */
+  setCovered?(px: number): void;
+  opslaan?: boolean;
+  signal?: AbortSignal;
+  engaged(): boolean;
+  realTarget: RealTarget;
+  onDestroy?(fn: () => void): void;
+}
+/** The run as it stands, for a feedback report. */
+export interface HandelingInfo {
+  handeling: string;
+  naam: string;
+  hoe: Hoe;
+  stappen: number;
+  goed: number;
+  fout: number;
+  klaar: boolean;
+  vraag: { opties: string[]; antwoord: string; beantwoord: boolean } | null;
+}
+/** What initHandelingen gives back to main.ts. */
+export interface Handelingen {
+  active(): boolean;
+  refresh(): void;
+  info(): HandelingInfo | null;
+  callOff(): void;
+  /** Watch `op`, at the step labelled `stap`: null when it runs, else why not. */
+  bekijk(op: string, stap?: string | null, voor?: () => void): string | null;
+  naam(op: string): string | undefined;
+}
+/** A run of an operation, in its card. */
+interface Run {
+  op: string; mode: Hoe; total: number; fromStart: boolean; goed: number; fout: number; wrong: string[];
+  question: HandelingVraag | null; answered: boolean; done: boolean;
+}
 
 // the groups of the list, and what each operation is called in it
-const GROUPS = [
+const GROUPS: [string, Record<string, string>][] = [
   ['Tuigage', { mastZetten: 'Mast zetten', zeilklaar: 'Zeilklaar maken', aanslaan: 'Zeilen aanslaan', hijsen: 'Zeilen hijsen', reven: 'Reven',
     strijken: 'Zeilen strijken', nachtklaar: 'Nachtklaar maken', afslaan: 'Zeilen afslaan', mastStrijken: 'Mast strijken' }],
   ['Wenden', { overstag: 'Overstag', gijpen: 'Gijp', stormrondje: 'Stormrondje', opkruisen: 'Opkruisen', manOverBoord: 'Man over boord', peiling: 'Dwarspeiling', bijliggen: 'Bijliggen', weerVaren: 'Weer varen' }],
@@ -27,9 +118,9 @@ const GROUPS = [
     aanleggenSpiegel: 'Aanleggen met de spiegel', mobRoeiend: 'Man overboord', ankerenRoeiend: 'Ankeren', ankerOpRoeiend: 'Anker op' }],
 ];
 // the groups that go with the boat's mode: rowing has its own, the rest are sailing
-const GROUP_MODE = { Roeien: 'roeien' };
+const GROUP_MODE: Partial<Record<string, string>> = { Roeien: 'roeien' };
 // and on the card of a run
-const NAMES = {
+const NAMES: Record<string, string> = {
   aanslaan: 'Zeilen aanslaan', afslaan: 'Zeilen afslaan', nachtklaar: 'Nachtklaar maken', zeilklaar: 'Zeilklaar maken', hijsen: 'Zeilen hijsen', strijken: 'Zeilen strijken', mastStrijken: 'Mast strijken', mastZetten: 'Mast zetten', reven: 'Reven',
   bijliggen: 'Bijliggen', weerVaren: 'Weer varen uit bijliggen',
   overstag: 'Overstag (wenden)', gijpen: 'Gijpen', stormrondje: 'Stormrondje', opkruisen: 'Opkruisen', manOverBoord: 'Man over boord',
@@ -40,7 +131,7 @@ const NAMES = {
   afvarenHoger: 'Afvaren van hogerwal', afvaren: 'Afvaren van langswal', afvarenLager: 'Afvaren van lagerwal', kopInDeWind: 'Kop in de wind leggen',
   ankerenZeil: 'Ankeren onder zeil', ankerenKaal: 'Ankeren zonder zeilen', ankerOpZeil: 'Anker op onder zeil', ankerOpKaal: 'Anker op zonder zeilen',
 };
-const ABOUT = {
+const ABOUT: Record<string, string> = {
   aanslaan: 'Grootzeil aan gaffel en giek, fok aan de voorstag',
   afslaan: 'Fok van de stag in de zak, grootzeil van de rondhouten',
   nachtklaar: 'Fok in de zak, vallen weg, zeilkleed erover; voor anker de ankerbol en het ankerlicht',
@@ -83,7 +174,7 @@ const ABOUT = {
 };
 // what it is for, at the top of the card of a run: one sentence, in words a sailor of ten understands,
 // after the zeilinstructieboek, the roei-instructieboek and CWO Roeien
-const DOEL = {
+const DOEL: Partial<Record<string, string>> = {
   mastZetten: 'De mast veilig rechtop zetten en vastzetten, zodat je kunt gaan tuigen.',
   zeilklaar: 'De boot na de nacht weer klaarmaken, zodat je de zeilen kunt hijsen.',
   aanslaan: 'De zeilen goed vastmaken aan gaffel, giek en voorstag, zodat je ze kunt hijsen.',
@@ -127,7 +218,7 @@ const DOEL = {
 // what has to be so before it begins, shown at stap 0 of a run that is watched: the boat as the
 // viewer asks for it (modes.js, OPS), in words; for overstag and gijpen also the check of the
 // Sint Maarten Kielboot lesboeken, whether it is safe in the boat and there is room
-const VOORWAARDEN = {
+const VOORWAARDEN: Partial<Record<string, string>> = {
   mastZetten: 'De mast ligt gestreken in de mik.',
   zeilklaar: 'De boot is nachtklaar: de zeilen in de zak of opgedoekt, het zeilkleed erover.',
   aanslaan: 'De zeilen zijn nog niet aangeslagen.',
@@ -168,7 +259,7 @@ const VOORWAARDEN = {
   ankerenRoeiend: 'Je roeit, vrij van de kant.',
   ankerOpRoeiend: 'De boot ligt voor anker en je gaat roeien.',
 };
-const DONE = {
+const DONE: Partial<Record<string, string>> = {
   aanslaan: 'De zeilen zijn aangeslagen', afslaan: 'De zeilen zijn afgeslagen',
   hijsen: 'De zeilen staan al', strijken: 'De zeilen zijn al gestreken', mastStrijken: 'De mast ligt al', mastZetten: 'De mast staat al',
   slipHoger: 'De boot ligt al afgemeerd', opschieter: 'De boot ligt al afgemeerd',
@@ -177,10 +268,10 @@ const DONE = {
   ankerenRoeiend: 'De boot ligt al voor anker', ankerOpRoeiend: 'Het anker is op',
   ankerenZeil: 'De boot ligt al voor anker', ankerenKaal: 'De boot ligt al voor anker', ankerOpZeil: 'Het anker is op', ankerOpKaal: 'Het anker is op',
 };
-const MARKS = { goed: '✓', fout: '✗' };
+const MARKS: Partial<Record<string, string>> = { goed: '✓', fout: '✗' };
 // the views of a run, in its card
-const VIEWS = { vogel: 'Vogelvlucht', dichtbij: 'Dichtbij', boven: 'Bovenaf', schipper: 'Schipper' };
-const VIEW_TITLES = {
+const VIEWS: Record<string, string> = { vogel: 'Vogelvlucht', dichtbij: 'Dichtbij', boven: 'Bovenaf', schipper: 'Schipper' };
+const VIEW_TITLES: Record<string, string> = {
   vogel: 'Van schuin boven, zoals de manoeuvre het beste te volgen is',
   dichtbij: 'Dichtbij wat er bij elke stap gebeurt',
   boven: 'Recht van boven, stil boven het water',
@@ -188,11 +279,12 @@ const VIEW_TITLES = {
 };
 const STORE = 'lelievlet.manoeuvres.v1';      // { v: 1, foutloos: { <op>: true } }: practised through without a mistake
 
-const el = (tag, className, text) => Object.assign(document.createElement(tag), { className: className ?? '', textContent: text ?? '' });
-const pct = (goed, total) => (total ? Math.round((goed / total) * 100) : 0);
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string | null, text?: string): HTMLElementTagNameMap[K] => Object.assign(document.createElement(tag), { className: className ?? '', textContent: text ?? '' });
+const pct = (goed: number, total: number): number => (total ? Math.round((goed / total) * 100) : 0);
 
-export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedure, dismissProcedure, runView, setCovered, opslaan = true, signal, engaged, realTarget, onDestroy }) {
-  const $ = (id) => ui.getElementById(id);
+export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedure, dismissProcedure, runView, setCovered, opslaan = true, signal, engaged, realTarget, onDestroy }: HandelingenOpties): Handelingen {
+  // the viewer's markup: these ids are there, and of the kind asked for
+  const $ = <E extends HTMLElement = HTMLElement>(id: string): E => ui.getElementById(id) as E;
   const run = modes.run;
   const touch = window.matchMedia('(pointer: coarse)');
 
@@ -201,12 +293,12 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
   // in localStorage under one key; like everywhere else the access is wrapped, so it works without,
   // and with aanpassen.opslaan false it is not touched. A tick is added to what is stored at that
   // moment, so one set by another viewer on the page is kept.
-  const readFlawless = () => {
+  const readFlawless = (): Partial<Record<string, boolean>> | null => {
     if (!opslaan) return null;
     try { return JSON.parse(localStorage.getItem(STORE) ?? 'null')?.foutloos ?? {}; } catch { return null; }   // start from nothing
   };
   let flawless = readFlawless() ?? {};
-  const markFlawless = (op) => {
+  const markFlawless = (op: string): void => {
     flawless = { ...flawless, ...readFlawless(), [op]: true };
     if (!opslaan) return;
     try { localStorage.setItem(STORE, JSON.stringify({ v: 1, foutloos: flawless })); } catch { /* it works without */ }
@@ -217,8 +309,8 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
   const groupBox = $('ops-groups');
   const list = $('ops-list');
   const turnsRow = $('ops-turns-row'); const turnsBox = $('ops-turns');
-  const goButtons = { bekijken: $('ops-bekijken'), oefenen: $('ops-oefenen') };   // each starts the chosen one, its own way
-  let group = null; let chosen = null; let turns = run.turns || 1;
+  const goButtons = { bekijken: $<HTMLButtonElement>('ops-bekijken'), oefenen: $<HTMLButtonElement>('ops-oefenen') };   // each starts the chosen one, its own way
+  let group: string | null = null; let chosen: string | null = null; let turns = run.turns || 1;
 
   const groupButtons = GROUPS.map(([g]) => {
     const b = Object.assign(el('button', null, g), { type: 'button' });
@@ -242,7 +334,8 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
     b.addEventListener('click', () => { turns = n; refreshPanel(); });
     turnsBox.append(b);
   }
-  for (const [how, b] of Object.entries(goButtons)) b.addEventListener('click', () => start(chosen, how, turns));
+  // the keys of goButtons are the ways
+  for (const [how, b] of Object.entries(goButtons) as [Hoe, HTMLButtonElement][]) b.addEventListener('click', () => start(chosen, how, turns));
 
   /**
    * What can be done now: the rows greyed with their reason, the choice moved off one that cannot.
@@ -250,27 +343,27 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
    */
   function refreshPanel() {
     const state = Object.fromEntries(run.ops().map((o) => [o.op, o]));
-    const can = (op) => !state[op].blocked && !state[op].done;
+    const can = (op: string): boolean => !state[op].blocked && !state[op].done;
     // only the groups of the mode she is in: rowing its own, sailing the others
     const mode = modes.state.mode;
-    const fits = (g) => (GROUP_MODE[g] ?? 'zeilen') === mode;
-    for (const b of groupButtons) b.hidden = !fits(b.dataset.group);
+    const fits = (g: string): boolean => (GROUP_MODE[g] ?? 'zeilen') === mode;
+    for (const b of groupButtons) b.hidden = !fits(b.dataset.group!);
     if (group && !fits(group)) group = null;
-    group ??= rows.find((b) => fits(b.dataset.group) && can(b.dataset.op))?.dataset.group ?? GROUPS.find(([g]) => fits(g))?.[0] ?? GROUPS[0][0];
+    group ??= rows.find((b) => fits(b.dataset.group!) && can(b.dataset.op!))?.dataset.group ?? GROUPS.find(([g]) => fits(g))?.[0] ?? GROUPS[0][0];
     const shownRows = rows.filter((b) => b.dataset.group === group);
-    if (!chosen || !can(chosen) || !shownRows.some((b) => b.dataset.op === chosen)) chosen = shownRows.map((b) => b.dataset.op).find(can) ?? null;
+    if (!chosen || !can(chosen) || !shownRows.some((b) => b.dataset.op === chosen)) chosen = shownRows.map((b) => b.dataset.op!).find(can) ?? null;
     for (const b of groupButtons) b.setAttribute('aria-checked', String(b.dataset.group === group));
     for (const b of rows) {
-      const { op } = b.dataset; const s = state[op];
+      const op = b.dataset.op!; const s = state[op];
       b.hidden = b.dataset.group !== group;
       b.disabled = !can(op);
       b.setAttribute('aria-checked', String(op === chosen));
       const sub = s.done ? DONE[op] ?? ABOUT[op] : s.blocked ?? ABOUT[op];
-      if (b.lastChild.textContent !== sub) b.lastChild.textContent = sub;
-      b.querySelector('.tick').hidden = !flawless[op];
+      if (b.lastChild!.textContent !== sub) b.lastChild!.textContent = sub;
+      b.querySelector<HTMLElement>('.tick')!.hidden = !flawless[op];
     }
     turnsRow.hidden = chosen !== 'reven';
-    for (const b of turnsBox.children) {
+    for (const b of turnsBox.children as HTMLCollectionOf<HTMLButtonElement>) {   // the buttons made above
       b.setAttribute('aria-checked', String(Number(b.dataset.turns) === turns));
       b.disabled = Number(b.dataset.turns) === run.turns;         // the rif it has now is nothing to do
     }
@@ -323,14 +416,15 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
   card.append(head, views, doel, voorwaarden, startHint, big, vraag, hint, holder, answers, uitleg, actions);
   wrap.append(card);
   card.addEventListener('pointerdown', (e) => e.stopPropagation());
-  const procBar = $('procedure'); const procHome = procBar.parentNode; const procNext = procBar.nextSibling;
+  const procBar = $('procedure'); const procHome = procBar.parentNode!; const procNext = procBar.nextSibling;
 
-  let onPrimary = null; let onSecondary = null; let onExtra = null;
+  let onPrimary: (() => void) | null = null; let onSecondary: (() => void) | null = null; let onExtra: (() => void) | null = null;
   primary.addEventListener('click', () => onPrimary?.());
   secondary.addEventListener('click', () => onSecondary?.());
   extra.addEventListener('click', () => onExtra?.());
   /** The buttons under the card; a main button without a function stands there greyed out. */
-  function setActions(primaryText, primaryFn, secondaryText = null, secondaryFn = null, extraText = null, extraFn = null) {
+  function setActions(primaryText: string | null, primaryFn: (() => void) | null, secondaryText: string | null = null, secondaryFn: (() => void) | null = null,
+    extraText: string | null = null, extraFn: (() => void) | null = null): void {
     primary.hidden = !primaryText; primary.textContent = primaryText ?? ''; onPrimary = primaryFn; primary.disabled = !primaryFn;
     secondary.hidden = !secondaryText; secondary.textContent = secondaryText ?? ''; onSecondary = secondaryFn;
     extra.hidden = !extraText; extra.textContent = extraText ?? ''; onExtra = extraFn;
@@ -338,22 +432,22 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
     actions.hidden = !primaryText && !secondaryText && !extraText && (feedback.hidden || feedback.classList.contains('leeg'));
   }
   /** The cross, or at the end of the run a green Klaar in its place: it closes the card either way. */
-  function setDone(done) {
+  function setDone(done: boolean): void {
     if (stop.classList.contains('klaar') === done) return;
     stop.classList.toggle('klaar', done);
     stop.textContent = done ? 'Klaar' : '×';
     stop.title = done ? 'Klaar' : 'Stoppen'; stop.setAttribute('aria-label', stop.title);
   }
-  function setUitleg(text) {
+  function setUitleg(text: string | null | undefined): void {
     uitleg.hidden = !text;
     if (uitleg.textContent !== (text ?? '')) uitleg.textContent = text ?? '';
   }
-  function setFeedback(text, mood = null) {
+  function setFeedback(text: string | null, mood: 'goed' | 'fout' | null = null): void {
     feedback.replaceChildren();
     for (const m of ['goed', 'fout']) card.classList.toggle(m, mood === m);
     feedback.classList.toggle('leeg', !text);
     if (!text) { feedback.textContent = ' '; return; }
-    if (MARKS[mood]) feedback.append(el('span', 'mark', MARKS[mood]));
+    if (MARKS[mood!]) feedback.append(el('span', 'mark', MARKS[mood!]));   // null finds no mark
     feedback.append(el('span', 'tekst', text));
   }
 
@@ -365,29 +459,29 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
   onDestroy?.(() => cardWatch.disconnect());
 
   // ---------------------------------------------------------------- a run
-  let current = null;       // { op, mode, total, asked, goed, wrong: [], question, answered, waiting, finished }
+  let current: Run | null = null;       // { op, mode, total, asked, goed, wrong: [], question, answered, waiting, finished }
   let tick = 0;
 
-  function setFocus(on) {
+  function setFocus(on: boolean): void {
     wrap.classList.toggle('ops-on', on);
     wrap.classList.toggle('ops-oefenen', on && current?.mode === 'oefenen');
     card.hidden = !on;
-    if (on && current.mode === 'bekijken') holder.append(procBar);
+    if (on && current!.mode === 'bekijken') holder.append(procBar);
     else if (procBar.parentNode !== procHome) procHome.insertBefore(procBar, procNext);
-    holder.hidden = !(on && current.mode === 'bekijken');
+    holder.hidden = !(on && current!.mode === 'bekijken');
     clearInterval(tick);
     if (on) tick = setInterval(follow, 150);
     coverage();
   }
 
-  function start(op, how, n) {
+  function start(op: string | null, how: Hoe, n: number): void {
     if (!op) return;
     modes.closePopover();
     if (!run.begin(op, { play: false, turns: n })) return;        // watched too, it waits at stap 0 for play
     const p = modes.procedure();
     // it counts as the whole manoeuvre only when it starts at its first step: struck halfway and then
     // hoisted from there is a part of it, and earns no tick
-    const fromStart = Boolean(p) && p.t <= 1e-6;
+    const fromStart = Boolean(p) && p!.t <= 1e-6;
     current = { op, mode: how, total: p?.steps.filter((s) => !s.skipped).length ?? 0, fromStart, goed: 0, fout: 0, wrong: [], question: null, answered: false, done: false };
     name.textContent = op === 'reven' ? `${NAMES[op]} · ${n === 0 ? 'rif eruit' : `${n} ${n === 1 ? 'slag' : 'slagen'}`}` : NAMES[op];
     big.hidden = true; card.classList.remove('results');
@@ -415,8 +509,8 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
    * The line under the head: at stap 0 (`waarom` null) what the whole of it is for; once it has begun,
    * what the step on is for - or nothing, where that needs no saying.
    */
-  function showDoel(waarom) {
-    const text = waarom ?? DOEL[current?.op] ?? '';
+  function showDoel(waarom: string | null): void {
+    const text = waarom ?? DOEL[current?.op as string] ?? '';   // no run: undefined finds nothing
     const key = `${waarom === null ? 'doel' : 'waarom'}|${text}`;
     if (doel.dataset.shown === key) return;
     doel.dataset.shown = key;
@@ -425,15 +519,15 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
   }
 
   /** Stap 0: what it needs and how to begin, shown while a watched run has not begun. */
-  function showStart(on) {
-    voorwaarden.hidden = !on || !VOORWAARDEN[current?.op]; startHint.hidden = !on;
+  function showStart(on: boolean): void {
+    voorwaarden.hidden = !on || !VOORWAARDEN[current?.op as string];   // no run: undefined finds nothing startHint.hidden = !on;
   }
 
   /** Steps done so far. */
-  const doneSteps = (p) => p.steps.filter((s) => !s.skipped && s.end <= p.t + 1e-6).length;
+  const doneSteps = (p: ProcedureStand): number => p.steps.filter((s) => !s.skipped && s.end <= p.t + 1e-6).length;
 
   /** Every few frames: the count and the bar, and the buttons that wait for a step to finish. */
-  function follow() {
+  function follow(): void {
     const p = modes.procedure();
     if (!p || !current) return;
     const done = Math.min(doneSteps(p), current.total);
@@ -457,10 +551,10 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
     }
   }
 
-  function ask() {
+  function ask(): void {
     const q = run.question();
     if (!q) { results(); return; }
-    current.question = q; current.answered = false;
+    current!.question = q; current!.answered = false;
     // before the first step, where she sets out from: what the first answer turns on
     vraag.hidden = false; vraag.textContent = q.context ? `${q.context} Wat is de volgende stap?` : 'Wat is de volgende stap?';
     setUitleg(null);
@@ -476,38 +570,38 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
     setActions('Volgende', null);
   }
 
-  function answer(i) {
+  function answer(i: number): void {
     const q = current?.question;
-    if (!q || current.answered) return;
-    current.answered = true;
+    if (!q || current!.answered) return;
+    current!.answered = true;
     const right = q.options[i] === q.answer;
-    [...answers.children].forEach((b, j) => {
+    [...answers.children as HTMLCollectionOf<HTMLButtonElement>].forEach((b, j) => {   // the answers made in ask()
       b.disabled = true;
       if (q.options[j] === q.answer) b.classList.add('goed');
       else if (j === i) b.classList.add('fout');
     });
-    current[right ? 'goed' : 'fout']++;
-    if (!right) current.wrong.push(q.answer);
+    current![right ? 'goed' : 'fout']++;
+    if (!right) current!.wrong.push(q.answer);
     setFeedback(right ? 'Goed!' : `Fout: eerst ${q.answer.toLowerCase()}`, right ? 'goed' : 'fout');
     setUitleg((!right && q.why?.[q.options[i]]) || q.tip);
     stepProcedure(1);                                              // the next step is shown: the camera goes first
   }
 
-  function results() {
-    current.done = true;
-    if (current.mode === 'oefenen' && current.fromStart && current.fout === 0 && current.goed === current.total) markFlawless(current.op);
+  function results(): void {
+    current!.done = true;
+    if (current!.mode === 'oefenen' && current!.fromStart && current!.fout === 0 && current!.goed === current!.total) markFlawless(current!.op);
     card.classList.add('results');
     answers.hidden = true; hint.hidden = true; doel.hidden = true; showStart(false); setUitleg(null);
-    const total = current.goed + current.fout;
-    big.hidden = false; big.textContent = `${pct(current.goed, total)}%`;
-    vraag.textContent = `${current.goed} van de ${total} stappen goed`;
-    setFeedback(current.wrong.length ? `Nog eens: ${current.wrong.join(', ')}` : 'Alles in de goede volgorde!', current.wrong.length ? null : 'goed');
+    const total = current!.goed + current!.fout;
+    big.hidden = false; big.textContent = `${pct(current!.goed, total)}%`;
+    vraag.textContent = `${current!.goed} van de ${total} stappen goed`;
+    setFeedback(current!.wrong.length ? `Nog eens: ${current!.wrong.join(', ')}` : 'Alles in de goede volgorde!', current!.wrong.length ? null : 'goed');
     setActions(null, null);                                        // closed with Klaar, where the cross was
     setDone(true);
     stop.focus();
   }
 
-  function close() {
+  function close(): void {
     // called off before its end: the boat goes back to how it was when it began
     if (current && !current.done && !run.finished) run.abandon();
     current = null;
@@ -521,9 +615,9 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
   window.addEventListener('keydown', (e) => {
     if (!current || !engaged() || e.ctrlKey || e.metaKey || e.altKey || realTarget(e).closest?.(TYPING)) return;
     if (current.mode === 'oefenen' && !current.answered && e.key >= '1' && e.key <= '4') {
-      answers.children[Number(e.key) - 1]?.click(); e.preventDefault(); return;
+      (answers.children as HTMLCollectionOf<HTMLButtonElement>)[Number(e.key) - 1]?.click();   // the answers made in ask() e.preventDefault(); return;
     }
-    if (e.key === 'Enter' && realTarget(e).tagName !== 'BUTTON' && !primary.hidden && !primary.disabled) { primary.click(); e.preventDefault(); }
+    if (e.key === 'Enter' && (realTarget(e) as Partial<Element>).tagName !== 'BUTTON' && !primary.hidden && !primary.disabled) { primary.click(); e.preventDefault(); }
   }, { signal });
   onDestroy?.(() => clearInterval(tick));
 
@@ -535,8 +629,8 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
 
   // ---------------------------------------------------------------- from Zoeken › Begrippen
   // What stands in the way of an operation, and the plain change that clears it - by the reason run.ops() gives
-  const side = () => Math.sign(modes.state.course) || 1;
-  const PREP = [
+  const side = (): number => Math.sign(modes.state.course) || 1;
+  const PREP: [RegExp, () => void][] = [
     [/zeilen hijsen/, () => modes.apply({ tuig: 'op' }, { direct: true })],
     [/zeilen strijken|grootzeil en fok strijken|zeilen omlaag|mast zetten/, () => modes.apply({ tuig: 'gestreken' }, { direct: true })],
     [/aan de wind of halve wind/, () => modes.apply({ koers: side() * 60 }, { direct: true })],
@@ -544,28 +638,28 @@ export function initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedur
     [/niet kop in de wind/, () => modes.apply({ koers: side() * 90 }, { direct: true })],
   ];
   // done already, so not to be done: the tuig the other way first
-  const UNDONE = { hijsen: 'gestreken', strijken: 'op', mastZetten: 'mast', mastStrijken: 'gestreken' };
+  const UNDONE: Partial<Record<string, string>> = { hijsen: 'gestreken', strijken: 'op', mastZetten: 'mast', mastStrijken: 'gestreken' };
   /**
    * Watch `op` in Bekijken, at the end of the step labelled `stap` (or at its start), paused there. The boat is
    * made ready first as far as a few plain changes go: the mode of its group, the sails up or down, a course to
    * start from. Returns null when it runs; else why not, with the list of Leren › Manoeuvres left on it.
    * `voor()` is called just before it starts (Zoeken closes then).
    */
-  function bekijk(op, stap, voor) {
+  function bekijk(op: string, stap?: string | null, voor?: () => void): string | null {
     if (current) close();
     const g = GROUPS.find(([, ops]) => Object.hasOwn(ops, op))?.[0];
     if (!g) return 'Onbekende handeling';
     const mode = GROUP_MODE[g] ?? 'zeilen';
     if (modes.state.mode !== mode) modes.apply({ modus: mode });
     for (let i = 0; i < 5; i++) {
-      const o = run.ops().find((x) => x.op === op);
+      const o = run.ops().find((x) => x.op === op)!;             // op is one of GROUPS: run.ops() has it
       if (o.done && UNDONE[op]) { modes.apply({ tuig: UNDONE[op] }, { direct: true }); continue; }
-      const fix = o.blocked && PREP.find(([re]) => re.test(o.blocked));
+      const fix = o.blocked && PREP.find(([re]) => re.test(o.blocked!));
       if (!fix) break;
       fix[1]();
     }
     dismissProcedure?.();                                          // a direct change leaves no bar of its own
-    const o = run.ops().find((x) => x.op === op);
+    const o = run.ops().find((x) => x.op === op)!;
     if (o.blocked || o.done) {
       group = g; chosen = op; refreshPanel();
       return o.blocked ?? DONE[op] ?? 'Dat is al gedaan';
