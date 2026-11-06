@@ -38,6 +38,10 @@ de naslag in `docs/` en de eigen notities in `reference/`. Delen en bewerken mag
 particulier en als scoutinggroep, school, vereniging of andere organisatie zonder winstoogmerk; met
 naamsvermelding, en een bewerking deel je onder dezelfde licentie.
 
+Deze versie is een bewerking van [Lelievlet 3D](https://github.com/wiebren/lelievlet) door Wiebren Braakman.
+Bewerkt door [boschDev](https://github.com/boschDev), 2026; de wijzigingen staan in de git-geschiedenis. Ook deze
+bewerking valt onder CC BY-NC-SA 4.0.
+
 Wat van anderen is, valt niet onder deze licentie:
 
 - Het ontwerp van de lelievlet en het CAD-model waar de geometrie van `lelievlet.glb` uit komt, zijn
@@ -66,8 +70,27 @@ handelingen draai je in `web/`:
 
     cd web && pnpm install && pnpm dev        # http://localhost:5173
 
+De viewer is TypeScript (`web/src/**/*.ts`); Vite haalt de types eruit, `pnpm run typecheck` controleert ze. Een
+bestand dat nog niet getypeerd is, begint met `// @ts-nocheck`: haal dat weg zodra het bestand getypeerd is.
+
+### Bootonderdelen
+
+Niet elke lelievlet is hetzelfde. Wat per vlet in vorm verschilt (niet in kleur: dat is Aanpassen), staat in
+`web/src/bootonderdelen/{onderdeel}/`: een `base.ts` met wat de versies delen en het onderdeel op zijn kaalst, een
+bestand per versie (`{versie}.ts`) en een `index.ts` met de versies en de standaard, de versie die het model heeft.
+Een groep kiest in `groepen.ts` per onderdeel een versie (`onderdelen: { riem: 'blad' }`); een onderdeel dat ze niet
+noemt, houdt de standaard. Nu is er één:
+
+| Onderdeel | Versies | Standaard |
+|---|---|---|
+| `riem` (roeiriemen en wrikriem) | `base` (zonder markering), `handvat` (band in de bakskleur bij het handvat), `blad` (band 5 cm van de punt van het blad, half zo breed) | `handvat` |
+
+Een nieuw onderdeel: een map naast `riem/` met een `base.ts`, een bestand per versie en een `index.ts`, en de naam in
+`bootonderdelen/index.ts`. De versies veranderen het model in de viewer; het model zelf (`lelievlet.glb`) heeft elk
+onderdeel in één vorm.
+
 `web/index.html` is niet meer dan een lege `<div>` die de viewer vult; alles zit in de bibliotheek
-(`web/src/lib.js`). Zie hieronder hoe je hem in een eigen pagina zet.
+(`web/src/lib.ts`). Zie hieronder hoe je hem in een eigen pagina zet.
 
 ## Insluiten in een webpagina
 
@@ -221,7 +244,7 @@ verlaat volledig scherm vanzelf.
 
 Alles is optioneel; wat je weglaat blijft zoals de viewer het zelf heeft. Een sleutel die de viewer
 niet kent, wordt één keer met een `console.warn` gemeld. De volledige vorm staat ook in
-`web/src/config.js`.
+`web/src/config.ts`.
 
 | Sleutel | Type | Standaard | Wat |
 |---|---|---|---|
@@ -265,10 +288,10 @@ dezelfde handle op `window.vlet`, voor de eerste viewer op de pagina.
 
 ### Hoe het in elkaar zit
 
-`web/src/lib.js` is de hele buitenkant: het hangt een shadow root aan het element, vult die met de
-stylesheet (`style.css`, als string ingeladen met `?inline`) en de opmaak (`web/src/template.js`, de
+`web/src/lib.ts` is de hele buitenkant: het hangt een shadow root aan het element, vult die met de
+stylesheet (`style.css`, als string ingeladen met `?inline`) en de opmaak (`web/src/template.ts`, de
 markup die vroeger de body van `index.html` was, in één `<div class="lv">`), en roept `mount()` in
-`web/src/main.js` aan. Er draait niets meer op importniveau: alles wat `main.js` deed zit in die
+`web/src/main.ts` aan. Er draait niets meer op importniveau: alles wat `main.ts` deed zit in die
 functie, en geen enkel `src`-bestand houdt nog veranderlijke toestand op moduleniveau. Elk
 `document.getElementById` is een opzoeking in de shadow root geworden, alles wat op `document.body`
 stond (`quiz-on`, `procedure-open`, `--procedure-top`) staat nu op
@@ -326,7 +349,7 @@ pagina geen `assets` op te geven.
    met UV's, baannaden opgemeten uit het zeilplan (Vlettenboek p. 60: dwarsgesneden, doek van 90 cm,
    loodrecht op schoothoek → tophoek/kop) en de plaats van zeilteken en cijfers (p. 58: lelie + V
    38 cm breed, cijfers 30 × 20 cm, stuurboord het hoogst). De viewer tekent de texture
-   (`web/src/sails.js`), zodat het zeilnummer live te wijzigen is.
+   (`web/src/sails.ts`), zodat het zeilnummer live te wijzigen is.
 6. `pipeline/rigging.py` genereert geometrie opnieuw die in de CAD niet klopt. De blokken van de
    fokkenschoot zijn op het tweede leioog getekend; ze horen op het voorste, bij het zijstag
    (bodies 5943 / 5953), dus `NUDGE` in `pipeline/parts.py` brengt ze daarheen en de schoot loopt
@@ -398,9 +421,9 @@ pagina geen `assets` op te geven.
 
 ## Aanpassen
 
-De tandwielknop opent het menu (`web/src/customize.js`): zeilnummer, naam en plaats (belettering die
+De tandwielknop opent het menu (`web/src/customize.ts`): zeilnummer, naam en plaats (belettering die
 als decals op het boeisel wordt geprojecteerd ter hoogte van voordek / achterdek, aan beide zijden —
-`web/src/hulltext.js`), de kleur van de zeilen (een schuif van wit via roodbruin naar donkerbruin), een bakskleur en één kleur per verfzone (twee per
+`web/src/hulltext.ts`), de kleur van de zeilen (een schuif van wit via roodbruin naar donkerbruin), een bakskleur en één kleur per verfzone (twee per
 regel, zodat het paneel ook op een telefoon kort blijft). De bakskleur (materiaal `bakskleur`)
 accentueert roerkop, voorplecht, hanekam, de metalen mastbanden (lummelband, hommerring,
 masttopring), het giekbeslag aan beide einden van de giek, en geschilderde banden van 5 cm: 5 cm
@@ -418,20 +441,20 @@ haar `config.aanpassen`, dan krijgt ook een bezoeker die ooit iets anders aanpas
 "Standaardwaarden" zet alles terug naar waar deze viewer begon, dus naar de waarden
 van de pagina als die er zijn. Alle tekst naar de gebruiker toe is Nederlands.
 
-Onder **Tekst** kiest de gebruiker Normaal, Groter of Grootst (`web/src/tekstgrootte.js`, onthouden in
+Onder **Tekst** kiest de gebruiker Normaal, Groter of Grootst (`web/src/tekstgrootte.ts`, onthouden in
 `lelievlet.tekst.v1`): elke lettergrootte in `style.css` staat als `calc(… * var(--tekst))`, de windroos en de
 tekeningen houden hun eigen maat. In de plaats van inzoomen: binnen de viewer laat `touch-action` de browser niet
 zoomen, ook niet met dubbel tikken, en `app.html` zoomt helemaal niet (`maximum-scale=1`).
 
 Bovenin het paneel kiest de gebruiker **Bekend** of **Eigen** (welke van de twee het laatst open stond, staat
 onder `lelievlet.aanpassen.modus`). **Eigen** zijn de velden en kleurkiezers hierboven, met
-*Standaardwaarden*. **Bekend** zoekt in de bekende groepen (`web/src/groepen.js`: per groep de plaats voluit
+*Standaardwaarden*. **Bekend** zoekt in de bekende groepen (`web/src/groepen.ts`: per groep de plaats voluit
 en, zoals die op de romp staat als dat anders is (`plaatsOpBoot`: R-dam voor Rotterdam), de kleuren per zone,
 bakskleur, zeilkleur, de letterkleuren, `rompnummer` als het zeilnummer ook midscheeps op het boeisel staat
 (alleen zo, niet onder Eigen) en de boten met zeilnummer, naam en eventueel een eigen bakskleur, `boeiselBanen`
 als het boeisel in banen geschilderd is, zoals een vlag: rood, wit, blauw, de bovenste eerst; voor de groep of één
-boot, ook alleen zo; `boeiselVoor` als de voorste helft van het boeisel in de bakskleur is; `riemBandBlad` als de band in de bakskleur op de
-riemen en de wrikriem bij het blad zit en niet bij het handvat; `roerbeslagKleur` als de roerkoning, de roerhaken en de vingerlingen een eigen kleur hebben; `beslagKleur` als de
+boot, ook alleen zo; `boeiselVoor` als de voorste helft van het boeisel in de bakskleur is; `onderdelen` met per bootonderdeel de versie
+(zie hieronder: `{ riem: 'blad' }` als de band op de riemen en de wrikriem bij het blad zit en niet bij het handvat); `roerbeslagKleur` als de roerkoning, de roerhaken en de vingerlingen een eigen kleur hebben; `beslagKleur` als de
 mikhouders, de wantputtingen, de dolpotten, de kikkers op het voordek en de leiogen geverfd zijn; `lummelKleur` als het lummelbeslag, de mastband ervan en de banden en de wervel aan de uiteinden van de giek niet in de bakskleur zijn; `naamBordje` als de naam op een houten bordje op het boeisel staat; `plechtKleur` als de
 voorplecht en de hanenkam niet in de bakskleur zijn (dan in die van het dolboord); `roerKleur` als het hele roer, ook
 de roerkop, één kleur heeft; `spiegelKleur` als de spiegel buiten niet in de rompkleur is; `spiegelTekst` voor
@@ -442,16 +465,16 @@ groep of één boot; en `plaatsOpBoot: ''` als er geen plaats op de romp staat; 
 plaats, zeilnummer of bootnaam, en toont er 30 tegelijk. Een groep kiezen geeft haar kleuren en de plaats
 zoals die op de romp staat, een boot ook haar zeilnummer, naam en bakskleur; wat er nu op staat, is
 gemarkeerd. Daaronder opent **Kleuren van je groep melden** een melding in het paneel van Melden
-(`web/src/feedback.js`): kloppen de kleuren (zo niet, dan eerst naar Eigen), naam en plaats (voluit) van de
+(`web/src/feedback.ts`): kloppen de kleuren (zo niet, dan eerst naar Eigen), naam en plaats (voluit) van de
 groep, wat er waar op de boot staat (naam, plaats, zeilnummer, naam van de groep: boeisel, bordje, spiegel of
 niet) en of elke boot een eigen bakskleur heeft, per boot zeilnummer, naam en bakskleur (zonder de naam of de
 bakskleur als ze die niet hebben), wat er verder anders is, en versturen, met de waarden van
 Aanpassen erbij; staat de plaats daar anders, dan geeft de melding die als `plaatsOpBoot`. Een gemelde groep
-komt na controle met de hand in `groepen.js`. Met `feedback: false` is die knop er niet; in deze versie is dat de standaard, zie hieronder.
+komt na controle met de hand in `groepen.ts`. Met `feedback: false` is die knop er niet; in deze versie is dat de standaard, zie hieronder.
 
 ## Modi en animatie
 
-`web/src/modes.js` schakelt tussen Zeilen, Roeien en Wrikken en trimt in Zeilen de zeilen voor een
+`web/src/modes.ts` schakelt tussen Zeilen, Roeien en Wrikken en trimt in Zeilen de zeilen voor een
 koers ten opzichte van de wind. De bediening is een kolom iconen linksboven - **Boot**, dan
 **Leren**, en in Roeien **Roeicommando** - en elk icoon opent zijn bediening in een popover ernaast: één tegelijk, weer te sluiten met hetzelfde icoon, een ander icoon,
 Escape of een klik ernaast. **Boot** bundelt de modus (Zeilen, Roeien, Wrikken), de koers ten
@@ -475,7 +498,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   de nok onder de schoothoek blijft. De fok draait om het voorstag; waar voor de wind begint (158°) gaat
   hij op weg naar 180° over naar loef (fok te loevert).
 - De fokkenschoten zijn geen opgerekte CAD-touwen maar worden elk frame opnieuw gelegd (`RopeLine`,
-  `roundTheFront` in `web/src/rig.js`): de lijzijdige schoot loopt recht van de schoothoek naar zijn
+  `roundTheFront` in `web/src/rig.ts`): de lijzijdige schoot loopt recht van de schoothoek naar zijn
   blok, de loefzijdige gaat eerst om de voorkant van de mast heen. Elk blok hangt aan zijn leioog
   tussen de twee parten van zijn schoot.
 - Beide zeilen worden vlak geëxporteerd met een buiggewicht per vertex en in de viewer gebogen, want
@@ -489,7 +512,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   recht, hoeken vast, onderlijk en achterlijk bollen uit). De diepte volgt de koers, gaat door vlak
   heen terwijl de fok overkomt en keert binnenstebuiten voor fok te loevert.
 - Piekenval en klauwval, die alleen een bewegend uiteinde volgen, worden per vertex opgerekt
-  (`RopeStretch` in `web/src/rig.js`).
+  (`RopeStretch` in `web/src/rig.ts`).
 - De grootschoot is een talie die elk frame opnieuw wordt geschoren (`RopeLine`): vastgezet aan de
   hondsvot onder het bovenste blok, om de ene schijf van het onderste blok, over de bovenste schijf,
   om de andere onderste schijf en door naar de hand van de roerganger, die aan loef op het achterdek
@@ -501,25 +524,25 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   **Leren** en in Roeien **Roeicommando**. Leren kiest eerst wat je doet - **Lessen** (een kaart naast
   de boot, een tegelijk, in de volgorde van de lesboeken: **Zeiltermen** (`web/src/zeiltermen/`), **Het weer**,
   **Grote schepen**, **Bruggen**, **Sluizen**, **Regels**, **Voorrang**, **Verkeerstekens**, **Geluidsseinen**,
-  **Lichten en dagtekens** (`web/src/lessen/`, op de gedeelde kaart `lessen/kaart.js`) en **Krachten en koppels**
+  **Lichten en dagtekens** (`web/src/lessen/`, op de gedeelde kaart `lessen/kaart.ts`) en **Krachten en koppels**
   (`web/src/krachten/`); alleen wat de CWO vraagt, de meeste met als laatste onderwerp Zelf verkennen met alles uit
   Zoeken of een knop naar een quiz;
-  wat gevolgd is staat in `lelievlet.lessen.v1` (`lessen/voortgang.js`, per les en onderwerp-id); `?voorrang` enz.
+  wat gevolgd is staat in `lelievlet.lessen.v1` (`lessen/voortgang.ts`, per les en onderwerp-id); `?voorrang` enz.
   in het adres opent er meteen een), **Manoeuvres** (de
   handelingen, alleen in Zeilen) of **Quiz**, met daarin **Onderdelen** (de quiz), **Voorrang** (steeds een nieuwe
-  situatie, makkelijk, normaal of moeilijk, gemaakt uit de regels: `lessen/voorrang-quiz.js`, `voorrang-oefen.js`,
+  situatie, makkelijk, normaal of moeilijk, gemaakt uit de regels: `lessen/voorrang-quiz.ts`, `voorrang-oefen.ts`,
   op de kaart van de lessen; `?voorrangquiz`), **Zeiltermen** (vragen over de boot op het water:
-  `zeiltermen/quiz.js`; `?zeiltermenquiz`) of **Verkeerstekens** (de quiz op borden, tonnen, seinen, lichten,
-  dagmerken en geluidsseinen, `web/src/bpr/tekenquiz.js`, alleen wat CWO vraagt, de score in
+  `zeiltermen/quiz.ts`; `?zeiltermenquiz`) of **Verkeerstekens** (de quiz op borden, tonnen, seinen, lichten,
+  dagmerken en geluidsseinen, `web/src/bpr/tekenquiz.ts`, alleen wat CWO vraagt, de score in
   `lelievlet.verkeerstekens.v1`; de foute antwoorden komen eerst uit de tekens die erop lijken maar
   iets anders betekenen, `LOOKALIKES`, dan uit de eigen groep, en bij het begin van een ronde zet
-  `closePanels` in `main.js` de boot met `modes.sailFree()` vrij op open water: geen steiger, lijnen of
+  `closePanels` in `main.ts` de boot met `modes.sailFree()` vrij op open water: geen steiger, lijnen of
   anker, in Zeilen op een koers) - en toont daaronder het startpaneel daarvan; het opent op wat het
   laatst gekozen is, en anders op Lessen. Op een telefoon gaan de menu's van de kolom er over de hele breedte onder open.
   Rechtsboven zit het **tandwiel** voor Aanpassen, met onderaan dat paneel de snelheid van de
   animaties (met de sneltoetsen voor de camera). Daaronder het rondje met de **i**: een menu met
   **Melden**, de **Handleiding** en de **Homepagina** (op scoutvaardig.nl/lelievlet, in een nieuw
-  tabblad), **Updates** (per datum wat er veranderd is, uit `web/src/updates.js`) en **Over dit
+  tabblad), **Updates** (per datum wat er veranderd is, uit `web/src/updates.ts`) en **Over dit
   model**; die laatste twee gaan midden in beeld open. Updates gaat ook vanzelf open als er een datum
   bij is gekomen sinds de laatste keer dat deze gebruiker keek (`lelievlet.updates.v1` in localStorage,
   met de nieuwste gezien datum): in de geïnstalleerde app voor iedereen, op het web voor wie iets in
@@ -531,17 +554,17 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   komt Melden terug en wordt een melding als bestand opgeslagen; met `feedback: { url }` gaat hij naar een eigen ontvanger. Boot en Leren hebben, net als de andere panelen, rechtsboven *Sluiten*.
   Rechtsonder staat de **onderdelenkaart**: met niets geselecteerd is
   dat alleen een ronde zoekknop, met een onderdeel geselecteerd de kaart met groep en naam en
-  rechtsboven daarin dezelfde zoekknop. Die opent **Zoeken** boven de kaart (`web/src/bpr/zoeken.js`).
+  rechtsboven daarin dezelfde zoekknop. Die opent **Zoeken** boven de kaart (`web/src/bpr/zoeken.ts`).
   Het opent op een startpagina met één zoekveld over alles (per soort de eerste zes treffers en een link
   naar de rest) en een tegel per soort; een tegel opent de eigen pagina van die soort, met *‹* terug:
   **Onderdelen** (de doorzoekbare lijst; elke groepskop daarin heeft een oog dat de hele groep in het
   model verbergt of weer toont, en *Alles tonen* / *Alles verbergen* doen dat voor alle groepen
   tegelijk), **Begrippen** (de zeil- en roeitermen met een korte uitleg en knoppen naar de les, de manoeuvre of
-  het onderdeel waar je ze ziet, `web/src/begrippen.js`), **Borden**, **Markeringen**, **Seinen**, **Lichten** en **Dagmerken** (de schepen van BPR
-  hoofdstuk 3, `bpr/schepen.js` met de uitleg in `bpr/lichtuitleg.js`), **Vlaggen** en
-  **Geluidsseinen** (BPR bijlage 6, `bpr/geluiden.js`, te beluisteren via `bpr/hoorn.js`). Naast het
+  het onderdeel waar je ze ziet, `web/src/begrippen.ts`), **Borden**, **Markeringen**, **Seinen**, **Lichten** en **Dagmerken** (de schepen van BPR
+  hoofdstuk 3, `bpr/schepen.ts` met de uitleg in `bpr/lichtuitleg.ts`), **Vlaggen** en
+  **Geluidsseinen** (BPR bijlage 6, `bpr/geluiden.ts`, te beluisteren via `bpr/hoorn.ts`). Naast het
   zoekveld van elke pagina behalve Onderdelen staat de chip **CWO**: aan laat hij alleen zien wat
-  `cwo` heeft, op alle pagina's tegelijk (`cwoOnly` in `zoeken.js`, één keuze voor alle pagina's, die
+  `cwo` heeft, op alle pagina's tegelijk (`cwoOnly` in `zoeken.ts`, één keuze voor alle pagina's, die
   blijft staan als het paneel dichtgaat). Bij CWO hoort wat op een officiële lijst van CWO staat
   (Kielboot, tot en met V) of wat het CWO-zeilinstructieboek van de Katwijkse Zeeverkenners leert; de
   quiz Verkeerstekens vraagt alleen daarnaar. Wat daar
@@ -559,7 +582,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
 - Onder het tandwiel zit **Volledig scherm** (de vier hoekhaken, naar binnen gekeerd zodra het aan
   staat), ook te bedienen met de toets `f`; hij verdwijnt zolang het Aanpassen-paneel open staat,
   want dat staat op zijn plek. Volledig scherm wordt aan het *hostelement* gevraagd, dus de hele
-  shadow root gaat mee en de viewer houdt zijn eigen indeling (`web/src/fullscreen.js`). Kan de
+  shadow root gaat mee en de viewer houdt zijn eigen indeling (`web/src/fullscreen.ts`). Kan de
   browser dat niet — Safari op de iPhone kent `requestFullscreen` op een element niet, en in een
   `<iframe>` zonder `allow="fullscreen"` is het uitgezet — of wordt het verzoek geweigerd, dan legt
   de viewer zichzelf paginavullend over de pagina heen (`position: fixed`, attribuut `data-lv-vol`
@@ -586,7 +609,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   plus de richting waaruit nu gekeken wordt) waarbij het kleinste aantal van zeven steekproefpunten
   van het onderdeel achter andere onderdelen schuilgaat. Onderdelen die in de huidige modus weg zijn,
   worden gedimd en zijn niet aan te klikken.
-- Wat geselecteerd is **ademt**, en wat klein is krijgt een **zoeklicht** (`web/src/locator.js`). De
+- Wat geselecteerd is **ademt**, en wat klein is krijgt een **zoeklicht** (`web/src/locator.ts`). De
   highlight van de selectie - en van de kleuren die de quiz op onderdelen zet, maar nooit die van de
   hover, die rustig en onmiddellijk blijft - zwelt aan en af in 1.4 s, tussen 55 % en 100 % van de
   sterkte die `paint()` zette; de overlay van een gebied ademt in zijn dekking mee. Het is het
@@ -609,13 +632,13 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
 - Sommige nummers in de tekening duiden een gebied aan, geen object: Boeg (de voorste 0.65 m van de
   romp) en Kleed (de derde baan van het grootzeil, geteld vanaf de schoothoek omhoog, tussen de naden
   van `extras.zeil.naden`). Ze staan als onderdelen in de lijst, gemarkeerd als "gebied", met
-  "Gebied, geen los onderdeel" in de infotegel. `web/src/regions.js` definieert elk gebied
+  "Gebied, geen los onderdeel" in de infotegel. `web/src/regions.ts` definieert elk gebied
   als een paar onderdeel-id's plus een predicaat over de driehoeken van hun meshes, en bouwt de
   highlight als een overlay die de position- en normal-attributen van die meshes deelt (zodat hij met
   het zeil meebuigt) en eronder hangt (zodat hij met ze meezwaait). Hij verschijnt alleen zolang zijn
   regel geselecteerd is en is zelf nooit aan te klikken - een klik op de boeg selecteert nog steeds
   Boeisel, Vlak of Berghout.
-- Een windvaan in de masttop (gebouwd in `web/src/rig.js`, niet in de CAD) draait zo dat het
+- Een windvaan in de masttop (gebouwd in `web/src/rig.ts`, niet in de CAD) draait zo dat het
   draadframe in de wind wijst en de rode vaan met de wind mee uitstaat.
 - Midzwaard neer / half / op, zonder eigen bediening: een klik op het zwaard, de zwaardloper of de
   borgpen zet het een stand verder, en het volgt de boot - op bij roeien, wrikken, voor de wind en zodra een met de hand uitgegooid
@@ -640,16 +663,16 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   beide einden een echt gat. De kraanlijn wordt in het bovenste gat vastgezet. Het pettenlijntje loopt
   van de vrije beugel aan het bakboordeind van de schootring naar achteren onder de giek door, door
   het oog onder de achterste beslagband en door het onderste gat, met een stopperknoop erachter.
-- Procedures (`web/src/procedure.js`): reven, zeilen strijken en mast strijken zijn timelines van
+- Procedures (`web/src/procedure.ts`): reven, zeilen strijken en mast strijken zijn timelines van
   stappen, die elk één waarde in een gegeven tijd van waar hij stond naar waar hij moet zijn brengen en
   een Nederlands label dragen. Een timeline kan beide kanten op worden afgespeeld, gepauzeerd, stap
   voor stap doorlopen en gescrubd; `initModes()` geeft de voortgangsbalk `procedure()` (kale data) en
   `procedureControl` (play, pause, volgende, vorige, scrub). Het tuig is ÉÉN timeline: "Zeilen op" is
   het begin, "Zeilen gestreken" het einde van de stap zeilbinders, "Mast gestreken" het einde ervan.
   Getoond en bediend wordt hij als twee flows, **Zeilen** en **Mast**: elk een `Stretch` (in
-  `web/src/procedure.js`) van die timeline, met alleen zijn eigen stappen op de voortgangsbalk; vorige,
+  `web/src/procedure.ts`) van die timeline, met alleen zijn eigen stappen op de voortgangsbalk; vorige,
   volgende en de schuif blijven binnen de flow.
-- Leren → **Manoeuvres** (`web/src/handelingen.js`) is een startpaneel met de
+- Leren → **Manoeuvres** (`web/src/handelingen.ts`) is een startpaneel met de
   handelingen als rijen, zoals de oefeningen van de quiz, in vijf groepen: **Tuigage** (mast zetten, zeilen
   aanslaan, hijsen, reven met het aantal slagen, strijken en afslaan, mast strijken), **Wenden** (overstag, gijp, stormrondje, opkruisen, man over boord,
   dwarspeiling, bijliggen en weer varen), **Afmeren** (aan hogerwal de sliplanding en de opschieter; aan een langswal de
@@ -662,19 +685,19 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   stappen en voorwaarden van elk staan in `docs/manoeuvres.md`. Een stap met een commando ("Ree!",
   "Gijp!") laat het commando als tekstballon zien boven wie het roept, net als een gekozen
   roeicommando. Elke handeling heeft
-  voorwaarden (`OPS` in `web/src/modes.js`) die kijken naar hoe de boot er nu bij ligt en niet naar
+  voorwaarden (`OPS` in `web/src/modes.ts`) die kijken naar hoe de boot er nu bij ligt en niet naar
   wat het laatst gevraagd is; een rij die niet kan is grijs, met de reden eronder ("Eerst de zeilen
   strijken", "Eerst de mast zetten", "Eerst de zeilen hijsen", "Eerst het reven afmaken") of wat er
   al zo is ("De mast staat al"). Wat niet genoemd is, doet er niet toe: de mast wil alleen gestreken
   en opgebonden zeilen — waar het anker of het midzwaard intussen is, maakt niet uit.
-  Bovenaan de kaart staat het doel van de handeling in één zin (`DOEL` in `web/src/handelingen.js`); een
+  Bovenaan de kaart staat het doel van de handeling in één zin (`DOEL` in `web/src/handelingen.ts`); een
   stap kan een `tip` hebben, die bij bekijken onder de stap staat zolang hij loopt en bij oefenen na
   het antwoord, en een fout antwoord dat leerlingen vaak kiezen een uitleg waarom het fout is.
   Daaronder twee knoppen: **Bekijken** speelt de handeling af, en de stappenbalk (vorige, afspelen,
   volgende, de schuif) staat dan in de kaart; **Oefenen** laat de boot staan en vraagt bij elke stap
   "Wat is de volgende stap?" met vier antwoorden: de goede en drie die in de toestand van de boot
   nú zouden kunnen, alleen niet nu. Welke dat zijn volgt uit wat elke stap vooraf nodig heeft
-  (`STEP_NEEDS` en `REEF_NEEDS` in `modes.js`: opdoeken vraagt het grootzeil omlaag, de mast de
+  (`STEP_NEEDS` en `REEF_NEEDS` in `modes.ts`: opdoeken vraagt het grootzeil omlaag, de mast de
   lummelbout, de grendelbout, de pelikaanhaak en de fok eraf), plus het terugdraaien van een stap die
   al gedaan is; ze komen vooral uit de handeling zelf en soms uit de andere flow. Een antwoord laat
   die stap zien (de camera eerst, zoals altijd), een fout antwoord de goede; na de laatste stap volgt
@@ -682,14 +705,14 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   de quiz: alleen de boot, de kaart en volledig scherm, en een klik op het model doet niets.
   Aan het eind van de handeling wordt het kruisje een groene **Klaar**. Dat gebeurt zodra er in de
   richting van de handeling geen stap meer te doen is. Het kruisje daarvoor breekt de handeling af
-  (`run.abandon()` in `modes.js`): de tijdlijn gaat terug naar waar de handeling begon, en een
+  (`run.abandon()` in `modes.ts`): de tijdlijn gaat terug naar waar de handeling begon, en een
   manoeuvre laat de boot daar los. Zo ligt de boot er weer bij zoals ervoor, zonder iets half gedaan.
   Een steiger die Afmeren had gelegd verdwijnt, en na een afgebroken wending of gijp vaart ze weer
   haar oude koers.
-  Bovenin de kaart kies je het beeld (`main.js`, onthouden in `lelievlet.beeld.v1`):
+  Bovenin de kaart kies je het beeld (`main.ts`, onthouden in `lelievlet.beeld.v1`):
   - **Vogelvlucht** (standaard): van schuin boven, zoals elke manoeuvre het zelf aangeeft; de camera
     draait mee met de boot en houdt het spoor in beeld. Bij de manoeuvres onder zeil blijft hij op dat
-    ene beeld en vliegt hij niet per stap naar de onderdelen (`steadyView` in `modes.js`); bij de kleine
+    ene beeld en vliegt hij niet per stap naar de onderdelen (`steadyView` in `modes.ts`); bij de kleine
     handelingen (reven, de vallen, lijnen) wel.
   - **Dichtbij**: bij elke stap naar de onderdelen waar het om gaat.
   - **Bovenaf**: recht van boven en stil boven het water, met de wind van boven. De boot vaart door
@@ -755,7 +778,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   over van de een naar de ander, zodat er bij geen enkele schootstand een gat tussen zeil en giek valt,
   gereefd of niet.
 - Reven (rolrif), bediening "Reven" met het aantal slagen van de giek. Een kleine sequencer in
-  `web/src/modes.js` doorloopt de stappen op volgorde, elk één waarde die naar zijn doel wordt
+  `web/src/modes.ts` doorloopt de stappen op volgorde, elk één waarde die naar zijn doel wordt
   gedreven, en plant opnieuw vanaf waar hij op dat moment is als de opdracht verandert: vallen vieren;
   de schootring naar achteren naar de nok schuiven; de giek 3 cm naar achteren trekken tegen de veer in
   het lummelbeslag in (er komt een as in de spleet tevoorschijn); de giek ronddraaien; hem terug laten
@@ -774,7 +797,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   klauwval bij de hommerring (daarom een dubbel blok, in plaats van het enkele uit de CAD), en omlaag
   naar de bovenste bakboordkikker op de mastkoker, de enige vrije. Elk frame gelegd: hij hangt slap, zwaait met de giek
   mee en ligt tegen het doek aan als het zeil naar bakboord bolt.
-- Vlaggenstok, knop en vlag (`web/src/flag.js`): een gebogen stok (recht in de buis, daarna naar
+- Vlaggenstok, knop en vlag (`web/src/flag.ts`): een gebogen stok (recht in de buis, daarna naar
   achteren overbuigend, taps) die in de open bovenkant van de roerkoning staat, een 1"-buis, zodat hij
   met het roer mee 33.7 graden achteroverhelt; de knop is een schijf van 2 cm met een afgeronde rand in
   de bakskleur; de Nederlandse vlag waait onder zeil met de wind mee uit, hangt stil als er geen wind
@@ -783,11 +806,11 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   zeilen strijken (of met een klik) wordt hij overgezet en staat hij in de twee mikhouders op het
   achterschot, vork omhoog en haaks op de boot, met zijn voet op het vlak.
 - Dollen: de boot heeft zes dolpotten (pipeline) maar vier dollen (`makeDol`, `makeKnevel` in
-  `web/src/rig.js`), in de potten bij de twee doften. Een dol staat alleen in zijn pot, meedraaiend met
+  `web/src/rig.ts`), in de potten bij de twee doften. Een dol staat alleen in zijn pot, meedraaiend met
   de riem, zolang er een riem in getrokken wordt; anders is hij eruit gelicht en hangt hij binnenboord
   ondersteboven aan zijn kettinkje, dat door de pot loopt naar een knevel die niet door de boring kan
   (`layChain` legt de schalmen langs het pad over de rand).
-- Vijf onderdelen die de CAD niet heeft, worden in de viewer gebouwd (`web/src/rig.js`) en als gewone
+- Vijf onderdelen die de CAD niet heeft, worden in de viewer gebouwd (`web/src/rig.ts`) en als gewone
   aanklikbare onderdelen geregistreerd: de **zwaardbout**, de **borgpen**, het **kettinkje** daarvan,
   de **windvaan** en de omzetting van de **roerkop**.
 - De twee blokken van de grootschoot hangen in de schoot: elk is gericht langs de lijn van de
@@ -809,7 +832,7 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
     de riemen toe, op riemen, lopend, op of binnen heeft, roeit niet mee. Onder elk boord staat wat het
     nu doet.
   - De roep verschijnt in tekstballonnen boven de roerganger, één per commando.
-  Een commando is een houding (`ROEICOMMANDOS` in `web/src/modes.js`: kracht, hoe ver omlaag, hoe ver
+  Een commando is een houding (`ROEICOMMANDOS` in `web/src/modes.ts`: kracht, hoe ver omlaag, hoe ver
   naar achteren gehaald, blad verticaal of vlak, hoe ver binnenboord, staand op de vlonder, in de dol
   of opgeborgen; `beide: true` markeert de commando's voor de hele boot) waar elke riem van dat boord
   soepel naartoe gaat. Het paneel toont de woorden die de roerganger voor de twee boorden samen zou
@@ -825,15 +848,15 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
 
 ## Quiz (Leren)
 
-Leren → Quiz → **Onderdelen** is de quiz (`web/src/quiz.js`, de styling ervan in
+Leren → Quiz → **Onderdelen** is de quiz (`web/src/quiz.ts`, de styling ervan in
 één gemarkeerd blok onderaan `web/src/style.css`). Er wordt alleen gevraagd naar de genummerde namen
-op de onderdelentekening van de klasse — `web/src/quizdata.js`, één entry per naam met de id's van de
+op de onderdelentekening van de klasse — `web/src/quizdata.ts`, één entry per naam met de id's van de
 onderdelen die het *zijn* (`delen`) en de onderdelen die bij een klik goed gerekend worden omdat ze
 erbij horen (`ook`). Het model heeft veel meer onderdelen dan er geleerd hoeven te worden. Id's
 worden bij het opstarten tegen `parts` opgezocht; een entry waarvan geen enkel onderdeel uit `delen` in het model zit valt af, en wat is
 afgevallen wordt één keer met `console.info` gelogd.
 
-Welke vragen een insluitende pagina stelt, bepaalt zij zelf: `quizEntries()` in `web/src/config.js`
+Welke vragen een insluitende pagina stelt, bepaalt zij zelf: `quizEntries()` in `web/src/config.ts`
 haalt `quiz.weg` uit de standaardlijst en zet `quiz.erbij` erachteraan. `debug.quiztabellen` zet een link **Tabellen** in het startpaneel die laat zien wat daar
 uiteindelijk uit kwam — handig om te zien of een `weg` of `erbij` terechtkwam waar hij hoorde.
 
@@ -843,7 +866,7 @@ Vier soorten oefening, en Gemengd, die per vraag één soort trekt uit wat de en
   selectie-highlight en de kaart biedt Bevestigen / Annuleren aan, zonder ooit te noemen wat er
   geraakt is. Goed als de id van het aangeklikte onderdeel in `delen` of `ook` staat; bij een gebied
   (Boeg, Kleed) als de klik op een van de onderdelen landde waar het gebied op ligt *én* binnen het
-  gebied zelf — `regionAt` in `web/src/regions.js` beantwoordt dat aan de hand van de driehoeken die
+  gebied zelf — `regionAt` in `web/src/regions.ts` beantwoordt dat aan de hand van de driehoeken die
   de overlay bedekt. Fout: de kaart noemt wat er in plaats daarvan is aangeklikt, en de camera vliegt
   naar het echte onderdeel en licht het op.
 - **Benoemen** — het onderdeel wordt opgelicht en aangevlogen, en er worden vier namen aangeboden. De
@@ -882,7 +905,7 @@ Vragen worden zonder herhaling getrokken tot de pool op is, met een weging naar 
 (`(1 + fout × 2) / (1 + goed)`). Entries waarvan de onderdelen er in de modus waarin de boot staat
 niet zijn vallen af, via dezelfde `partVisible` als de onderdelenlijst, en het startpaneel meldt het
 als een groot deel van de pool weg is. Het paneel kiest eerst het **Diploma**: **Roeien** vraagt
-de namen van de roeilijst van 40 (`roeien: true` in `quizdata.js`; welke dat zijn staat in
+de namen van de roeilijst van 40 (`roeien: true` in `quizdata.ts`; welke dat zijn staat in
 `reference/book/ROEIEN.md`), die geen niveaus kent — de roeiboeken eisen ze allemaal. **Zeilen**
 heeft daaronder een **Niveau** (I / II / III): niveau L vraagt alles met `niveau <= L`, een entry
 zonder niveau telt als III, en `zeilen: false` (de Riem) laat een roei-naam bij Zeilen weg. Zeilen
@@ -902,7 +925,7 @@ viewers op één pagina tellen samen: elke wijziging wordt gelegd op wat er op d
 "Wissen" onderaan het startpaneel wist de score (niet de keuze) na een inline
 "Score wissen?".
 
-`main.js` geeft de quiz wat hij nodig heeft via één aanroep `initQuiz({ … })` na `initModes` en
+`main.ts` geeft de quiz wat hij nodig heeft via één aanroep `initQuiz({ … })` na `initModes` en
 `initRegions`: `parts`, `scene`, `select`, `flyTo`, `setCovered`,
 `setHighlights`, `partVisible`, de map met paneelsluiters, en het gereedschap van de insluiting
 (`ui`, `wrap`, `config`, `signal`, `engaged`, `realTarget`, `onDestroy`). `setHighlights` is het enige dat de

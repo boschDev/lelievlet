@@ -1,0 +1,154 @@
+// @ts-nocheck
+import * as THREE from 'three';
+import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+
+// Lettering on the boeisel: the text is projected onto the curved plating as a decal, on both
+// sides of the boat, following the sheer. Model space: x = transom -> bow, y = up, z = starboard.
+
+const raycaster = new THREE.Raycaster();
+
+function findStrakeMiddle(mesh, x, side) {
+  let lo = null; let hi = null;
+  const dir = new THREE.Vector3(0, 0, -side);
+  for (let y = 0.3; y <= 1.25; y += 0.01) {
+    raycaster.set(new THREE.Vector3(x, y, side * 3), dir);
+    const hit = raycaster.intersectObject(mesh, false)[0];
+    if (!hit) continue;
+    if (!lo) lo = hit;
+    hi = hit;
+  }
+  if (!lo) return null;
+  const yMid = (lo.point.y + hi.point.y) / 2;
+  raycaster.set(new THREE.Vector3(x, yMid, side * 3), dir);
+  const mid = raycaster.intersectObject(mesh, false)[0];
+  if (!mid) return null;
+  const normal = mid.face.normal.clone().transformDirection(mesh.matrixWorld);
+  if (normal.z * side < 0) normal.negate();
+  return { point: mid.point, normal, height: hi.point.y - lo.point.y };
+}
+
+function textTexture(text, color, renderer) {
+  const H = 256; const pad = 24;
+  const font = `700 ${H - 2 * pad}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const canvas = document.createElement('canvas');
+  let ctx = canvas.getContext('2d');
+  ctx.font = font;
+  const width = Math.ceil(ctx.measureText(text).width) + 2 * pad;
+  canvas.width = Math.max(8, width); canvas.height = H;
+  ctx = canvas.getContext('2d');
+  ctx.font = font; ctx.fillStyle = color; ctx.textBaseline = 'middle';
+  ctx.fillText(text, pad, H / 2 + 4);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return { texture, aspect: canvas.width / canvas.height };
+}
+
+// A name board: a plank of the boat's own varnished wood with rounded corners and some thickness, screwed on the
+// boeisel, the name in the middle of it - smaller than lettering straight on the boeisel. Flat: on the curve of the
+// boeisel it touches in its middle.
+const BORD_TEKST = 0.42;               // the letters' cap height, of the board's
+const BORD_DIK = 0.012;                // m
+const BORD_RAND = 0.002;               // m: its edges rounded off
+function boardText(text, color, renderer) {
+  const H = 256; const font = `700 ${Math.round(BORD_TEKST * H / 0.72)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const canvas = document.createElement('canvas');
+  let g = canvas.getContext('2d');
+  g.font = font;
+  canvas.width = Math.ceil(g.measureText(text).width + 1.1 * H); canvas.height = H;
+  g = canvas.getContext('2d');
+  g.font = font; g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, canvas.width / 2, H / 2 + 4);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return { texture, aspect: canvas.width / H };
+}
+function boardShape(w, h) {
+  const r = 0.18 * h; const x = w / 2 - BORD_RAND; const y = h / 2 - BORD_RAND;
+  const shape = new THREE.Shape();
+  shape.moveTo(-x + r, -y); shape.lineTo(x - r, -y); shape.quadraticCurveTo(x, -y, x, -y + r);
+  shape.lineTo(x, y - r); shape.quadraticCurveTo(x, y, x - r, y); shape.lineTo(-x + r, y);
+  shape.quadraticCurveTo(-x, y, -x, y - r); shape.lineTo(-x, -y + r); shape.quadraticCurveTo(-x, -y, -x + r, -y);
+  return new THREE.ExtrudeGeometry(shape, {
+    depth: BORD_DIK - 2 * BORD_RAND, bevelEnabled: true, bevelThickness: BORD_RAND, bevelSize: BORD_RAND, bevelSegments: 2, curveSegments: 6,
+  }).translate(0, 0, BORD_RAND);
+}
+
+export class HullText {
+  /** boeisel: { sb: Mesh, bb: Mesh } - the outer skins of the boeisel plates */
+  constructor(boeisel, renderer, parent) {
+    this.boeisel = boeisel; this.renderer = renderer; this.parent = parent;
+    this.decals = new Map();
+    this.strakes = new Map();      // per viewer: the probing is slow, the answer never changes
+    for (const m of Object.values(boeisel)) m.updateWorldMatrix(true, false);
+    // a name board is of the boat's varnished wood, as the helmstok and the riemen
+    parent.traverse((m) => { if (m.isMesh && m.material?.name === 'hout_gelakt') this.wood ??= m.material; });
+  }
+
+  /** Middle of the boeisel strake (and the surface normal there) at station x on one side. */
+  strakeMiddle(mesh, x, side) {
+    const key = `${mesh.uuid}:${x.toFixed(3)}:${side}`;
+    if (!this.strakes.has(key)) this.strakes.set(key, findStrakeMiddle(mesh, x, side));
+    return this.strakes.get(key);
+  }
+
+  /** key: slot name, text, x: station (m from the transom) of the text centre, letterHeight in m; bordje: on a
+   *  wooden name board about as high as the letters would be */
+  set(key, text, x, letterHeight, color = '#0b0b0b', { bordje = false } = {}) {
+    for (const old of this.decals.get(key) ?? []) {
+      this.parent.remove(old);
+      old.traverse((m) => {
+        if (!m.isMesh) return;
+        m.geometry.dispose();
+        if (m.material !== this.wood) { m.material.map?.dispose(); m.material.dispose(); }
+      });
+    }
+    this.decals.set(key, []);
+    text = text.trim();
+    if (!text) return;
+    for (const [name, side] of [['sb', 1], ['bb', -1]]) {
+      const mesh = this.boeisel[name];
+      const here = this.strakeMiddle(mesh, x, side);
+      const aft = this.strakeMiddle(mesh, x - 0.25, side); const fore = this.strakeMiddle(mesh, x + 0.25, side);
+      if (!here || !aft || !fore) continue;
+      // Seen from outside, text runs towards the bow on starboard and towards the stern on port.
+      const n = here.normal.clone().normalize();
+      const along = fore.point.clone().sub(aft.point).multiplyScalar(side).normalize();
+      const xAxis = along.sub(n.clone().multiplyScalar(along.dot(n))).normalize();
+      const yAxis = new THREE.Vector3().crossVectors(n, xAxis);
+      const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, n);
+      if (bordje) {
+        // the board about as high as the letters would be, the name on its face
+        const { texture, aspect } = boardText(text, color, this.renderer);
+        const h = letterHeight * 1.1; const w = h * aspect;
+        const board = new THREE.Group();
+        board.add(new THREE.Mesh(boardShape(w, h), this.wood ?? new THREE.MeshStandardMaterial({ color: '#9e6633', roughness: 0.35 })));
+        const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({
+          map: texture, transparent: true, roughness: 0.35, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+        }));
+        face.position.z = BORD_DIK + 0.0002;
+        board.add(face);
+        board.quaternion.setFromRotationMatrix(basis);
+        board.position.copy(here.point);
+        this.parent.add(board);
+        this.decals.get(key).push(board);
+        continue;
+      }
+      const { texture, aspect } = textTexture(text, color, this.renderer);
+      const boxHeight = letterHeight / 0.62;                   // cap height is ~62 % of the canvas height
+      const orientation = new THREE.Euler().setFromRotationMatrix(basis);
+      const size = new THREE.Vector3(boxHeight * aspect, boxHeight, 0.3);
+      const decal = new THREE.Mesh(
+        new DecalGeometry(mesh, here.point, orientation, size),
+        new THREE.MeshStandardMaterial({
+          map: texture, transparent: true, roughness: 0.5, depthWrite: false,
+          polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+        }),
+      );
+      decal.renderOrder = 2;
+      this.parent.add(decal);
+      this.decals.get(key).push(decal);
+    }
+  }
+}

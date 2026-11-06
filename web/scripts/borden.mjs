@@ -19,7 +19,7 @@ const work = mkdtempSync(join(tmpdir(), 'borden-'));
 
 const rows = [];
 for (const g of groups) {
-  const signs = (await import(`../src/bpr/borden/${g}.js?${Date.now()}`)).default;
+  const signs = (await import(`../src/bpr/borden/${g}.ts?${Date.now()}`)).default;
   for (const [code, { svg }] of Object.entries(signs)) {
     const file = join(work, `${code}.svg`); writeFileSync(file, svg);
     const ours = join(work, `${code}.png`);

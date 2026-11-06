@@ -57,7 +57,7 @@ export default defineConfig({
     target: 'es2022',
     minify: true,
     lib: {
-      entry: resolve(here, 'src/lib.js'),
+      entry: resolve(here, 'src/lib.ts'),
       name: 'Lelievlet',
       formats: ['es', 'iife'],
       fileName: (format) => (format === 'es' ? 'lelievlet.js' : 'lelievlet.iife.js'),

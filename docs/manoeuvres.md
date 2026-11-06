@@ -5,7 +5,7 @@ en in welke stappen. Wat er nog bij komt, met CWO-niveau en bronnen, staat in de
 `docs/handelingen.md`.
 
 Dit bestand wordt gemaakt door `web/scripts/docs.mjs` (`pnpm run docs` in `web/`); de stappen, de
-voorwaarden en wat er eerst gedaan moet zijn komen rechtstreeks uit `web/src/modes.js`. Pas het niet
+voorwaarden en wat er eerst gedaan moet zijn komen rechtstreeks uit `web/src/modes.ts`. Pas het niet
 met de hand aan: verander de bron en draai het script opnieuw.
 
 ## Het menu Handelingen
@@ -32,7 +32,7 @@ Daaronder kies je:
   kiest hoe je kijkt. Met de groene afspeelknop gaat ze stap voor stap: elke stap blijft even staan,
   lang genoeg om te lezen wat erbij staat, en dan komt de volgende. Je kunt ook zelf stap voor stap
   doorklikken. Vanaf de eerste stap staat op de plaats van het doel waarom je die stap doet, waar daar
-  iets over te zeggen is (`web/src/stapuitleg.js`, naar de lesboeken van Sint Maarten en Katwijk). De stappenbalk staat in de kaart: vorige stap,
+  iets over te zeggen is (`web/src/stapuitleg.ts`, naar de lesboeken van Sint Maarten en Katwijk). De stappenbalk staat in de kaart: vorige stap,
   afspelen/pauzeren, volgende stap en een schuif over de hele handeling. Volgende en vorige stap gaan
   altijd in de richting van de handeling zelf. De tip staat erbij zolang die stap bezig is. Een stap
   op zich laat de camera bij de kleine handelingen (reven, vallen, lijnen) eerst naar de onderdelen

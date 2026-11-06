@@ -4,7 +4,7 @@ Naslag voor wie de viewer gebruikt of controleert: elk onderdeel dat het 3D-mode
 namen die de lesstof ervoor gebruikt, en of en hoe de **quiz** (Leren › Quiz) ernaar vraagt.
 
 Dit bestand wordt gemaakt door `web/scripts/docs.mjs` (`pnpm run docs` in `web/`) uit
-`web/public/models/lelievlet.parts.json` (het model) en `web/src/quizdata.js` (de vragen). Pas
+`web/public/models/lelievlet.parts.json` (het model) en `web/src/quizdata.ts` (de vragen). Pas
 het niet met de hand aan: verander de bron en draai het script opnieuw.
 
 ## Hoe te lezen

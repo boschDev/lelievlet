@@ -2,22 +2,22 @@
 //   docs/onderdelen.md   every part of the model, its other names and where the quiz asks about it
 //   docs/manoeuvres.md   every operation: what it is for, its preconditions and its steps
 // Run from web/ with `pnpm run docs` after the model, the quiz list or the operations change. The
-// tables come from lelievlet.parts.json, src/quizdata.js, src/modes.js and src/handelingen.js, so
+// tables come from lelievlet.parts.json, src/quizdata.ts, src/modes.ts and src/handelingen.ts, so
 // they stay in step.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { QUIZ } from '../src/quizdata.js';
-import { ANDERE_NAMEN } from '../src/anderenamen.js';
+import { QUIZ } from '../src/quizdata.ts';
+import { ANDERE_NAMEN } from '../src/anderenamen.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const web = resolve(here, '..');
 const docs = resolve(web, '..', 'docs');
 const parts = JSON.parse(readFileSync(resolve(web, 'public/models/lelievlet.parts.json'), 'utf8'));
-const modes = readFileSync(resolve(web, 'src/modes.js'), 'utf8');
-const handelingen = readFileSync(resolve(web, 'src/handelingen.js'), 'utf8');
-const template = readFileSync(resolve(web, 'src/template.js'), 'utf8');
+const modes = readFileSync(resolve(web, 'src/modes.ts'), 'utf8');
+const handelingen = readFileSync(resolve(web, 'src/handelingen.ts'), 'utf8');
+const template = readFileSync(resolve(web, 'src/template.ts'), 'utf8');
 
 const ROMAN = { 1: 'I', 2: 'II', 3: 'III' };
 const cell = (text) => String(text).replace(/\|/g, '\\|');
@@ -81,7 +81,7 @@ Naslag voor wie de viewer gebruikt of controleert: elk onderdeel dat het 3D-mode
 namen die de lesstof ervoor gebruikt, en of en hoe de **quiz** (Leren › Quiz) ernaar vraagt.
 
 Dit bestand wordt gemaakt door \`web/scripts/docs.mjs\` (\`pnpm run docs\` in \`web/\`) uit
-\`web/public/models/lelievlet.parts.json\` (het model) en \`web/src/quizdata.js\` (de vragen). Pas
+\`web/public/models/lelievlet.parts.json\` (het model) en \`web/src/quizdata.ts\` (de vragen). Pas
 het niet met de hand aan: verander de bron en draai het script opnieuw.
 
 ## Hoe te lezen
@@ -167,11 +167,11 @@ function objectOf(name, source = modes) {
 /** The step order a manoeuvre's run checks, from `<name>.needs = { ... };` in modes.js. */
 function needsOf(name) {
   const m = modes.match(new RegExp(`\\b${name}\\.needs = (\\{[\\s\\S]*?\\})\\s*;`));
-  if (!m) throw new Error(`docs.mjs: no \`${name}.needs = { ... };\` in src/modes.js`);
+  if (!m) throw new Error(`docs.mjs: no \`${name}.needs = { ... };\` in src/modes.ts`);
   try {
     return Function(`return ${m[1]}`)();
   } catch (error) {
-    throw new Error(`docs.mjs: \`${name}.needs\` in src/modes.js is no plain object literal (${error.message})`);
+    throw new Error(`docs.mjs: \`${name}.needs\` in src/modes.ts is no plain object literal (${error.message})`);
   }
 }
 /**
@@ -183,7 +183,7 @@ function opsOf() {
   const block = modes.slice(at, modes.indexOf('\n  };', at));
   // preconditions shared between operations, written once as `const name = [check, 'reason'];`
   const shared = Object.fromEntries([...modes.matchAll(/const (\w+) = \[[^\]\n]*'([^']+)'\];/g)].map((m) => [m[1], m[2]]));
-  if (!shared.notReefing) throw new Error('docs.mjs: no `const notReefing = [..., \'reason\']` in src/modes.js');
+  if (!shared.notReefing) throw new Error('docs.mjs: no `const notReefing = [..., \'reason\']` in src/modes.ts');
   const named = new RegExp(`'([^']+)'|\\b(${Object.keys(shared).join('|')})\\b`, 'g');
   const out = {};
   const heads = [...block.matchAll(/^ {4}(\w+): \{/gm)];
@@ -325,7 +325,7 @@ en in welke stappen. Wat er nog bij komt, met CWO-niveau en bronnen, staat in de
 \`docs/handelingen.md\`.
 
 Dit bestand wordt gemaakt door \`web/scripts/docs.mjs\` (\`pnpm run docs\` in \`web/\`); de stappen, de
-voorwaarden en wat er eerst gedaan moet zijn komen rechtstreeks uit \`web/src/modes.js\`. Pas het niet
+voorwaarden en wat er eerst gedaan moet zijn komen rechtstreeks uit \`web/src/modes.ts\`. Pas het niet
 met de hand aan: verander de bron en draai het script opnieuw.
 
 ## Het menu Handelingen
@@ -352,7 +352,7 @@ Daaronder kies je:
   kiest hoe je kijkt. Met de groene afspeelknop gaat ze stap voor stap: elke stap blijft even staan,
   lang genoeg om te lezen wat erbij staat, en dan komt de volgende. Je kunt ook zelf stap voor stap
   doorklikken. Vanaf de eerste stap staat op de plaats van het doel waarom je die stap doet, waar daar
-  iets over te zeggen is (\`web/src/stapuitleg.js\`, naar de lesboeken van Sint Maarten en Katwijk). De stappenbalk staat in de kaart: vorige stap,
+  iets over te zeggen is (\`web/src/stapuitleg.ts\`, naar de lesboeken van Sint Maarten en Katwijk). De stappenbalk staat in de kaart: vorige stap,
   afspelen/pauzeren, volgende stap en een schuif over de hele handeling. Volgende en vorige stap gaan
   altijd in de richting van de handeling zelf. De tip staat erbij zolang die stap bezig is. Een stap
   op zich laat de camera bij de kleine handelingen (reven, vallen, lijnen) eerst naar de onderdelen

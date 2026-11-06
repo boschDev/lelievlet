@@ -1,0 +1,18 @@
+{
+  // Vite builds the viewer and strips the types; tsc only checks them (pnpm run typecheck).
+  // Files that are not typed yet start with // @ts-nocheck: take it out of a file once it is typed.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": ["vite/client"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"]
+}
