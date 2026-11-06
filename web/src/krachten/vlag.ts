@@ -1,5 +1,5 @@
-// @ts-nocheck
 import * as THREE from 'three';
+import type { Vec2 } from './model.ts';
 
 // A flag that stands still, for Ware en schijnbare wind: on a boei beside the boat, it flies in the ware
 // wind, while the flag and the windvaan on the boat - sailing - fly in the schijnbare wind. Set going
@@ -9,7 +9,10 @@ const POLE = 2.6;                   // m, from the water to the top of the pole
 const W = 0.7; const H = 0.46;      // the cloth
 const NU = 18;                      // segments along the cloth, for its waves
 
-export function createVlag(scene) {
+/** What dispose meets in the group: meshes, and the groups that hold them. */
+type Deel = THREE.Object3D & { geometry?: THREE.BufferGeometry; material?: THREE.Material };
+
+export function createVlag(scene: THREE.Scene) {
   const group = new THREE.Group(); group.name = 'krachten-vlag'; group.visible = false; scene.add(group);
   const boei = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, 0.55, 24), new THREE.MeshStandardMaterial({ color: 0xf2c200, roughness: 0.5 }));
   boei.position.y = 0.05; group.add(boei);
@@ -19,7 +22,7 @@ export function createVlag(scene) {
   // the cloth from the pole along +x, rood wit blauw from the top: three bands painted on it, sharp
   const geo = new THREE.PlaneGeometry(W, H, NU, 1); geo.translate(W / 2, 0, 0);
   const canvas = document.createElement('canvas'); canvas.width = 4; canvas.height = 3;
-  const paint = canvas.getContext('2d');
+  const paint = canvas.getContext('2d')!;
   ['#ae1c28', '#ffffff', '#21468b'].forEach((c, i) => { paint.fillStyle = c; paint.fillRect(0, i, 4, 1); });
   const texture = new THREE.CanvasTexture(canvas); texture.magFilter = THREE.NearestFilter; texture.colorSpace = THREE.SRGBColorSpace;
   const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide, roughness: 0.85 }));
@@ -28,9 +31,9 @@ export function createVlag(scene) {
   const rest = Float32Array.from(pos.array);
 
   return {
-    set visible(on) { group.visible = on; },
+    set visible(on: boolean) { group.visible = on; },
     /** at: where it stands (world, on the water); to: [x, z], the way the ware wind blows (world); wind 0..1. */
-    update(t, at, to, wind) {
+    update(t: number, at: THREE.Vector3, to: Vec2, wind: number) {
       group.position.copy(at);
       holder.rotation.y = Math.atan2(-to[1], to[0]);                  // its +x downwind
       // waves running out along the cloth, bigger towards the free end, and a little sag in a light wind
@@ -44,7 +47,7 @@ export function createVlag(scene) {
     },
     dispose() {
       group.removeFromParent();
-      group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+      group.traverse((o: Deel) => { o.geometry?.dispose(); o.material?.dispose(); });
       texture.dispose();
     },
   };

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Krachten: the lessons. They follow Sint Maarten Kielboot III, hoofdstuk 7 (Peppelman 2023,
 // CC BY-NC-SA 4.0) in order, words and colours - blauw lucht, rood water, groen gestippeld een koppel
 // - with the natuurkunde set right where the book has it otherwise (the zeil and the "langere weg",
@@ -24,10 +23,67 @@
 //                         berghout onder water or naar loef, rood omslaan) and 'gier' (oranje: the roer cannot hold her)
 
 import { BERGHOUT_ONDER, HELM_MOST } from './model.ts';
+import type { Krachten, Trim, ZeilOpBoot } from './model.ts';
 
-const kant = (z) => (z > 0 ? 'stuurboord' : 'bakboord');
-const hoeveel = (r) => { const h = Math.abs(r.helmNeeded); return h < 3 ? 'een klein beetje' : h < 8 ? 'iets' : 'flink'; };
-const gier = (r, s) => {
+/** A schoot: a setting by name, or (Zelf verkennen) the angle of the sail to the boat in degrees. */
+export type Schoot = Trim | number;
+export type Zwaard = 'neer' | 'half' | 'op';
+
+/** What the card sets (index.ts DEFAULT). */
+export interface Settings {
+  koers: number;                 // degrees off the wind, 45 .. 195: past 180 on the other boeg
+  groot: Schoot;
+  fok: Schoot | 'bak';
+  zwaard: Zwaard;
+  bft: number;
+  vaart: number;
+  vlaag: boolean;
+  bemanning: number;             // -1 aan lij, 0 midden, 1 aan loef
+  helmstok: number;
+  roerstand: 'recht' | number;
+  duw: number;
+  rif: number;
+}
+
+/** What status() gets: the settings, and how many turns a rif can have. */
+export type StatusSettings = Settings & { rifMax: number };
+
+/** The controls a card can show (index.ts CONTROLS). */
+export type Bediening = 'koers' | 'groot' | 'fok' | 'zwaard' | 'rif' | 'wind' | 'vaart' | 'vlaag' | 'bemanning' | 'helmstok' | 'duw'
+  | 'trimmen' | 'grootschoot' | 'fokkenschoot' | 'roerstand' | 'laag';
+
+/** What can be drawn (index.ts buildItems). */
+export type Toon = 'duw' | 'arm' | 'duwkoppel' | 'perzeil' | 'zeilkracht' | 'ontbonden' | 'voortstuwend' | 'zijkracht' | 'zp'
+  | 'drift' | 'weerstand' | 'lp' | 'koersdoorwater' | 'middelen' | 'zeilkoppels' | 'gierkoppel' | 'samenkoppel' | 'armgier'
+  | 'wind' | 'roer' | 'roerdelen' | 'roerkoppel' | 'helmstok' | 'stroom' | 'druk'
+  | 'kenterend' | 'zwaartepunt' | 'drukpunt' | 'armstab' | 'oprichtend';
+
+/** Where the camera goes; null: it stays. */
+export type Aanzicht = 'boven' | 'achter' | 'achterboven' | null;
+
+/** One lesson (see above). */
+export interface Les {
+  id: string;
+  titel: string;
+  cwo: string;
+  bron: string;
+  aanzicht: Aanzicht;
+  kort: string[];
+  meer: { kop: string; tekst: string }[];
+  bediening: Bediening[];
+  toon: Toon[];
+  begin: Partial<Settings>;
+  vraag?: { tekst: string; opties: [string, boolean][]; uitleg: string; laat: Partial<Settings> };
+  status: (r: Krachten, s: StatusSettings) => string;
+  koppel?: number;
+  helt?: boolean;
+  balans?: 'gier' | 'helling';
+  zegt?: ('helling' | 'gier')[];
+}
+
+const kant = (z: number) => (z > 0 ? 'stuurboord' : 'bakboord');
+const hoeveel = (r: Krachten) => { const h = Math.abs(r.helmNeeded); return h < 3 ? 'een klein beetje' : h < 8 ? 'iets' : 'flink'; };
+const gier = (r: Krachten, s?: StatusSettings) => {
   const m = r.gier;
   // the helmstok set by hand (Zelf verkennen): whether she goes straight on with it, or turns
   if (s?.roerstand !== undefined && s.roerstand !== 'recht' && r.roer) {
@@ -46,21 +102,21 @@ const gier = (r, s) => {
 };
 // Too much helling: what to do about it, in the order you would - the weight to loef first, then a rif,
 // then easing the grootschoot in the vlagen once the rif is all in.
-const minder = (s) => (s.bemanning < 1 ? 'ga allemaal aan loef zitten.'
+const minder = (s: StatusSettings) => (s.bemanning < 1 ? 'ga allemaal aan loef zitten.'
   : s.rif < s.rifMax ? (s.rif > 0 ? 'zet er een slag rif bij.' : 'tijd om te reven.')
     : 'vier in de vlagen de grootschoot.');
 // The other way: the weight too far to loef for this wind - in to the middle, or on to lij ('' when they
 // sit aan lij already). A little helling to lij lets the sails fall into their shape.
-const naarLij = (s) => (s.bemanning > 0 ? 'ga in het midden zitten.' : s.bemanning === 0 ? 'ga aan lij zitten.' : '');
-const hoofd = (t) => `${t[0].toUpperCase()}${t.slice(1)}`;
+const naarLij = (s: Settings) => (s.bemanning > 0 ? 'ga in het midden zitten.' : s.bemanning === 0 ? 'ga aan lij zitten.' : '');
+const hoofd = (t: string) => `${t[0].toUpperCase()}${t.slice(1)}`;
 // Helling and gieren in one line - but going over, or schepping, only that: what the roer does no longer matters
-const hellingEnGier = (r, s) => (r.helling.omslaan || r.helling.schept ? helling(r, s) : `${helling(r, s)} ${gier(r, s)}`);
-const helling = (r, s) => {
+const hellingEnGier = (r: Krachten, s: StatusSettings) => (r.helling.omslaan || r.helling.schept ? helling(r, s) : `${helling(r, s)} ${gier(r, s)}`);
+const helling = (r: Krachten, s: StatusSettings) => {
   const h = r.helling;
   if (h.omslaan) return `Te veel: het oprichtend koppel kan het niet meer aan. De boot slaat om! ${hoofd(minder(s))}`;
   // water scheppen: the dolboord at the water, and it comes in - it runs to lij and she heels further still
   if (h.schept) return `Het dolboord gaat onder water: de boot schept water. Dat loopt naar lij, en zo helt hij nog verder. Snel minder helling: ${minder(s)} Daarna hozen.`;
-  const nat = h.water > 0.03 ? ' Er staat water in de boot: hozen! Zolang het erin staat, helt de boot verder.' : '';
+  const nat = h.water! > 0.03 ? ' Er staat water in de boot: hozen! Zolang het erin staat, helt de boot verder.' : '';   // (water: set by index.ts before any status)
   const phi = Math.round(Math.abs(h.phi));
   const lij = naarLij(s);
   if (phi < 1) return `De boot vaart rechtop.${nat}${!nat && lij ? ` Een beetje helling naar lij laat de zeilen in hun vorm vallen: ${lij}` : ''}`;
@@ -68,7 +124,7 @@ const helling = (r, s) => {
   return `Helling naar lij: ongeveer ${phi}°.${h.phi >= BERGHOUT_ONDER ? ` Het berghout gaat onder water: ${minder(s)}` : ''}${nat}`;
 };
 
-export const LESSEN = [
+export const LESSEN: Les[] = [
   {
     id: 'kracht', titel: 'Kracht en koppel', cwo: 'KB III', bron: 'Sint Maarten KB III § 7.2',
     aanzicht: 'boven',
@@ -143,9 +199,9 @@ export const LESSEN = [
       laat: { koers: 45 },
     },
     status: (r) => {
-      const stand = (z) => ({ goed: 'staat goed', klappert: 'klappert', 'te strak': 'staat te strak', duwt: 'wordt geduwd', bak: 'staat bak' }[z.stand]);
+      const stand = (z: ZeilOpBoot) => ({ goed: 'staat goed', klappert: 'klappert', 'te strak': 'staat te strak', duwt: 'wordt geduwd', bak: 'staat bak' }[z.stand]);
       const [g, f] = ['grootzeil', 'fok'].map((n) => r.zeilen.find((z) => z.naam === n));
-      return `Grootzeil ${stand(g)}, fok ${stand(f)}.`;
+      return `Grootzeil ${stand(g!)}, fok ${stand(f!)}.`;
     },
   },
   {
@@ -169,9 +225,9 @@ export const LESSEN = [
       laat: { groot: 'goed' },
     },
     status: (r) => {
-      const zegt = (z) => ({ goed: 'de stroming volgt het zeil', 'te strak': 'de stroming laat los aan lij', klappert: 'het voorlijk bolt in: het zeil killt', duwt: 'de wind duwt ertegen', bak: 'het staat bak' }[z.stand]);
+      const zegt = (z: ZeilOpBoot) => ({ goed: 'de stroming volgt het zeil', 'te strak': 'de stroming laat los aan lij', klappert: 'het voorlijk bolt in: het zeil killt', duwt: 'de wind duwt ertegen', bak: 'het staat bak' }[z.stand]);
       const [g, f] = ['grootzeil', 'fok'].map((n) => r.zeilen.find((z) => z.naam === n));
-      return `Grootzeil: ${zegt(g)}. Fok: ${zegt(f)}.`;
+      return `Grootzeil: ${zegt(g!)}. Fok: ${zegt(f!)}.`;
     },
   },
   {

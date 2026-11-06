@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Krachten as a schema: the same items as on the boat (pijlen.js), drawn flat in the card - from
 // above with the bow up, from astern, or from astern close up on the hull - over outlines taken from
 // the model itself, the way the lesboeken draw them. The 3D boat stays behind it, doing the same.
@@ -7,6 +6,25 @@
 // stuurboord, up = up. One SVG per pane, side by side; words and lines are sized in screen pixels, so
 // a close-up pane does not get bigger letters.
 
+import type { Vec2, Vec3 } from './model.ts';
+import type { Item, BoogItem } from './pijlen.ts';
+
+/** The panes the schema can show. */
+export type SchemaView = 'boven' | 'achter' | 'romp';
+
+/** An outline of the boat for the schema, in the world: a line or a shape round `pts`, or a dot. fit: the
+ *  pane takes it in; romp false: not in the close-up of the hull. */
+interface ShapeBase { view: 'boven' | 'achter'; fill?: string; romp?: boolean }
+export interface LineShape extends ShapeBase { pts: Vec3[]; dot?: undefined; closed?: boolean; stroke?: string; px?: number; dashed?: boolean; fit?: boolean }
+export interface DotShape extends ShapeBase { dot: Vec3; pts?: undefined; r?: number; fit?: undefined }
+export type Shape = LineShape | DotShape;
+
+/** The step a word was moved off by, and the one it is drawn at, easing to it. */
+interface Stap { step: Vec2; glide: readonly number[] }
+
+/** What a pane shows, in metres: u across, v down. */
+interface Box { u: Vec2; v: Vec2 }
+
 const NS = 'http://www.w3.org/2000/svg';
 // each pane takes in the hull and whatever is drawn (not the sails), at least `min`, in the shape the card
 // gives it: every pane as high as one would be across the whole card (ASPECT), so two side by side are
@@ -14,26 +32,26 @@ const NS = 'http://www.w3.org/2000/svg';
 // along the boat the pane goes where the forces are, and the hull runs on out of it where nothing is
 // drawn - the forces drawn large beat a whole boat drawn small
 const ASPECT = 1.05;
-const PANE = {
+const PANE: Record<SchemaView, { min: Vec2; titel: string; across?: boolean; box?: Box }> = {
   boven: { min: [3.2, 4.2], titel: 'Bovenaanzicht', across: true },
   achter: { min: [3.4, 3.4], titel: 'Achteraanzicht' },
   romp: { min: [2.6, 2.4], titel: 'De romp, van achteren', box: { u: [-1.45, 1.45], v: [-1.6, 1.0] } },
 };
-const project = (view, [x, y, z]) => (view === 'boven' ? [z, -x] : [z, -y]);
+const project = (view: 'boven' | 'achter', [x, y, z]: readonly number[]): Vec2 => (view === 'boven' ? [z, -x] : [z, -y]);
 // where a word may go when its own place is taken, nearest first
-const STEPS = [[0, 0], [0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -2], [0, 2], [0, -3], [0, 3]];
-const f = (n) => Math.round(n * 1000) / 1000;
-const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const STEPS: readonly Vec2[] = [[0, 0], [0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -2], [0, 2], [0, -3], [0, 3]];
+const f = (n: number) => Math.round(n * 1000) / 1000;
+const esc = (t: string) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-export function createSchema(host) {
-  let views = ['boven'];
-  const svgs = [];
-  const boxes = {};                                                  // per view, the box shown: it eases to the one wanted
-  const steps = {};                                                  // per view, per word: the step it was moved off by
+export function createSchema(host: HTMLElement) {
+  let views: SchemaView[] = ['boven'];
+  const svgs: SVGSVGElement[] = [];
+  const boxes: Partial<Record<SchemaView, Box>> = {};                                                  // per view, the box shown: it eases to the one wanted
+  const steps: Partial<Record<SchemaView, Map<string, Stap>>> = {};                                                  // per view, per word: the step it was moved off by
   let hostWidth = -1; let most = 340;                                // the page's height limit, read again when the card changes width
 
   /** What a pane should show: the hull and the items, with room round them, in the pane's shape. */
-  function fit(view, shapes, items, aspect) {
+  function fit(view: SchemaView, shapes: Shape[], items: Item[], aspect: number): Box {
     const p = PANE[view];
     if (p.box) {                                                     // a fixed box, widened or heightened to the pane
       const { u: [a, z], v: [c, d] } = p.box; let w = z - a; let h = d - c;
@@ -42,8 +60,8 @@ export function createSchema(host) {
     }
     const base = view === 'boven' ? 'boven' : 'achter';
     let u0 = Infinity; let u1 = -Infinity; let v0 = Infinity; let v1 = -Infinity;
-    const take = (pt) => { const [u, v] = project(base, pt); u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); };
-    const hull = [];
+    const take = (pt: readonly number[]) => { const [u, v] = project(base, pt); u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); };
+    const hull: Vec3[] = [];
     for (const s of shapes) if (s.view === base && s.fit) hull.push(...s.pts);
     if (!p.across) hull.forEach(take);
     for (const it of items) {
@@ -71,8 +89,8 @@ export function createSchema(host) {
     return { u: [cu - w / 2, cu + w / 2], v: [cv - h / 2, cv + h / 2] };
   }
 
-  const arcPts = (it, n = 36) => {
-    const pts = [];
+  const arcPts = (it: BoogItem, n = 36) => {
+    const pts: Vec3[] = [];
     for (let i = 0; i <= n; i++) {
       const t = it.start + (it.sweep * i) / n; const [x, y, z] = it.center;
       pts.push(it.as === 'y' ? [x + it.r * Math.cos(t), y, z - it.r * Math.sin(t)] : [x, y + it.r * Math.cos(t), z + it.r * Math.sin(t)]);
@@ -81,13 +99,13 @@ export function createSchema(host) {
   };
 
   /** One pane: everything in metres, `px` metres to a screen pixel. */
-  function pane(view, b, shapes, items, px) {
+  function pane(view: SchemaView, b: Box, shapes: Shape[], items: Item[], px: number) {
     const base = view === 'boven' ? 'boven' : 'achter';
-    const P = (p) => project(base, p);
+    const P = (p: readonly number[]) => project(base, p);
     const unit = 2.6 * px;                                           // the width of a force arrow
     const font = 11.5 * px;
-    const words = [];                                                // { u, v, text, kleur }: laid out last
-    const word = (u, v, text, kleur, first = false) => words.push({ u, v, text, kleur, first });
+    const words: { u: number; v: number; text: string; kleur: string; first: boolean }[] = [];                                                // { u, v, text, kleur }: laid out last
+    const word = (u: number, v: number, text: string, kleur: string, first = false) => words.push({ u, v, text, kleur, first });
     let out = '';
     if (base === 'achter') {
       out += `<rect x="${b.u[0]}" y="-0.3" width="${b.u[1] - b.u[0]}" height="${b.v[1] + 0.3}" fill="#cfe2ee"/>`;
@@ -160,23 +178,23 @@ export function createSchema(host) {
     // the words, each moved off the ones before it as far as it has to - in its own place when that is
     // free, else keeping the step it had while that still fits - and sliding to a new one, so a word
     // does not hop about as the arrows turn
-    const placed = [];
+    const placed: { u: number; v: number; w: number }[] = [];
     const h = 1.3 * font;
-    const had = steps[view] ?? (steps[view] = new Map());
-    words.sort((a, b) => b.first - a.first);                         // the points keep their place
+    const had = steps[view] ?? (steps[view] = new Map<string, Stap>());
+    words.sort((a, b) => Number(b.first) - Number(a.first));                         // the points keep their place
     for (const w of words) {
       const wd = (w.text.length * 0.56 + 0.8) * font;
       const was = had.get(w.text);
       // a step is [across, up or down]: across by most of its own width, up or down by a line
       // (and never out of the pane: a word past its edge is pulled in)
-      const inside = (u, lo, hi, half) => Math.min(Math.max(u, lo + half + 3 * px), hi - half - 3 * px);
-      const at = ([a, k]) => [inside(w.u + a * 0.6 * wd, b.u[0], b.u[1], wd / 2), inside(w.v + k * h, b.v[0], b.v[1], h / 2)];
+      const inside = (u: number, lo: number, hi: number, half: number) => Math.min(Math.max(u, lo + half + 3 * px), hi - half - 3 * px);
+      const at = ([a, k]: readonly number[]) => [inside(w.u + a * 0.6 * wd, b.u[0], b.u[1], wd / 2), inside(w.v + k * h, b.v[0], b.v[1], h / 2)];
       // `ruim`: room to spare - a word that was moved off goes back to its own place only when that is clearly
       // free, so it does not hop to and fro while the pane eases to a new size
-      const free = (step, ruim = 0) => { const [u, v] = at(step); return !placed.some((p) => Math.abs(p.u - u) < (p.w + wd) / 2 + ruim && Math.abs(p.v - v) < h + ruim); };
+      const free = (step: readonly number[], ruim = 0) => { const [u, v] = at(step); return !placed.some((p) => Math.abs(p.u - u) < (p.w + wd) / 2 + ruim && Math.abs(p.v - v) < h + ruim); };
       const thuis = !was || was.step === STEPS[0];
       const step = free(STEPS[0], thuis ? 0 : 0.35 * h) ? STEPS[0] : was && free(was.step) ? was.step : STEPS.find((st) => free(st)) ?? STEPS[0];
-      const glide = was ? was.glide.map((g, i) => g + (step[i] - g) * 0.2) : step;   // the step it is drawn at
+      const glide: readonly number[] = was ? was.glide.map((g, i) => g + (step[i] - g) * 0.2) : step;   // the step it is drawn at
       had.set(w.text, { step, glide });
       const [pu, pv] = at(step); const [u, v] = at(glide);
       placed.push({ u: pu, v: pv, w: wd });
@@ -187,9 +205,9 @@ export function createSchema(host) {
   }
 
   return {
-    set views(v) { views = v; },
+    set views(v: SchemaView[]) { views = v; },
     get views() { return views; },
-    draw(shapes, items, title) {
+    draw(shapes: Shape[], items: Item[], title: string) {
       while (svgs.length < views.length) {
         const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'kr-schema'); svg.setAttribute('role', 'img');
         host.append(svg); svgs.push(svg);
@@ -206,7 +224,7 @@ export function createSchema(host) {
         svg.style.height = `${Math.round(height)}px`;
         const want = fit(view, shapes, items, width / height);
         const was = boxes[view];
-        const ease = (a, z) => (was ? a + (z - a) * 0.12 : z);
+        const ease = (a: number, z: number) => (was ? a + (z - a) * 0.12 : z);
         const b = boxes[view] = was ? { u: [ease(was.u[0], want.u[0]), ease(was.u[1], want.u[1])], v: [ease(was.v[0], want.v[0]), ease(was.v[1], want.v[1])] } : want;
         const wM = b.u[1] - b.u[0]; const hM = b.v[1] - b.v[0];
         const px = wM / width;

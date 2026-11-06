@@ -1,7 +1,11 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { solve, BFT, TRIM, boatSpeed, heeled, BERGHOUT_ONDER, HELLING_FLINK, HELM_MOST, WATER_VOL } from './model.ts';
+import type { Vec2, Vec3, SailInput, SolveInput, Krachten, ZeilOpBoot, Trim } from './model.ts';
 import { LESSEN } from './lessen.ts';
+import type { Les, Settings, Toon, Bediening, Aanzicht, Zwaard } from './lessen.ts';
+import type { Item, View } from './pijlen.ts';
+import type { Shape, SchemaView } from './schema.ts';
+import type { ModelDeel } from '../bootonderdelen/onderdeel.ts';
 import { createPijlen } from './pijlen.ts';
 import { createSchema } from './schema.ts';
 import { createVlag } from './vlag.ts';
@@ -19,6 +23,53 @@ import { stroomlijnen, profiel } from './stroming.ts';
 // of each sail is and how it is sheeted, how far the zwaard sticks out. The card sets the rest -
 // course, schoten, zwaard, wind, bemanning, helmstok - and the boat follows (modes.js `kracht`).
 
+/** What this layer uses of modes (modes.ts): what it sets on the boat, and how she stands. */
+export interface KrachtenModes {
+  state: { course: number; midzwaard: Zwaard; mode: string };
+  apply(want: { koers?: number; zwaard?: Zwaard; modus?: string; tuig?: string }): void;
+  current(): { tuig: string };
+  procedure(): unknown;
+  trim(): { boom: number; jib: number; board: unknown };
+  rif(): { slagen: number; max: number; zakt: number; voorlijk: number };
+  zetRif(turns: number): boolean;
+  /** What the layer sets (modes.ts `kracht`): null lets go. */
+  kracht: { boom: number | null; jib: number | null; heel: number; helm: number | null; vane: number | null;
+            boomRate: number | null; slap: number; vlag: number | null };
+  island?: Lijn | null;
+  tow?: Lijn | null;
+}
+/** A line she can lie on: the island, the sleeplijn. */
+interface Lijn { on: boolean; set(on: boolean): void }
+
+/** What main.ts gives the layer. */
+export interface KrachtenOpties {
+  wrap: HTMLElement;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  controls: { target: THREE.Vector3 };
+  parts: ModelDeel[];
+  modes: KrachtenModes;
+  fly: (aanzicht: Exclude<Aanzicht, null>, coveredRight: number) => void;
+  setCoveredRight: (px: number) => void;
+  opslaan: boolean;
+  onOpen?: () => void;
+}
+
+/** A sail as measured on the model: what the model needs, and its corners (hals first, schoothoek last). */
+interface Zeil extends SailInput { corners: THREE.Vector3[] }
+/** What of the zwaard sticks out under the vlak: its middle, depth and ends along the boat. */
+interface Board { x: number; y: number; depth: number; fore: number; aft: number }
+/** What the model is given here. */
+interface KrachtenInput extends SolveInput { sails: Zeil[]; board: Board | null }
+/** How bad what the status says is. */
+type Niveau = '' | 'geel' | 'oranje' | 'rood';
+/** What a control row gets each frame: how a sheet is worked out, and the helmstok that holds her straight. */
+interface TickCtx { sheet: (v: number | Trim, lo: number, hi: number) => number; recht: number }
+/** A control row in the card. */
+type Row<E extends HTMLElement = HTMLElement> = E & { sync(): void; tick?: (ctx: TickCtx) => void };
+/** The settings a slider sets: numbers. */
+type NumKey = 'koers' | 'bft' | 'vaart' | 'helmstok' | 'duw';
+
 const KLEUR = {
   lucht: '#1b64c4', water: '#c0262d', koppel: '#16833a', koppelSom: '#11552a', duw: '#26323c', maat: '#36454f', spoor: '#6b7a88',
   ware: '#4c5a68', vaart: '#c96f00', schijnbaar: '#00808c', zwaarte: '#6a3fa0', opwaarts: '#0a7da3',
@@ -27,10 +78,10 @@ const FORCE = 1 / 170;              // metres of arrow per newton
 const FORCE_MAX = 3.0;              // the longest arrow; beyond it all forces are drawn smaller together
 const WIND = 0.6;                   // metres of arrow per m/s
 const PUSH = 220;                   // N: the hand in Kracht en koppel
-const MAST = [3.624, 5.78, 0];      // just over the windvaan
+const MAST: Vec3 = [3.624, 5.78, 0];      // just over the windvaan
 const STORE = 'lelievlet.krachten.v1';
-const ROMP = ['romp'];              // drawn in the schema's close-up of the hull, when it has one
-const ROMP_BOOT = ['romp', 'boot']; // there, and on the boat as well
+const ROMP: View[] = ['romp'];           // drawn in the schema's close-up of the hull, when it has one
+const ROMP_BOOT: View[] = ['romp', 'boot']; // there, and on the boat as well
 const KENTER = 2200;                // Nm: half a turn for the koppels of helling, kenterend and oprichtend
 const HELLING_VOL = 3000;          // Nm: a full half-bar in the balans of helling (about 6 Bft aan de wind)
 const OMSLAAN_NA = 0.8;             // s: going over has to hold this long - a sail still being trimmed is no capsize
@@ -49,10 +100,10 @@ const KLAP = {
 };
 const SHEET = 900;                  // px: up to this wide the card is a sheet at the foot (style.css @container)
 // course names along the slider, as modes.js has them
-const KOERS = [[70, 'Aan de wind'], [112, 'Halve wind'], [158, 'Ruime wind'], [181, 'Voor de wind']];
-const koersNaam = (c) => KOERS.find(([b]) => (c > 180 ? 360 - c : c) < b)[1];   // past 180: voor de wind, on the other boeg
+const KOERS: [number, string][] = [[70, 'Aan de wind'], [112, 'Halve wind'], [158, 'Ruime wind'], [181, 'Voor de wind']];
+const koersNaam = (c: number) => KOERS.find(([b]) => (c > 180 ? 360 - c : c) < b)![1];   // past 180: voor de wind, on the other boeg
 // what Zelf verkennen can switch on: chip -> the items it draws
-const LAGEN = [
+const LAGEN: [string, Toon[]][] = [
   ['Zeilkracht', ['zeilkracht', 'ontbonden', 'zp']], ['Per zeil', ['perzeil']], ['Stroming', ['stroom', 'druk']], ['Water', ['drift', 'weerstand', 'lp', 'koersdoorwater']],
   // gieren with the roer that answers it: what the sails turn her, and what holds her straight
   ['Gieren', ['zeilkoppels', 'samenkoppel', 'lp', 'helmstok', 'roer', 'roerdelen']], ['Wind', ['wind']],
@@ -60,32 +111,32 @@ const LAGEN = [
 ];
 // where Zelf verkennen looks from: the schema always from above and astern, whatever is on; the camera from
 // astern with Helling on, as lessons 5 and 6 do, else wherever it was
-const VERKEN = { schema: () => ['boven', 'achter'], aanzicht: (helling) => (helling ? 'achterboven' : null) };
+const VERKEN = { schema: (): SchemaView[] => ['boven', 'achter'], aanzicht: (helling: boolean): Aanzicht => (helling ? 'achterboven' : null) };
 
 /** The convex hull of points [u, v], round the outside (monotone chain). */
-function hull2(points) {
+function hull2(points: Vec2[]): Vec2[] {
   const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const half = (list) => {
-    const out = [];
+  const cross = (o: Vec2, a: Vec2, b: Vec2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list: Vec2[]) => {
+    const out: Vec2[] = [];
     for (const q of list) { while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], q) <= 0) out.pop(); out.push(q); }
     return out.slice(0, -1);
   };
   return [...half(p), ...half(p.slice().reverse())];
 }
 
-export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen }) {
+export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen }: KrachtenOpties) {
   const byId = new Map(parts.map((p) => [p.extras.id, p]));
-  let boat = scene.getObjectByName('lelievlet');
+  let boat = scene.getObjectByName('lelievlet')!;
   while (boat.parent && boat.parent !== scene) boat = boat.parent;
 
   // ------------------------------------------------------------------ the boat as it stands
   const tmp = new THREE.Vector3(); const ta = new THREE.Vector3(); const tb = new THREE.Vector3(); const tc = new THREE.Vector3();
-  const toBoat = (v) => boat.worldToLocal(v);
+  const toBoat = (v: THREE.Vector3) => boat.worldToLocal(v);
   /** The middle of a sail's cloth, area-weighted, in the boat's frame. */
   const td = new THREE.Vector3(); const local = new THREE.Vector3(); const n3 = new THREE.Matrix3();
-  const clothCentre = (id) => {
-    const seen = new Set(); let area = 0; const sum = new THREE.Vector3();
+  const clothCentre = (id: string) => {
+    const seen = new Set<THREE.BufferGeometry>(); let area = 0; const sum = new THREE.Vector3();
     for (const mesh of byId.get(id)?.meshes ?? []) {
       const g = mesh.geometry; if (seen.has(g)) continue; seen.add(g);
       mesh.updateWorldMatrix(true, false);
@@ -108,7 +159,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     return area > 0 ? toBoat(sum.divideScalar(area)) : null;
   };
   /** A point of the model: the middle of a (small) part, in the world. */
-  const partAt = (id, out = new THREE.Vector3()) => {
+  const partAt = (id: string, out = new THREE.Vector3()) => {
     out.set(0, 0, 0); let n = 0;
     for (const mesh of byId.get(id)?.meshes ?? []) {
       mesh.updateWorldMatrix(true, false);
@@ -122,7 +173,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   // half-width at each height. The water is drawn as its level surface - level in the world, however she heels -
   // from where that meets the hull on one side to where it meets it on the other.
   const kuipWater = (() => {
-    const model = scene.getObjectByName('lelievlet');
+    const model = scene.getObjectByName('lelievlet')!;
     const skin = parts.filter((p) => /^(kim|vlak|boeisel)_/.test(p.extras.id)).flatMap((p) => p.meshes).filter((m) => m.material.name === 'kuip');
     const STATIONS = Array.from({ length: 14 }, (_, i) => 1.36 + (i * (3.97 - 1.36)) / 13);
     const DY = 0.05; const ROWS = 20; const FLOOR = 0.04; const TOP = 0.9;
@@ -139,7 +190,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       }
     }
     for (const w of wide) for (let j = 1; j < ROWS; j++) if (!w[j]) w[j] = w[j - 1];   // a height with no vertex: as below
-    const halfWidth = (w, y) => { const f = THREE.MathUtils.clamp(y / DY, 0, ROWS - 1); const j = Math.floor(f); return w[j] + (w[Math.min(j + 1, ROWS - 1)] - w[j]) * (f - j); };
+    const halfWidth = (w: number[], y: number) => { const f = THREE.MathUtils.clamp(y / DY, 0, ROWS - 1); const j = Math.floor(f); return w[j] + (w[Math.min(j + 1, ROWS - 1)] - w[j]) * (f - j); };
     const position = new Float32Array((STATIONS.length - 1) * 6 * 3);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
@@ -149,12 +200,12 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     mesh.frustumCulled = false; mesh.renderOrder = 3; mesh.visible = false; mesh.raycast = () => {};
     model.add(mesh);
     const q = new THREE.Quaternion(); const up = new THREE.Vector3();
-    const ends = STATIONS.map(() => [0, 0, 0, 0, false]);
+    const ends = STATIONS.map((): [number, number, number, number, boolean] => [0, 0, 0, 0, false]);   // where the water meets the hull either side; whether it does
     return {
       hide() { mesh.visible = false; },
       dispose() { mesh.removeFromParent(); geometry.dispose(); mesh.material.dispose(); },
       /** fill: 0 dry .. 1 as much as she holds; on: only where she heels. */
-      set(fill, on) {
+      set(fill: number, on: boolean) {
         mesh.visible = on && fill > 0.005;
         if (!mesh.visible) return;
         // the world's up in the boat's frame: across her (y, z) - she heels about her length
@@ -164,16 +215,16 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
         for (const w of wide) for (let j = 1; j < ROWS; j++) for (const z of [-w[j], w[j]]) low = Math.min(low, j * DY * uy + z * uz);
         const c = low + 0.24 + 0.45 * fill;                          // over the buikdenning at once, then up to the dolboord
         wide.forEach((w, k) => {
-          let a = null; let b = null;
+          let a: number | null = null; let b: number | null = null;
           for (let t = -1.2; t <= 1.2; t += 0.02) {
             const y = c * uy - t * uz; const z = c * uz + t * uy;
             if (y >= FLOOR && y <= TOP && Math.abs(z) <= halfWidth(w, y)) { if (a === null) a = t; b = t; }
           }
           const e = ends[k]; e[4] = a !== null;
-          if (e[4]) { e[0] = c * uy - a * uz; e[1] = c * uz + a * uy; e[2] = c * uy - b * uz; e[3] = c * uz + b * uy; }
+          if (e[4]) { e[0] = c * uy - a! * uz; e[1] = c * uz + a! * uy; e[2] = c * uy - b! * uz; e[3] = c * uz + b! * uy; }   // (e[4]: a and b are set)
         });
         let i = 0;
-        const put = (x, y, z) => { position[i++] = x; position[i++] = y; position[i++] = z; };
+        const put = (x: number, y: number, z: number) => { position[i++] = x; position[i++] = y; position[i++] = z; };
         for (let k = 0; k + 1 < STATIONS.length; k++) {
           const p = ends[k]; const q2 = ends[k + 1];
           if (!p[4] || !q2[4]) continue;
@@ -194,8 +245,8 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     { naam: 'fok', area: 4.0, hoeken: ['fok_halshoek', 'fok_tophoek', 'fok_schoothoek'] },
   ];
   // (corners in the boat's frame, as all else measured here: drawn later in the world as she stands then)
-  const measureSails = (rif) => SAILS.map((s) => {
-    const corners = s.hoeken.map((id) => toBoat(partAt(id)));
+  const measureSails = (rif: { zakt: number; voorlijk: number }) => SAILS.map((s): Zeil => {
+    const corners = s.hoeken.map((id) => toBoat(partAt(id)!));
     const hals = corners[0]; const schoot = corners[corners.length - 1];
     // (the cloth wound on the giek with a rif is pressed flat in the model: it adds nothing to the middle)
     const mid = clothCentre(s.naam) ?? hals.clone().lerp(schoot, 0.5);
@@ -204,7 +255,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     return { naam: s.naam, area: s.area * (1 - wound), point: mid.toArray(), chord: [schoot.x - hals.x, schoot.z - hals.z], corners };
   });
   /** What of the zwaard sticks out under the vlak, in the boat's frame. */
-  const measureBoard = () => {
+  const measureBoard = (): Board | null => {
     let n = 0; let sx = 0; let sy = 0; let low = 0; let fore = -Infinity; let aft = Infinity;
     for (const mesh of byId.get('zwaard')?.meshes ?? []) {
       mesh.updateWorldMatrix(true, false);
@@ -221,12 +272,12 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   // heel and the swell do not change it.) A change shows in the meshes a frame later, when modes.js has
   // shaped them: so for a few frames after one it is measured each frame.
   const SETTLE = 3;
-  let sailsKey = ''; let sailsNow = null; let sailsSettle = 0; let boardKey = ''; let boardNow = null; let boardSettle = 0;
-  const readSails = (rif) => {
+  let sailsKey = ''; let sailsNow: Zeil[] | null = null; let sailsSettle = 0; let boardKey = ''; let boardNow: Board | null = null; let boardSettle = 0;
+  const readSails = (rif: { slagen: number; zakt: number; voorlijk: number }) => {
     const t = modes.trim(); const key = `${t.boom.toFixed(2)} ${t.jib.toFixed(2)} ${rif.slagen.toFixed(3)}`;
     if (key !== sailsKey || !sailsNow) { sailsKey = key; sailsSettle = SETTLE; }
     if (sailsSettle > 0) { sailsSettle--; sailsNow = measureSails(rif); }
-    return sailsNow;
+    return sailsNow!;
   };
   const readBoard = () => {
     const key = String(modes.trim().board);
@@ -237,9 +288,9 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   // outlines for the schema, once, in the boat's frame: the deck edge from above, the hull from astern
   const outline = (() => {
     const ids = parts.map((p) => p.extras.id).filter((id) => /^(boeisel|berghout|vlak|spiegel|scheg)/.test(id));
-    const top = new Map(); const side = new Map();
+    const top = new Map<number, number>(); const side = new Map<number, number>();
     for (const id of ids) {
-      for (const mesh of byId.get(id).meshes) {
+      for (const mesh of byId.get(id)!.meshes) {
         mesh.updateWorldMatrix(true, false);
         const pos = mesh.geometry.attributes.position;
         for (let i = 0; i < pos.count; i += 2) {
@@ -251,8 +302,8 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       }
     }
     const xs = [...top.keys()].sort((a, b) => a - b); const ys = [...side.keys()].sort((a, b) => a - b);
-    const deck = [...xs.map((x) => [x / 10, 0.95, top.get(x)]), ...xs.slice().reverse().map((x) => [x / 10, 0.95, -top.get(x)])];
-    const section = hull2([...ys.flatMap((y) => [[side.get(y), y / 20], [-side.get(y), y / 20]])]).map(([z, y]) => [2.8, y, z]);
+    const deck = [...xs.map((x): Vec3 => [x / 10, 0.95, top.get(x)!]), ...xs.slice().reverse().map((x): Vec3 => [x / 10, 0.95, -top.get(x)!])];
+    const section = hull2([...ys.flatMap((y): Vec2[] => [[side.get(y)!, y / 20], [-side.get(y)!, y / 20]])]).map(([z, y]): Vec3 => [2.8, y, z]);
     return { deck, section };
   })();
 
@@ -290,63 +341,63 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   back.innerHTML = TERUG;
   wrap.append(back);
   const layer = document.createElement('div'); layer.className = 'kr-labels'; wrap.append(layer);
-  const q = (sel) => card.querySelector(sel);
+  const q = <T extends Element = HTMLElement>(sel: string) => card.querySelector<T>(sel)!;
 
   const pijlen = createPijlen({ scene, camera, controls, layer });
   const schema = createSchema(q('.kr-schema-host'));
   const vlag = createVlag(scene);
-  const VLAG_AT = [1.2, 0.3, 3.2];                      // the boei: beside her stern, on the loef side (z by side)
+  const VLAG_AT: Vec3 = [1.2, 0.3, 3.2];                      // the boei: beside her stern, on the loef side (z by side)
   let vlagTijd = 0;
 
   // ------------------------------------------------------------------ state
-  const saved = (() => { if (!opslaan) return {}; try { return JSON.parse(localStorage.getItem(STORE) ?? '{}') ?? {}; } catch { return {}; } })();
+  const saved: { les?: number } = (() => { if (!opslaan) return {}; try { return JSON.parse(localStorage.getItem(STORE) ?? '{}') ?? {}; } catch { return {}; } })();
   const save = () => { if (!opslaan) return; try { localStorage.setItem(STORE, JSON.stringify({ les: lesIndex })); } catch { /* private mode */ } };
-  let lesIndex = Number.isInteger(saved.les) && LESSEN[saved.les] ? saved.les : 0;
+  let lesIndex = Number.isInteger(saved.les) && LESSEN[saved.les!] ? saved.les! : 0;
   // on a big screen the card can be opened wide, for a bigger schema beside the words: one choice for all lessons
   const breed = breedKnop(card, opslaan, () => requestAnimationFrame(frame));
-  const DEFAULT = { koers: 90, groot: 'goed', fok: 'goed', zwaard: 'neer', bft: 3, vaart: 1, vlaag: false, bemanning: 0, helmstok: 0, roerstand: 'recht', duw: 4.9 };
-  let s = { ...DEFAULT };
-  const lagen = new Set(['Zeilkracht', 'Water']);
+  const DEFAULT: Omit<Settings, 'rif'> = { koers: 90, groot: 'goed', fok: 'goed', zwaard: 'neer', bft: 3, vaart: 1, vlaag: false, bemanning: 0, helmstok: 0, roerstand: 'recht', duw: 4.9 };
+  let s = { ...DEFAULT } as Settings;                 // (rif: set by showLesson, before it is read)
+  const lagen = new Set<string>(['Zeilkracht', 'Water']);
   let open = false;
   let answered = false;
   let shownTheta = 0;                                   // the heel drawn: it eases to what the model says
-  let shownCourse = null;                               // the course the forces are worked out on: it eases to the boat's,
+  let shownCourse: number | null = null;                              // the course the forces are worked out on: it eases to the boat's,
                                                         // so a step on the slider turns them, not throws them
-  let lastStatus = ''; let lastNiveau = '';
+  let lastStatus = ''; let lastNiveau: Niveau = '';
   let omslaanTijd = 0;
   let klapOm = 0;                                       // s: a klapgijp threw her over - she lies there this much longer
   let wasOm = false;
   let water = 0;                                        // in the boat: 0 dry .. 1 as much as she holds (model.js WATER_VOL)
   let schepte = false;
   let opstaan = 0;                                      // s: she is coming back up after going over
-  let gijp = null;                                      // a gijp under way: { t, klap, gegooid }
-  let melding = null;                                   // what a gijp brought about, said for a while: { tekst, niveau, t, tot }
+  let gijp: { t: number; klap: boolean; gegooid: boolean } | null = null;                                     // a gijp under way: { t, klap, gegooid }
+  let melding: { tekst: string; niveau: Niveau; t: number; tot: number } | null = null;                                  // what a gijp brought about, said for a while: { tekst, niveau, t, tot }
   let lastMain = 0;                                     // degrees the giek was out last frame
   // the side the koers slider counts from: past 180 the wind is over the other side - voor de wind on the other
   // boeg, the giek gone over (a gijp). Let go of the slider and it counts from the side she is on.
   let boeg = 1;
   let schemaDue = 0;
-  let verkenAanzicht = null;                             // where Zelf verkennen last sent the camera
-  let trim = null;                                      // Zo trim je, under way: { t }
+  let verkenAanzicht: Aanzicht = null;                            // where Zelf verkennen last sent the camera
+  let trim: { t: number } | null = null;                                     // Zo trim je, under way: { t }
   const les = () => LESSEN[lesIndex];
 
   // ------------------------------------------------------------------ the boat follows the card
   const side = () => Math.sign(modes.state.course) || 1;
   const courseNow = () => Math.abs(modes.state.course) || 90;
-  const koersOp = (k) => (k <= 180 ? boeg * k : -boeg * (360 - k));
-  const setBoat = (want) => {
-    const go = {};
+  const koersOp = (k: number) => (k <= 180 ? boeg * k : -boeg * (360 - k));
+  const setBoat = (want: { koers?: number; zwaard?: Zwaard }) => {
+    const go: { koers?: number; zwaard?: Zwaard } = {};
     if (want.koers !== undefined) go.koers = koersOp(want.koers);
     if (want.zwaard !== undefined || want.koers !== undefined) go.zwaard = s.zwaard;   // a course trims the zwaard itself: ours goes after it
     if (Object.keys(go).length) modes.apply(go);
   };
   // a rif set at once - unless the boat is being reefed just now: then the card shows what she has
-  const zetRif = (n) => { if (!modes.zetRif(n)) s.rif = Math.round(modes.rif().slagen); };
+  const zetRif = (n: number) => { if (!modes.zetRif(n)) s.rif = Math.round(modes.rif().slagen); };
   let rifBijOpenen = 0;                                 // the rif she had: given back when the card closes
-  let lijnBijOpenen = null;                             // a line she lay on: let go, and made fast again when it closes
-  const set = (want) => {
+  let lijnBijOpenen: { island: boolean | undefined; tow: boolean | undefined } | null = null;                            // a line she lay on: let go, and made fast again when it closes
+  const set = (want: Partial<Settings>) => {
     // past voor de wind, or back: the wind comes in the sail from the other side and the giek goes over
-    if ('koers' in want && (want.koers > 180) !== (s.koers > 180)) {
+    if ('koers' in want && (want.koers! > 180) !== (s.koers > 180)) {
       // with the grootschoot te strak the giek is held in, whatever the wind lets it out to: a gijp, not a klap
       gijp = { t: 0, klap: lastMain > GIJP_LOS && s.groot !== 'strak', gegooid: false };
       if (gijp.klap) gevolg('klapgijp');
@@ -358,8 +409,8 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   };
 
   // ------------------------------------------------------------------ controls
-  const segmented = (label, key, options) => {
-    const row = document.createElement('div'); row.className = 'kr-rij';
+  const segmented = (label: string, key: keyof Settings, options: (string | number)[][]) => {
+    const row = document.createElement('div') as Row<HTMLDivElement>;   // (sync: set below) row.className = 'kr-rij';
     row.innerHTML = `<span>${label}</span><div class="segmented" role="radiogroup" aria-label="${label}">${options.map(([v, t]) => `<button type="button" role="radio" data-v="${v}">${t}</button>`).join('')}</div>`;
     row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
       const raw = b.dataset.v; set({ [key]: Number.isNaN(Number(raw)) ? raw : Number(raw) });
@@ -367,10 +418,10 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     row.sync = () => row.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(String(s[key]) === b.dataset.v)));
     return row;
   };
-  const slider = (label, key, min, max, step, says, ends) => {
-    const row = document.createElement('label'); row.className = 'kr-rij kr-schuif';
+  const slider = (label: string, key: NumKey, min: number, max: number, step: number, says: (v: number) => string, ends?: [string, string]) => {
+    const row = document.createElement('label') as Row<HTMLLabelElement>;   // (sync: set below) row.className = 'kr-rij kr-schuif';
     row.innerHTML = `<span>${label} <b></b></span><input type="range" min="${min}" max="${max}" step="${step}">${ends ? `<small><i>${ends[0]}</i><i>${ends[1]}</i></small>` : ''}`;
-    const input = row.querySelector('input'); const value = row.querySelector('b');
+    const input = row.querySelector('input')!; const value = row.querySelector('b')!;
     input.addEventListener('input', () => set({ [key]: Number(input.value) }));
     row.sync = () => { if (Number(input.value) !== s[key]) input.value = String(s[key]); value.textContent = says(s[key]); };
     return row;
@@ -379,13 +430,14 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   // the boat wants is - "goed" for a sheet, "recht" for the helmstok - which moves with the wind and the
   // course. Let go on the mark (or near it) and the setting is that word: it then moves along with the mark.
   const SNAP = 3;                                                    // degrees either side of the mark
-  const merkSchuif = ({ label, key, min, max, woord, ends, merk, zegt }) => {
-    const row = document.createElement('label'); row.className = 'kr-rij kr-schuif kr-merk';
+  const merkSchuif = ({ label, key, min, max, woord, ends, merk, zegt }: { label: string; key: 'groot' | 'fok' | 'roerstand'; min: number; max: number;
+    woord: 'goed' | 'recht'; ends: [string, string]; merk: (ctx: TickCtx) => number; zegt: (v: number, d: number) => string }) => {
+    const row = document.createElement('label') as Row<HTMLLabelElement>;   // (sync and tick: set below) row.className = 'kr-rij kr-schuif kr-merk';
     row.innerHTML = `<span>${label} <b></b></span><div class="kr-baan"><input type="range" min="${min}" max="${max}" step="1"><i class="kr-goed" aria-hidden="true">${woord}</i></div><small><i>${ends[0]}</i><i>${ends[1]}</i></small>`;
-    const input = row.querySelector('input'); const value = row.querySelector('b'); const mark = row.querySelector('.kr-goed');
+    const input = row.querySelector('input')!; const value = row.querySelector('b')!; const mark = row.querySelector<HTMLElement>('.kr-goed')!;
     let op = (min + max) / 2;                                        // where the mark stands
     input.addEventListener('change', () => row.sync());
-    const at = () => (s[key] === woord ? op : s[key]);
+    const at = () => (s[key] === woord ? op : s[key] as number);   // off the mark it is a number: this slider sets nothing else
     input.addEventListener('input', () => {
       const v = Number(input.value);
       set({ [key]: Math.abs(v - op) <= SNAP ? woord : v });
@@ -404,16 +456,16 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     return row;
   };
   // a sheet: the angle of the sail to the boat, from all the way in to all the way out
-  const schoot = (label, key, min, max) => merkSchuif({ label, key, min, max, woord: 'goed', ends: ['strak', 'los'],
+  const schoot = (label: string, key: 'groot' | 'fok', min: number, max: number) => merkSchuif({ label, key, min, max, woord: 'goed', ends: ['strak', 'los'],
     merk: ({ sheet }) => sheet('goed', min, max), zegt: (v, d) => (d < 0 ? 'te strak' : 'te los') });
-  const kantZeggen = (h) => (Math.abs(h) < 0.5 ? 'midden' : `${Math.abs(Math.round(h))}° naar ${h > 0 ? 'stuurboord' : 'bakboord'}`);
-  const CONTROLS = {
+  const kantZeggen = (h: number) => (Math.abs(h) < 0.5 ? 'midden' : `${Math.abs(Math.round(h))}° naar ${h > 0 ? 'stuurboord' : 'bakboord'}`);
+  const CONTROLS: Record<Bediening, () => Row> = {
     koers: () => {
       // past voor de wind only where the card has a grootschoot to take in first: elsewhere a gijp could only be a klap
       const schoot = les().bediening.some((k) => k === 'groot' || k === 'grootschoot');
       const row = slider('Koers', 'koers', 45, schoot ? 195 : 180, 5, koersNaam);
       // let go past 180: she is on the other boeg now, and the slider counts from there
-      row.querySelector('input').addEventListener('change', () => { boeg = side(); s.koers = courseNow(); renderControls(); });
+      row.querySelector('input')!.addEventListener('change', () => { boeg = side(); s.koers = courseNow(); renderControls(); });
       return row;
     },
     groot: () => segmented('Grootschoot', 'groot', [['los', 'Te los'], ['goed', 'Goed'], ['strak', 'Te strak']]),
@@ -423,24 +475,24 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     wind: () => slider('Wind', 'bft', 1, 6, 1, (b) => `${b} Bft`),
     vaart: () => slider('Vaart', 'vaart', 0, 1.3, 0.05, (v) => (v < 0.05 ? 'stil' : v < 0.6 ? 'langzaam' : v <= 1.05 ? 'op snelheid' : 'snel')),
     vlaag: () => {
-      const row = document.createElement('div'); row.className = 'kr-rij';
+      const row = document.createElement('div') as Row<HTMLDivElement>; row.className = 'kr-rij';
       row.innerHTML = '<span>Vlaag</span><button type="button" class="kr-vlaag" aria-pressed="false">Een vlaag</button>';
-      const b = row.querySelector('button'); b.addEventListener('click', () => set({ vlaag: !s.vlaag }));
+      const b = row.querySelector('button')!; b.addEventListener('click', () => set({ vlaag: !s.vlaag }));
       row.sync = () => b.setAttribute('aria-pressed', String(s.vlaag));
       return row;
     },
     // lij on the side it is seen from astern: on the left with the wind over stuurboord, else on the right
     bemanning: () => {
-      const opties = [['-1', 'Aan lij'], ['0', 'Midden'], ['1', 'Aan loef']];
+      const opties: string[][] = [['-1', 'Aan lij'], ['0', 'Midden'], ['1', 'Aan loef']];
       return segmented('Bemanning', 'bemanning', side() > 0 ? opties : opties.reverse());
     },
     helmstok: () => slider('Helmstok', 'helmstok', -80, 80, 5, (h) => (h === 0 ? 'recht' : `${Math.abs(h)}° naar ${h > 0 ? 'stuurboord' : 'bakboord'}`), ['bakboord', 'stuurboord']),
     duw: () => slider('Waar duw je?', 'duw', 0, 5.6, 0.1, () => '', ['achter', 'voor']),
     // De juiste zeilstand: the book's way, played on the grootzeil - vieren tot de tegenbolling, dan aanhalen tot die weg is
     trimmen: () => {
-      const row = document.createElement('div'); row.className = 'kr-rij';
+      const row = document.createElement('div') as Row<HTMLDivElement>; row.className = 'kr-rij';
       row.innerHTML = '<span>Het grootzeil</span><button type="button" class="primary">Zo trim je</button>';
-      const b = row.querySelector('button'); b.addEventListener('click', () => { trim = { t: 0 }; renderControls(); });
+      const b = row.querySelector('button')!; b.addEventListener('click', () => { trim = { t: 0 }; renderControls(); });
       row.sync = () => { b.disabled = Boolean(trim); };
       return row;
     },
@@ -450,33 +502,33 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     roerstand: () => merkSchuif({ label: 'Helmstok', key: 'roerstand', min: -HELM_MOST, max: HELM_MOST, woord: 'recht', ends: ['bakboord', 'stuurboord'],
       merk: ({ recht }) => recht, zegt: (v) => kantZeggen(v) }),
     laag: () => {
-      const row = document.createElement('div'); row.className = 'kr-lagen';
+      const row = document.createElement('div') as Row<HTMLDivElement>; row.className = 'kr-lagen';
       row.innerHTML = LAGEN.map(([naam]) => `<button type="button" aria-pressed="false" data-laag="${naam}">${naam}</button>`).join('');
       row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-        if (lagen.has(b.dataset.laag)) lagen.delete(b.dataset.laag); else lagen.add(b.dataset.laag);
+        if (lagen.has(b.dataset.laag!)) lagen.delete(b.dataset.laag!); else lagen.add(b.dataset.laag!);
         renderControls();
       }));
-      row.sync = () => row.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(lagen.has(b.dataset.laag))));
+      row.sync = () => row.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(lagen.has(b.dataset.laag!))));
       return row;
     },
   };
-  let rows = [];
+  let rows: Row[] = [];
   const renderControls = () => { for (const r of rows) r.sync(); };
 
   // ------------------------------------------------------------------ a lesson
-  const showLesson = (i) => {
+  const showLesson = (i: number) => {
     lesIndex = THREE.MathUtils.clamp(i, 0, LESSEN.length - 1); save();
     const l = les();
-    q('.kr-lessen').value = String(lesIndex);
+    q<HTMLSelectElement>('.kr-lessen').value = String(lesIndex);
     voortgang.gezien('krachten', l.id); vinkjes();
-    q('.kr-vorige').disabled = lesIndex === 0;   // a row, not a round
+    q<HTMLButtonElement>('.kr-vorige').disabled = lesIndex === 0;   // a row, not a round
     q('.kr-tekst').innerHTML = `${l.cwo ? `<p class="kr-chips"><span>CWO ${l.cwo}</span></p>` : ''}${l.kort.map((p) => `<p>${p}</p>`).join('')}`;
     const host = q('.kr-bediening'); host.replaceChildren();
     rows = l.bediening.map((key) => CONTROLS[key]()); host.append(...rows);
     voet.toon(l.meer);
     answered = false; renderQuestion(); trim = null; verder();
     boeg = side(); water = 0; gijp = null; melding = null; klapOm = 0; opstaan = 0; modes.kracht.boomRate = null;
-    s = { ...DEFAULT, koers: courseNow(), zwaard: modes.state.midzwaard, ...l.begin };
+    s = { ...DEFAULT, koers: courseNow(), zwaard: modes.state.midzwaard, ...l.begin } as Settings;   // (rif: next)
     // a rif only where the lesson has the control for it: elsewhere the sail is shown whole
     s.rif = l.bediening.includes('rif') ? (l.begin.rif ?? Math.round(modes.rif().slagen)) : 0;
     zetRif(s.rif);
@@ -490,12 +542,12 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     const v = les().vraag; const host = q('.kr-vraag');
     if (!v) { host.replaceChildren(); return; }
     host.innerHTML = `<h3>Vraag</h3><p>${v.tekst}</p><div class="kr-opties">${v.opties.map(([t], i) => `<button type="button" data-i="${i}">${t}</button>`).join('')}</div><p class="kr-uitleg" hidden></p>`;
-    host.querySelectorAll('.kr-opties button').forEach((b) => b.addEventListener('click', () => {
+    host.querySelectorAll<HTMLButtonElement>('.kr-opties button').forEach((b) => b.addEventListener('click', () => {
       if (answered) return;
       answered = true;
       const i = Number(b.dataset.i);
-      host.querySelectorAll('.kr-opties button').forEach((o, j) => { o.classList.toggle('goed', v.opties[j][1]); o.classList.toggle('fout', j === i && !v.opties[j][1]); o.disabled = true; });
-      const p = host.querySelector('.kr-uitleg'); p.hidden = false;
+      host.querySelectorAll<HTMLButtonElement>('.kr-opties button').forEach((o, j) => { o.classList.toggle('goed', v.opties[j][1]); o.classList.toggle('fout', j === i && !v.opties[j][1]); o.disabled = true; });
+      const p = host.querySelector<HTMLElement>('.kr-uitleg')!; p.hidden = false;
       p.innerHTML = `<b>${v.opties[i][1] ? 'Goed!' : 'Niet helemaal.'}</b> ${v.uitleg} <i>Kijk maar op de boot.</i>`;
       voortgang.antwoord('krachten', les().id, v.opties[i][1]);
       set(v.laat); verder();
@@ -507,7 +559,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     o.textContent = `${i + 1}. ${LESSEN[i].titel}${voortgang.gevolgd('krachten', LESSEN[i].id, Boolean(LESSEN[i].vraag)) ? ' ✓' : ''}`;
   });
   voortgang.bijWijziging(vinkjes);
-  q('.kr-lessen').addEventListener('change', (e) => showLesson(Number(e.target.value)));
+  q('.kr-lessen').addEventListener('change', (e) => showLesson(Number((e.target as HTMLSelectElement).value)));
   q('.kr-vorige').addEventListener('click', () => showLesson(lesIndex - 1));
   q('.kr-volgende').addEventListener('click', () => showLesson(lesIndex + 1));
   // Volgende only once its question is answered (now, or on an earlier visit); after the last one: done
@@ -525,13 +577,13 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   // the middle of the picture in the middle of what the card leaves free (main.js moves the lens, not the
   // camera, so a view from astern stays straight from astern); measured again only when the page changes
   let centreKey = '';
-  const centre = (width) => {
+  const centre = (width: number) => {
     const key = `${width} ${open} ${card.hidden} ${breed()}`;
     if (key !== centreKey) { centreKey = key; setCoveredRight(covers()); }
   };
 
   // on a phone: the boat on its own, with what it does in a bar at the foot and the way back to the lesson
-  const showBoat = (on) => {
+  const showBoat = (on: boolean) => {
     card.hidden = on; back.hidden = !on;
     requestAnimationFrame(frame);
   };
@@ -543,7 +595,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     setCoveredRight(0); centreKey = '';
     shownTheta = 0; shownCourse = null; pijlen.visible = false; vlag.visible = false;
   };
-  const setOpen = (on) => {
+  const setOpen = (on: boolean) => {
     if (on === open) return;
     open = on; card.hidden = !on; back.hidden = true;
     wrap.classList.toggle('kr-open', on);
@@ -558,14 +610,14 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       showLesson(lesIndex);
     } else {
       release(); modes.zetRif(rifBijOpenen);
-      if (lijnBijOpenen?.island) modes.island.set(true); else if (lijnBijOpenen?.tow) modes.tow.set(true);
+      if (lijnBijOpenen?.island) modes.island!.set(true); else if (lijnBijOpenen?.tow) modes.tow!.set(true);
       lijnBijOpenen = null;
     }
   };
   q('.kr-sluit').addEventListener('click', () => setOpen(false));
 
   // ------------------------------------------------------------------ every frame
-  function update(dt, width, height) {
+  function update(dt: number, width: number, height: number) {
     if (!open) return;
     // a manoeuvre or a quiz round from Leren takes the whole screen: the lesson is done with
     if (wrap.classList.contains('ops-on') || wrap.classList.contains('quiz-on')) { setOpen(false); return; }
@@ -593,10 +645,10 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     const awa = (Math.atan2(tws * Math.sin(b), tws * Math.cos(b) + V) * 180) / Math.PI;
     // the sheets: each sail eased to the angle of attack its setting asks for, as far as it goes
     // (or, from a slider, the angle itself)
-    const sheet = (v, lo, hi) => THREE.MathUtils.clamp(typeof v === 'number' ? v : awa - TRIM[v], lo, hi);
+    const sheet = (v: number | Trim, lo: number, hi: number) => THREE.MathUtils.clamp(typeof v === 'number' ? v : awa - TRIM[v], lo, hi);
     // a schoot only holds a sail in: let out further than the wind, it swings back in till the wind runs along it,
     // and it klappert with a tegenbolling - it cannot stand out there with the wind in its back
-    const vrij = (v, lo, hi) => Math.min(sheet(v, lo, hi), Math.max(awa - TRIM.los, lo));
+    const vrij = (v: number | Trim, lo: number, hi: number) => Math.min(sheet(v, lo, hi), Math.max(awa - TRIM.los, lo));
     const main = vrij(s.groot, 4, 85);
     const jib = s.fok === 'bak' ? -24 : vrij(s.fok, 6, 62);
     modes.kracht.boom = sd * main; modes.kracht.jib = sd * jib;
@@ -632,7 +684,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       const kijk = VERKEN.aanzicht(lagen.has('Helling'));
       if (kijk !== verkenAanzicht) { verkenAanzicht = kijk; frame(); }
     }
-    const toon = l.id === 'verkennen' ? new Set(LAGEN.filter(([n]) => lagen.has(n)).flatMap(([, keys]) => keys)) : new Set(l.toon);
+    const toon: Set<Toon> = l.id === 'verkennen' ? new Set(LAGEN.filter(([n]) => lagen.has(n)).flatMap(([, keys]) => keys)) : new Set(l.toon);
     if (toon.has('zeilkracht')) toon.delete('zijkracht');   // the whole zeilkracht already, not its side part as well
     const helt = Boolean(l.helt);                         // in Zelf verkennen always: the chip Helling only draws it
     // the roer (blade + : to stuurboord): in Het roer as the card has it; in Zelf verkennen as the helmstok
@@ -642,7 +694,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       : l.id === 'verkennen' ? (s.roerstand === 'recht' ? 'recht' : -s.roerstand)
         : toon.has('roer') ? 'recht' : null;
     const rif = modes.rif();
-    const input = {
+    const input: KrachtenInput = {
       course, tws, vaart, sails: readSails(rif), board: readBoard(), crew: s.bemanning, heel: helt, helm: roerZet,
       push: l.id === 'kracht' ? { x: s.duw, force: PUSH } : null, water: helt ? water * WATER_VOL : 0,
     };
@@ -721,7 +773,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     // what a gijp brought about is said for a while - unless she schept or goes over now: that is said first
     if (melding && (rTal.helling.omslaan || rTal.helling.schept) && !klapOm) melding = null;
     const status = fase || melding?.tekst || l.status(rTal, { ...s, rifMax: rif.max });
-    if (status !== lastStatus) { q('.kr-status').textContent = status; back.querySelector('p').textContent = status; lastStatus = status; }
+    if (status !== lastStatus) { q('.kr-status').textContent = status; back.querySelector('p')!.textContent = status; lastStatus = status; }
     // a warning in its colour, not in the green of how things are
     const niveau = melding ? melding.niveau : waarschuwing(rTal, l, s);
     if (niveau !== lastNiveau) {
@@ -732,14 +784,14 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
 
   /** How bad what the status says is: '' (all well), geel, oranje or rood - for what the lesson warns about.
    *  Heeled to loef, or upright, it is only a warning while the bemanning can still move towards lij. */
-  function waarschuwing(r, l, s) {
+  function waarschuwing(r: Krachten, l: Les, s: Settings): Niveau {
     const zegt = l.zegt ?? []; const phi = r.helling.phi; const helling = zegt.includes('helling');
     const kanNaarLij = s.bemanning > -1; const rechtop = Math.round(Math.abs(phi)) < 1;
     if (helling && (r.helling.omslaan || r.helling.schept)) return 'rood';
     if (helling && phi >= BERGHOUT_ONDER) return 'oranje';
     if (helling && !rechtop && phi < 0 && kanNaarLij) return 'oranje';
     if (zegt.includes('gier') && Math.abs(r.helmNeeded) > HELM_MOST - 0.5) return 'oranje';
-    if (helling && (phi >= HELLING_FLINK || r.helling.water > 0.03 || (rechtop && kanNaarLij))) return 'geel';
+    if (helling && (phi >= HELLING_FLINK || r.helling.water! > 0.03 || (rechtop && kanNaarLij))) return 'geel';
     return '';
   }
 
@@ -747,29 +799,29 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   // A balans: a bar for each koppel, from a middle line to one side or the other, and their sum - "in
   // evenwicht" when it comes to nothing. In full ('vol') every bar shows; short (Zelf verkennen, where
   // there can be two) only the sum under the balans' name, with the parts one click further.
-  const makeBalans = ({ titel, kop, delen }) => {
+  const makeBalans = ({ titel, kop, delen }: { titel: string; kop: [string, string]; delen: { n: string; naam: string; kleur: string; som?: boolean }[] }) => {
     const el = document.createElement('div'); el.className = 'kr-balans'; el.hidden = true;
-    const rij = (n, naam, kleur, som) => `<div class="kr-balans-rij${som ? ' kr-som' : ''}" data-n="${n}"><span>${naam}</span><div class="kr-balans-baan"><i style="background: ${kleur}"></i>${som ? '<em>in evenwicht</em>' : ''}</div></div>`;
+    const rij = (n: string, naam: string, kleur: string, som?: boolean) => `<div class="kr-balans-rij${som ? ' kr-som' : ''}" data-n="${n}"><span>${naam}</span><div class="kr-balans-baan"><i style="background: ${kleur}"></i>${som ? '<em>in evenwicht</em>' : ''}</div></div>`;
     el.innerHTML = `<div class="kr-balans-kop"><span>◀ ${kop[0]}</span><span>${kop[1]} ▶</span></div>
       <button type="button" class="kr-balans-open" aria-expanded="false" hidden>${rij('netto', titel, KLEUR.koppelSom, true)}</button>
       <div class="kr-balans-delen">${delen.map((d) => rij(d.n, d.naam, d.kleur, d.som)).join('')}</div>`;
-    const rows = [...el.querySelectorAll('.kr-balans-rij')].map((row) => ({ row, n: row.dataset.n, bar: row.querySelector('i'), em: row.querySelector('em') }));
-    const knop = el.querySelector('.kr-balans-open'); const lijst = el.querySelector('.kr-balans-delen');
+    const rows = [...el.querySelectorAll<HTMLElement>('.kr-balans-rij')].map((row) => ({ row, n: row.dataset.n!, bar: row.querySelector('i')!, em: row.querySelector('em') }));
+    const knop = el.querySelector<HTMLButtonElement>('.kr-balans-open')!; const lijst = el.querySelector<HTMLElement>('.kr-balans-delen')!;
     let kort = false; let uit = false;
     const sync = () => {
       el.classList.toggle('kr-kort', kort); knop.hidden = !kort; lijst.hidden = kort && !uit;
-      knop.setAttribute('aria-expanded', String(uit)); knop.querySelector('span').textContent = `${uit ? '▾' : '▸'} ${titel}`;
+      knop.setAttribute('aria-expanded', String(uit)); knop.querySelector('span')!.textContent = `${uit ? '▾' : '▸'} ${titel}`;
     };
     knop.addEventListener('click', () => { uit = !uit; sync(); });
     const kopEl = el.querySelectorAll('.kr-balans-kop span');
     return {
       el,
       /** The words at the two ends, when they turn round (helling on the other boeg). */
-      kop([links, rechts]) { if (kopEl[0].textContent !== `◀ ${links}`) { kopEl[0].textContent = `◀ ${links}`; kopEl[1].textContent = `${rechts} ▶`; } },
-      toon(on, isKort) { el.hidden = !on; if (isKort !== kort) { kort = isKort; uit = false; sync(); } },
+      kop([links, rechts]: [string, string]) { if (kopEl[0].textContent !== `◀ ${links}`) { kopEl[0].textContent = `◀ ${links}`; kopEl[1].textContent = `${rechts} ▶`; } },
+      toon(on: boolean, isKort: boolean) { el.hidden = !on; if (isKort !== kort) { kort = isKort; uit = false; sync(); } },
       /** v: the koppel for each bar by name, and `netto` for the sum; most: the koppel of a full half-bar;
        *  weg: bars left out; som: the bar that is the sum - short, it is the one under the name already. */
-      set(v, most, weg = [], som = 'totaal') {
+      set(v: Record<string, number>, most: number, weg: string[] = [], som = 'totaal') {
         for (const { row, n, bar, em } of rows) {
           row.hidden = weg.includes(n) || (kort && n === som);
           const w = Math.min(Math.abs(v[n] ?? 0) / most, 1) * 50;
@@ -791,13 +843,13 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     { n: 'kenterend', naam: 'kenterend', kleur: KLEUR.lucht }, { n: 'oprichtend', naam: 'oprichtend', kleur: KLEUR.zwaarte },
     { n: 'totaal', naam: 'totaal', kleur: KLEUR.koppelSom, som: true }] });
   q('.kr-balansen').append(gierBalans.el, hellingBalans.el);
-  function balansen(r, l) {
+  function balansen(r: Krachten, l: Les) {
     const verken = l.id === 'verkennen';
     const metGier = verken ? lagen.has('Gieren') : l.balans === 'gier';
     const metHelling = verken ? lagen.has('Helling') : l.balans === 'helling';
     gierBalans.toon(metGier, verken); hellingBalans.toon(metHelling, verken);
     if (metGier) {
-      const v = { grootzeil: 0, fok: 0 };
+      const v: Record<string, number> = { grootzeil: 0, fok: 0 };
       r.zeilen.forEach((z, i) => { v[z.naam] = r.perZeil[i]; });
       v.samen = r.gier; v.roer = r.roer ? -r.side * r.roer.koppel : 0;   // the roer's koppel the gier way: oploevend > 0
       v.totaal = v.samen + v.roer; v.netto = r.roer ? v.totaal : v.samen;
@@ -811,30 +863,30 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   }
 
   // ------------------------------------------------------------------ what is drawn
-  function buildItems(r, toon, l, input) {
-    const items = [];
+  function buildItems(r: Krachten, toon: Set<Toon>, l: Les, input: KrachtenInput) {
+    const items: Item[] = [];
     const sd = r.side;
-    const forces = [];
-    const fv = (f) => [f[0], 0, f[1]];                                // [x, z] -> [x, 0, z]
+    const forces: number[] = [];
+    const fv = (f: Vec2): Vec3 => [f[0], 0, f[1]];                                // [x, z] -> [x, 0, z]
     // one scale for every force in the picture, shrunk together when one would be too long
-    const collect = (f) => forces.push(Math.hypot(f[0], f[1]));
+    const collect = (f: Vec2) => forces.push(Math.hypot(f[0], f[1]));
     if (toon.has('perzeil')) r.zeilen.forEach((z) => collect(z.force));
     if (toon.has('zeilkracht') || toon.has('zijkracht') || toon.has('voortstuwend')) collect(r.zeilkracht.force);
     if (toon.has('drift')) collect(r.drift);
     if (toon.has('roer') && r.roer) collect(r.roer.force);
     const scale = Math.min(FORCE, FORCE_MAX / Math.max(...forces, 1));
-    const sc = (v) => v.map((c) => c * scale);
+    const sc = (v: readonly number[]) => v.map((c) => c * scale) as Vec2;   // (only ever a force [x, z])
     // half a turn for the lesson's koppel; the gier koppels measured against the roer (half a turn is what it
     // holds at 15 degrees), so an arc says what the helmstok has to do
     const gierMaat = Math.max(r.roerMaat, 50);
-    const koppelArc = (m, most = 1.5 * Math.PI, ref = l.koppel, least = 0.25) => Math.sign(m) * Math.min(Math.max((Math.abs(m) / ref) * Math.PI, least), most);
+    const koppelArc = (m: number, most = 1.5 * Math.PI, ref: number = l.koppel!, least = 0.25) => Math.sign(m) * Math.min(Math.max((Math.abs(m) / ref) * Math.PI, least), most);
     // a koppel about a vertical axis; its middle on the loef side, or towards `mid` (radians: 0 forward, PI aft)
     // least: the shortest it is drawn (radians), long enough to stand out beyond its word
-    const arcY = (center, r0, m, label, mid = -sd * Math.PI / 2, most, vol = false, ref, kleur = KLEUR.koppel, least) => {
+    const arcY = (center: Vec3, r0: number, m: number, label: string, mid = -sd * Math.PI / 2, most?: number, vol = false, ref?: number, kleur = KLEUR.koppel, least?: number) => {
       const sweep = Math.abs(m) < 3 ? 0 : koppelArc(m, most, ref, least);
       items.push({ type: 'boog', center, as: 'y', r: r0, start: mid - sweep / 2, sweep, kleur, label, vol });
     };
-    const gierWoord = (m) => (m > 0 ? 'oploevend koppel' : 'afvallend koppel');   // m: oploevend > 0
+    const gierWoord = (m: number) => (m > 0 ? 'oploevend koppel' : 'afvallend koppel');   // m: oploevend > 0
 
     if (toon.has('duw') && r.duw) {
       const L = PUSH * FORCE * 1.1; const at = r.duw.at;
@@ -854,11 +906,11 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     const ce = r.zeilkracht.at; const F = r.zeilkracht.force;
     if (toon.has('zeilkracht')) items.push({ type: 'pijl', from: ce, vec: fv(sc(F)), kleur: KLEUR.lucht, label: 'zeilkracht' });
     if (toon.has('ontbonden')) {
-      const fwd = [F[0] * scale, 0, 0]; const lat = [0, 0, F[1] * scale]; const tip = fv(sc(F)).map((c, i) => ce[i] + c);
+      const fwd: Vec3 = [F[0] * scale, 0, 0]; const lat: Vec3 = [0, 0, F[1] * scale]; const tip = fv(sc(F)).map((c, i) => ce[i] + c) as Vec3;
       items.push({ type: 'pijl', from: ce, vec: fwd, kleur: KLEUR.lucht, dun: true, label: 'voortstuwend', labelAt: 0.8 });
       items.push({ type: 'pijl', from: ce, vec: lat, kleur: KLEUR.lucht, dun: true, label: 'verlijerend', labelAt: 0.8 });
-      items.push({ type: 'lijn', a: fwd.map((c, i) => ce[i] + c), b: tip, kleur: KLEUR.lucht });
-      items.push({ type: 'lijn', a: lat.map((c, i) => ce[i] + c), b: tip, kleur: KLEUR.lucht });
+      items.push({ type: 'lijn', a: fwd.map((c, i) => ce[i] + c) as Vec3, b: tip, kleur: KLEUR.lucht });
+      items.push({ type: 'lijn', a: lat.map((c, i) => ce[i] + c) as Vec3, b: tip, kleur: KLEUR.lucht });
     }
     if (toon.has('voortstuwend')) items.push({ type: 'pijl', from: ce, vec: [F[0] * scale, 0, 0], kleur: KLEUR.lucht, label: 'voortstuwend' });
     if (toon.has('zijkracht')) items.push({ type: 'pijl', from: ce, vec: [0, 0, F[1] * scale], kleur: KLEUR.lucht, label: 'zeilkracht' });
@@ -869,10 +921,10 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     if (toon.has('weerstand')) items.push({ type: 'pijl', from: lp, vec: fv(sc(r.weerstand)), kleur: KLEUR.water, label: 'weerstand' });
     if (toon.has('lp')) items.push({ type: 'punt', at: lp, kleur: KLEUR.water, label: 'lateraal punt' });
     if (toon.has('koersdoorwater')) {
-      const lam = (r.verlijering * Math.PI) / 180; const at = [5.75, 0.3, 0]; const L = 1.2;
-      const tip = [at[0] + L * Math.cos(lam), at[1], -sd * L * Math.sin(lam)];
+      const lam = (r.verlijering * Math.PI) / 180; const at: Vec3 = [5.75, 0.3, 0]; const L = 1.2;
+      const tip: Vec3 = [at[0] + L * Math.cos(lam), at[1], -sd * L * Math.sin(lam)];
       items.push({ type: 'lijn', a: at, b: [at[0] + L, at[1], 0], kleur: KLEUR.spoor });
-      items.push({ type: 'pijl', from: at, vec: tip.map((c, i) => c - at[i]), kleur: KLEUR.spoor, dun: true });
+      items.push({ type: 'pijl', from: at, vec: tip.map((c, i) => c - at[i]) as Vec3, kleur: KLEUR.spoor, dun: true });
       // its word beside its point, on the loef side, away from where it leans: no room is taken ahead of it
       items.push({ type: 'tekst', at: tip, kleur: KLEUR.spoor, label: 'koers door het water', offset: [sd * 72, 4] });
     }
@@ -889,16 +941,16 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     if (toon.has('samenkoppel')) arcY([lp[0], 1.0, 0], 1.35, -sd * r.gier, Math.abs(r.gier) < 3 ? '' : `samen: ${gierWoord(r.gier)}`, undefined, undefined, true, gierMaat);
     if (toon.has('armgier')) {
       // seen from astern: how far the zeilpunt stands beside the lateraal punt
-      const foot = [lp[0], lp[1], ce[2]];
+      const foot: Vec3 = [lp[0], lp[1], ce[2]];
       items.push({ type: 'lijn', a: ce, b: foot, kleur: KLEUR.maat });
       items.push({ type: 'maat', a: lp, b: foot, kleur: KLEUR.maat, label: 'arm', offset: [0, 14] });
     }
 
     if (toon.has('wind')) {
       const m = heeled(MAST, shownTheta);
-      const tail = (w) => [m[0] - w[0] * WIND, m[1], m[2] - w[1] * WIND];
+      const tail = (w: Vec2): Vec3 => [m[0] - w[0] * WIND, m[1], m[2] - w[1] * WIND];
       const tw = tail(r.ware); const tv = tail(r.vaartwind); const ts = tail(r.schijnbaar);
-      const arrow = (t, kleur, label) => items.push({ type: 'pijl', from: t, vec: m.map((c, i) => c - t[i]), kleur, label, dun: kleur !== KLEUR.schijnbaar, labelAt: 0.35 });
+      const arrow = (t: Vec3, kleur: string, label: string) => items.push({ type: 'pijl', from: t, vec: m.map((c, i) => c - t[i]) as Vec3, kleur, label, dun: kleur !== KLEUR.schijnbaar, labelAt: 0.35 });
       if (Math.hypot(...r.vaartwind) > 0.05) {
         items.push({ type: 'lijn', a: tw, b: ts, kleur: KLEUR.vaart }, { type: 'lijn', a: tv, b: ts, kleur: KLEUR.ware });
         arrow(tv, KLEUR.vaart, 'vaartwind');
@@ -911,10 +963,10 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       const at = r.roer.at;
       items.push({ type: 'pijl', from: at, vec: fv(sc(r.roer.force)), kleur: KLEUR.water, label: 'roerkracht' });
       if (toon.has('roerdelen')) {
-        const st = fv(sc(r.roer.sturend)); const re = fv(sc(r.roer.remmend)); const tip = fv(sc(r.roer.force)).map((c, i) => at[i] + c);
+        const st = fv(sc(r.roer.sturend)); const re = fv(sc(r.roer.remmend)); const tip = fv(sc(r.roer.force)).map((c, i) => at[i] + c) as Vec3;
         items.push({ type: 'pijl', from: at, vec: st, kleur: KLEUR.water, dun: true, label: 'sturend', labelAt: 0.85 });
         items.push({ type: 'pijl', from: at, vec: re, kleur: KLEUR.water, dun: true, label: 'remmend', labelAt: 0.85 });
-        items.push({ type: 'lijn', a: st.map((c, i) => at[i] + c), b: tip, kleur: KLEUR.water }, { type: 'lijn', a: re.map((c, i) => at[i] + c), b: tip, kleur: KLEUR.water });
+        items.push({ type: 'lijn', a: st.map((c, i) => at[i] + c) as Vec3, b: tip, kleur: KLEUR.water }, { type: 'lijn', a: re.map((c, i) => at[i] + c) as Vec3, b: tip, kleur: KLEUR.water });
       }
       if (toon.has('roerkoppel')) {
         arcY([lp[0], 1.0, 0], 0.8, r.roer.koppel, 'koppel', undefined, undefined, false, undefined, KLEUR.water);   // red, as its roerkracht
@@ -952,7 +1004,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     if (toon.has('middelen')) {
       const board = input.board; const steekt = board && board.depth > 0.08;
       const delen = steekt ? (s.zwaard === 'neer' ? [0.32, 0.48, 0.1, 0.1] : [0.45, 0.3, 0.13, 0.12]) : [0.66, 0, 0.19, 0.15];
-      const plek = [[2.6, -0.12, 0, 'onderwaterschip'], [steekt ? board.x : 3, steekt ? board.y : -0.3, 0, 'zwaard'], [0.7, -0.22, 0, 'scheg'], [-0.1, -0.3, 0, 'roer']];
+      const plek: [number, number, number, string][] = [[2.6, -0.12, 0, 'onderwaterschip'], [steekt ? board.x : 3, steekt ? board.y : -0.3, 0, 'zwaard'], [0.7, -0.22, 0, 'scheg'], [-0.1, -0.3, 0, 'roer']];
       plek.forEach(([x, y, zz, naam], i) => {
         if (!delen[i]) return;
         items.push({ type: 'pijl', from: [x, y, zz], vec: fv(sc(r.drift.map((c) => c * delen[i]))), kleur: KLEUR.water, dun: true, label: naam, labelAt: 0.9 });
@@ -962,7 +1014,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
     // helling, seen from astern: kenterend against oprichtend
     const h = r.helling;
     if (toon.has('kenterend')) {
-      const c = ce.map((v, i) => (v + lp[i]) / 2);
+      const c = ce.map((v, i) => (v + lp[i]) / 2) as Vec3;
       const sweep = -sd * koppelArc(h.tip, undefined, KENTER);
       items.push({ type: 'boog', center: c, as: 'x', r: 0.55, start: -sweep / 2, sweep, kleur: KLEUR.koppel, label: 'kenterend koppel', offset: [0, -14] });
     }
@@ -986,21 +1038,21 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   }
 
   /** The boat for the schema: outlines, sails and zwaard, in the world as she stands. */
-  function shapes(sails, board, helmstok = 0, zeilen = []) {
-    const w = (p) => tmp.set(...p).applyMatrix4(boat.matrixWorld).toArray();
-    const out = [];
+  function shapes(sails: Zeil[], board: Board | null, helmstok = 0, zeilen: ZeilOpBoot[] = []): Shape[] {
+    const w = (p: Vec3) => tmp.set(...p).applyMatrix4(boat.matrixWorld).toArray();
+    const out: Shape[] = [];
     out.push({ view: 'boven', pts: outline.deck.map(w), closed: true, fill: '#f7f4ec', stroke: '#36454f', fit: true });
     out.push({ view: 'achter', pts: outline.section.map(w), closed: true, fill: '#f7f4ec', stroke: '#36454f', fit: true });
     if (board) {
-      out.push({ view: 'boven', pts: [[board.aft, 0.0, 0], [board.fore, 0.0, 0]].map(w), stroke: '#36454f', px: 2.5, dashed: true });
-      out.push({ view: 'achter', pts: [[2.8, 0.0, 0], [2.8, -board.depth, 0]].map(w), stroke: '#36454f', px: 3 });
+      out.push({ view: 'boven', pts: ([[board.aft, 0.0, 0], [board.fore, 0.0, 0]] satisfies Vec3[]).map(w), stroke: '#36454f', px: 2.5, dashed: true });
+      out.push({ view: 'achter', pts: ([[2.8, 0.0, 0], [2.8, -board.depth, 0]] satisfies Vec3[]).map(w), stroke: '#36454f', px: 3 });
     }
-    out.push({ view: 'achter', pts: [[3.62, 0.37, 0], [3.62, 5.64, 0]].map(w), stroke: '#7a5a2e', px: 2.5, romp: false });
+    out.push({ view: 'achter', pts: ([[3.62, 0.37, 0], [3.62, 5.64, 0]] satisfies Vec3[]).map(w), stroke: '#7a5a2e', px: 2.5, romp: false });
     out.push({ view: 'boven', dot: w([3.62, 1, 0]), r: 0.06, fill: '#7a5a2e' });
     // the roer from above: blade and helmstok one straight line through the roerpen on the spiegel, the
     // helmstok into the boat, the blade aft of it - so the blade goes the other way (helmstok + : stuurboord)
-    const a = (helmstok * Math.PI) / 180; const pen = [0.02, 0.7, 0];
-    const along = (l) => [pen[0] + l * Math.cos(a), pen[1], pen[2] + l * Math.sin(a)];
+    const a = (helmstok * Math.PI) / 180; const pen: Vec3 = [0.02, 0.7, 0];
+    const along = (l: number): Vec3 => [pen[0] + l * Math.cos(a), pen[1], pen[2] + l * Math.sin(a)];
     out.push({ view: 'boven', pts: [along(0), along(1.25)].map(w), stroke: '#7a5a2e', px: 3 });
     out.push({ view: 'boven', pts: [along(0), along(-0.42)].map(w), stroke: '#36454f', px: 5 });
     out.push({ view: 'boven', dot: w(pen), r: 0.035, fill: '#36454f' });
@@ -1012,7 +1064,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
       const hals = s.corners[0]; const schoot = s.corners[s.corners.length - 1];
       const los = zeilen.find((z) => z.naam === s.naam)?.stand === 'klappert';
       const { p } = profiel([hals.x, hals.z], [schoot.x, schoot.z], side(), los);
-      const profile = [];
+      const profile: Vec3[] = [];
       for (let i = 0; i <= 16; i++) { const [x, z] = p(i / 16); profile.push(w([x, hals.y, z])); }
       out.push({ view: 'boven', pts: profile, stroke: '#5f5a50', px: 2.4, romp: false });
     }
@@ -1020,7 +1072,7 @@ export function initKrachten({ wrap, scene, camera, controls, parts, modes, fly,
   }
 
   /** Open it at its first onderwerp - or at the one with that id, when one is given (Zoeken › Begrippen). */
-  const openOp = (id) => {
+  const openOp = (id: string) => {
     const i = Math.max(LESSEN.findIndex((l) => l.id === id), 0);
     if (open) { showLesson(i); return; }
     lesIndex = i; setOpen(true);

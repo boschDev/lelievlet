@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Krachten: a steady-state model of the forces on a lelievlet, for the explanation layer. No
 // simulation: for a course, a wind and a trim it finds the forces as they stand once the boat
 // sails at an even speed - and then they balance, which is the point of half the explanations.
@@ -15,6 +14,13 @@
 // 4 degrees of verlijeren aan de wind with the zwaard down. The arrows only show lengths, never
 // numbers (notities/krachten/voorstel.md).
 
+/** A point or a vector in model space, [x, y, z]. */
+export type Vec3 = [number, number, number];
+/** A horizontal vector in the boat, [x, z]. */
+export type Vec2 = [number, number];
+/** A table of [x, y] to interpolate in. */
+type Table = readonly (readonly [number, number])[];
+
 const RHO_AIR = 1.2;
 const RHO_WATER = 1000;
 const G = 9.81;
@@ -24,12 +30,12 @@ export const BFT = [0.2, 1, 2.5, 4.4, 6.7, 9.4, 12.3];
 
 // Boat speed through the water as a part of the true wind, per course; the hull caps it (the
 // golfsnelheid of a 5 m waterline is about 2.8 m/s).
-const POLAR = [[0, 0], [38, 0], [45, 0.42], [60, 0.55], [90, 0.65], [120, 0.62], [150, 0.52], [180, 0.45]];
+const POLAR: Table = [[0, 0], [38, 0], [45, 0.42], [60, 0.55], [90, 0.65], [120, 0.62], [150, 0.52], [180, 0.45]];
 const HULL_SPEED = 2.8;
 
 const MASS_BOAT = 950;            // kg, rigged and equipped (900 - 1000 kg, scoutwiki)
 const MASS_CREW = 4 * 65;         // four aboard
-const G_BOAT = [2.9, 0.45, 0];    // zwaartepunt of boat and gear (the steel hull is low, the mast high)
+const G_BOAT: Vec3 = [2.9, 0.45, 0];  // zwaartepunt of boat and gear (the steel hull is low, the mast high)
 // where they sit: "aan loef" moves their weight `reach` from the middle on average - not all four sit out
 // on the gangboord (0.72 m), and not all the time
 const CREW = { x: 2.3, y: 0.85, reach: 0.36 };
@@ -39,7 +45,7 @@ export const WATER_VOL = 350;     // kg: water well over the buikdenning - more 
 const ROLL_Y = 0.30;              // she heels about the waterline (modes.js)
 // Righting arm of the hull on its own about G_BOAT, per degree of helling: vormstabiel, steep at
 // first and falling off once the berghout goes under at about 20 degrees.
-const GZ = [[0, 0], [5, 0.07], [10, 0.13], [15, 0.175], [20, 0.205], [25, 0.21], [30, 0.2], [40, 0.15], [50, 0.08], [60, 0.01], [70, -0.05]];
+const GZ: Table = [[0, 0], [5, 0.07], [10, 0.13], [15, 0.175], [20, 0.205], [25, 0.21], [30, 0.2], [40, 0.15], [50, 0.08], [60, 0.01], [70, -0.05]];
 export const BERGHOUT_ONDER = 19; // degrees: from here the berghout is in the water (KATZ p. 66: tijd om te reven)
 export const HELLING_FLINK = 12;  // degrees: a flinke helling, said in yellow
 export const HELM_MOST = 45;      // degrees: the most the roer gives - past what that holds she turns whatever you do
@@ -47,10 +53,11 @@ export const HELM_MOST = 45;      // degrees: the most the roer gives - past wha
 // Sail coefficients by angle of attack (degrees between the chord and the apparent wind): lift
 // across the wind and drag along it. Up to 30 degrees the flow follows the sail; beyond it lets go
 // and the sail is a plate the wind pushes on (te strak, and voor de wind).
-const CL = [[0, 0], [3, 0.3], [8, 0.95], [14, 1.35], [18, 1.42], [24, 1.15], [30, 0.6]];
-const CD = [[0, 0.03], [8, 0.07], [14, 0.13], [18, 0.2], [24, 0.32], [30, 0.4]];
+const CL: Table = [[0, 0], [3, 0.3], [8, 0.95], [14, 1.35], [18, 1.42], [24, 1.15], [30, 0.6]];
+const CD: Table = [[0, 0.03], [8, 0.07], [14, 0.13], [18, 0.2], [24, 0.32], [30, 0.4]];
 const PLATE = 1.3;
 export const TRIM = { los: 1.5, goed: 15, strak: 29 };   // the angle of attack each schoot setting aims for
+export type Trim = keyof typeof TRIM;
 
 // Rudder: the force stands square to the blade and grows with sin of the angle (Sint Maarten KB III
 // § 7.9: at 45 degrees sturend and remmend are about the same, beyond it mostly the remmende grows).
@@ -72,9 +79,9 @@ const BOARD_DEPTH = 0.607;
 const LEEWAY_K = 3.13;
 const GRIP_UP = 4 / 30;                                         // what is left with the zwaard up
 const GRIP_POWER = 3.43;                                        // half (0.35 of 0.61 m) gives 4 / 15
-const grip = (depth) => GRIP_UP + (1 - GRIP_UP) * clamp(depth / BOARD_DEPTH, 0, 1) ** GRIP_POWER;
+const grip = (depth: number): number => GRIP_UP + (1 - GRIP_UP) * clamp(depth / BOARD_DEPTH, 0, 1) ** GRIP_POWER;
 
-export const interp = (table, x) => {
+export const interp = (table: Table, x: number): number => {
   if (x <= table[0][0]) return table[0][1];
   for (let i = 1; i < table.length; i++) {
     if (x <= table[i][0]) {
@@ -84,18 +91,18 @@ export const interp = (table, x) => {
   }
   return table[table.length - 1][1];
 };
-const rad = (d) => (d * Math.PI) / 180;
-const deg = (r) => (r * 180) / Math.PI;
-const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+const rad = (d: number): number => (d * Math.PI) / 180;
+const deg = (r: number): number => (r * 180) / Math.PI;
+const clamp = (v: number, a: number, b: number): number => Math.min(Math.max(v, a), b);
 
 /** A point of the boat after a heel of `theta` (radians about +x; positive: the mast to stuurboord). */
-export function heeled([x, y, z], theta) {
+export function heeled([x, y, z]: Vec3, theta: number): Vec3 {
   const c = Math.cos(theta); const s = Math.sin(theta); const dy = y - ROLL_Y;
   return [x, ROLL_Y + dy * c - z * s, dy * s + z * c];
 }
 
 /** Lift and drag coefficients at an angle of attack in degrees (0 .. 180). */
-export function sailCoefficients(alpha) {
+export function sailCoefficients(alpha: number): { cl: number; cd: number } {
   const a = Math.abs(alpha);
   if (a <= 30) return { cl: interp(CL, a), cd: interp(CD, a) };
   const s = Math.sin(rad(Math.min(a, 180)));
@@ -103,9 +110,12 @@ export function sailCoefficients(alpha) {
 }
 
 /** How a sail stands at that angle of attack: as Sint Maarten KB III § 7.4 names it. */
-export const sailState = (alpha) => (alpha < 4 ? 'klappert' : alpha <= 22 ? 'goed' : alpha <= 60 ? 'te strak' : 'duwt');
+/** How a sail stands: from the model (sailState), or 'bak' with the wind in its back. */
+export type Stand = 'klappert' | 'goed' | 'te strak' | 'duwt' | 'bak';
 
-export function boatSpeed(course, tws) {
+export const sailState = (alpha: number): Stand => (alpha < 4 ? 'klappert' : alpha <= 22 ? 'goed' : alpha <= 60 ? 'te strak' : 'duwt');
+
+export function boatSpeed(course: number, tws: number): number {
   const r = interp(POLAR, Math.abs(course));
   return HULL_SPEED * Math.tanh((r * tws) / HULL_SPEED);
 }
@@ -126,22 +136,88 @@ export function boatSpeed(course, tws) {
  *   drawAt   the heel (radians, as modes.js) to give the points at - the one the boat is shown with,
  *            which eases towards the one found here - or null for that one
  */
-export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = null, heel = true, push = null, drawAt = null, water = 0 }) {
+/** A sail as the model gets it (see solve). */
+export interface SailInput {
+  naam: string;
+  area: number;
+  point: Vec3;
+  chord: Vec2;
+}
+
+/** What solve takes (see above); water: kg of water in the kuip. */
+export interface SolveInput {
+  course: number;
+  tws: number;
+  vaart?: number;
+  sails: SailInput[];
+  board: { depth: number } | null;
+  crew?: number;
+  helm?: number | 'recht' | null;
+  heel?: boolean;
+  push?: { x: number; force: number } | null;
+  drawAt?: number | null;
+  water?: number;
+}
+
+/** The force on one sail, at its point upright. */
+export interface ZeilKracht {
+  naam: string;
+  point: Vec3;
+  force: Vec2;
+  alpha: number;
+  stand: Stand;
+}
+
+/** The same at the heel drawn: `at` is where it works then. */
+export interface ZeilOpBoot extends ZeilKracht {
+  at: Vec3;
+}
+
+export interface Roer {
+  at: Vec3;
+  force: Vec2;
+  sturend: Vec2;
+  remmend: Vec2;
+  koppel: number;
+}
+
+export interface Duw {
+  at: Vec3;
+  force: Vec2;
+  arm: number;
+  koppel: number;
+}
+
+/** The helling found; schept and water are set by the layer (index.ts), which knows how long it has lasted. */
+export interface Helling {
+  phi: number;
+  theta: number;
+  omslaan: boolean;
+  g: Vec3;
+  b: Vec3;
+  right: number;
+  tip: number;
+  weight: number;
+  schept?: boolean;
+  water?: number;
+}
+
+export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = null, heel = true, push = null, drawAt = null, water = 0 }: SolveInput) {
   const side = Math.sign(course) || 1;          // +1: wind over stuurboord, lij is bakboord (-z)
   const beta = rad(Math.abs(course));
   const V = vaart * boatSpeed(course, tws);
   // the wind as the air moves, in the horizontal plane [x, z]: the ware wind comes from `course` off
   // the bow on the loef side, the vaartwind from dead ahead
-  const ware = [-tws * Math.cos(beta), -side * tws * Math.sin(beta)];
-  const vaartwind = [-V, 0];
-  const schijnbaar = [ware[0] + vaartwind[0], ware[1] + vaartwind[1]];
+  const ware: Vec2 = [-tws * Math.cos(beta), -side * tws * Math.sin(beta)];
+  const vaartwind: Vec2 = [-V, 0];
+  const schijnbaar: Vec2 = [ware[0] + vaartwind[0], ware[1] + vaartwind[1]];
   const aws = Math.hypot(...schijnbaar);
   const awa = aws > 1e-6 ? deg(Math.atan2(Math.abs(schijnbaar[1]), -schijnbaar[0])) : 0;
   const q = 0.5 * RHO_AIR * aws * aws;
-  const flow = aws > 1e-6 ? [schijnbaar[0] / aws, schijnbaar[1] / aws] : [0, 0];
+  const flow: Vec2 = aws > 1e-6 ? [schijnbaar[0] / aws, schijnbaar[1] / aws] : [0, 0];
 
   // -- each sail: lift across the flow, drag along it
-  const zeilen = sails.map((s) => {
+  const zeilen = sails.map((s): ZeilKracht => {
     const len = Math.hypot(s.chord[0], s.chord[1]) || 1;
     const c = [s.chord[0] / len, s.chord[1] / len];
     const alpha = deg(Math.acos(clamp(c[0] * flow[0] + c[1] * flow[1], -1, 1)));
@@ -149,32 +225,32 @@ export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = n
     // lift points to the side the wind is turned away from: the side of the chord the flow does not come from
     const cross = c[0] * flow[1] - c[1] * flow[0];
     const turn = cross >= 0 ? 1 : -1;
-    const lift = [-turn * flow[1], turn * flow[0]];
+    const lift: Vec2 = [-turn * flow[1], turn * flow[0]];
     const k = q * s.area;
-    const f = [k * (cl * lift[0] + cd * flow[0]), k * (cl * lift[1] + cd * flow[1])];
+    const f: Vec2 = [k * (cl * lift[0] + cd * flow[0]), k * (cl * lift[1] + cd * flow[1])];
     // bak: the sail stands on the loef side, so the wind is in its back
     const bak = s.chord[1] * side > 0.05 * len;
     return { naam: s.naam, point: s.point, force: f, alpha, stand: bak ? 'bak' : sailState(alpha) };
   });
-  const sum = zeilen.reduce((a, z) => [a[0] + z.force[0], a[1] + z.force[1]], [0, 0]);
+  const sum = zeilen.reduce<Vec2>((a, z) => [a[0] + z.force[0], a[1] + z.force[1]], [0, 0]);
 
   // -- lateraal punt: the driftbeperkende middelen together
   const W = LATERAL.reduce((a, p) => a + p.w, 0);
-  const lp = [LATERAL.reduce((a, p) => a + p.w * p.x, 0) / W, LATERAL.reduce((a, p) => a + p.w * p.y, 0) / W, 0];
+  const lp: Vec3 = [LATERAL.reduce((a, p) => a + p.w * p.x, 0) / W, LATERAL.reduce((a, p) => a + p.w * p.y, 0) / W, 0];
 
   // -- helling: the kenterend koppel of the side force between zeilpunt and lateraal punt against the
   // oprichtend koppel of weight and buoyancy. Solved for the angle where they are equal.
   const crewZ = side * crew * CREW.reach;
   const wBoat = MASS_BOAT * G; const wCrew = MASS_CREW * G; const wWater = water * G; const wAll = wBoat + wCrew + wWater;
   const ce0 = centre(zeilen);
-  const heelAt = (phi) => {                          // phi degrees to lij, negative to loef
+  const heelAt = (phi: number) => {                          // phi degrees to lij, negative to loef
     const theta = -side * rad(phi);
     const gb = heeled(G_BOAT, theta); const gc = heeled([CREW.x, CREW.y, crewZ], theta);
     // water in the boat runs to the low side, further the more she heels - lying upright it lies in the middle
     const lever = WATER_IN.reach * clamp(phi / 5, -1, 1) + Math.sign(phi) * WATER_IN.spread * Math.min(Math.abs(phi), 40);
     const gw = heeled([WATER_IN.x, WATER_IN.y, -side * lever], theta);
-    const g = [0, 1, 2].map((i) => (wBoat * gb[i] + wCrew * gc[i] + wWater * gw[i]) / wAll);   // the zwaartepunt: boat, tuig, crew and water
-    const b = [gb[0], 0.12, gb[2] - side * Math.sign(phi) * interp(GZ, Math.abs(phi))];        // the drukpunt, gone over to lij
+    const g = [0, 1, 2].map((i) => (wBoat * gb[i] + wCrew * gc[i] + wWater * gw[i]) / wAll) as Vec3;   // (a map of three is three)   // the zwaartepunt: boat, tuig, crew and water
+    const b: Vec3 = [gb[0], 0.12, gb[2] - side * Math.sign(phi) * interp(GZ, Math.abs(phi))];        // the drukpunt, gone over to lij
     const right = wAll * (g[2] - b[2]) * side;                      // > 0 rights her
     const ce = heeled(ce0, theta); const l = heeled(lp, theta);
     const tilt = Math.cos(rad(phi)) ** 2;                            // a heeled sail catches less
@@ -182,7 +258,7 @@ export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = n
     return { phi, theta, g, b, right, tip, ce, lp: l, tilt };
   };
   // phi from -25 (to loef: the crew outweighs a light wind) up; where the koppels are equal she stays
-  const net = (phi) => { const s = heelAt(phi); return s.tip - s.right; };   // > 0: she heels further to lij
+  const net = (phi: number) => { const s = heelAt(phi); return s.tip - s.right; };   // > 0: she heels further to lij
   let h = heelAt(0);
   let omslaan = false;
   if (heel) {
@@ -201,7 +277,7 @@ export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = n
   const theta = h.theta;
 
   // -- where it all works, after the helling
-  const zeilenH = zeilen.map((z) => ({ ...z, force: [z.force[0] * h.tilt, z.force[1] * h.tilt], at: heeled(z.point, theta) }));
+  const zeilenH = zeilen.map((z): ZeilOpBoot => ({ ...z, force: [z.force[0] * h.tilt, z.force[1] * h.tilt], at: heeled(z.point, theta) }));
   const ceH = h.ce; const lpH = h.lp;
   sum[0] *= h.tilt; sum[1] *= h.tilt;
   const voortstuwend = sum[0];
@@ -211,12 +287,12 @@ export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = n
   const qw = 0.5 * RHO_WATER * Math.max(V, 0.3) ** 2;
   const verlijering = clamp(deg(Math.abs(verlijerend) / (k * qw)), 0, 35);
   // the water: as much against the side as the sails push, and a weerstand as big as the drive
-  const drift = [0, -verlijerend];
-  const weerstand = [-voortstuwend, 0];
+  const drift: Vec2 = [0, -verlijerend];
+  const weerstand: Vec2 = [-voortstuwend, 0];
 
   // -- gieren: the koppel about the lateraal punt (vertical axis). (r - lp) x F, the y part: > 0 turns
   // the bow to bakboord. Oploeven is turning to the loef side, so oploevend = -side * M.
-  const yawOf = (at, f) => (at[2] - lpH[2]) * f[0] - (at[0] - lpH[0]) * f[1];
+  const yawOf = (at: Vec3, f: Vec2) => (at[2] - lpH[2]) * f[0] - (at[0] - lpH[0]) * f[1];
   const perZeil = zeilenH.map((z) => -side * yawOf(z.at, z.force));
   // the weerstand pulls in the middle of the hull, the drift in the lateraal punt: only the sails
   const gier = perZeil.reduce((a, m) => a + m, 0);
@@ -233,36 +309,40 @@ export function solve({ course, tws, vaart = 1, sails, board, crew = 0, helm = n
   const helmNeeded = rudderK > 1e-6 ? Math.sign(gier) * deg(Math.asin(clamp((2 * hold) / rudderK, 0, 1)) / 2) : 0;   // + : helmstok naar loef
   // a yardstick for gier koppels: what the roer holds with the helmstok 15 degrees over
   const roerMaat = rudderK * Math.sin(rad(15)) * Math.cos(rad(15)) * rudderArm;
-  let roer = null;
+  let roer: Roer | null = null;
   if (helm !== null) {
     const a = rad(helm === 'recht' ? -side * helmNeeded : helm);      // + : the achterkant of the blade to stuurboord
     const n = Math.abs(Math.sin(a)) * rudderK;
     // it turns the water to stuurboord, so the force is to bakboord - and aft, the blade being across the stream
-    const f = [-n * Math.abs(Math.sin(a)), -Math.sign(a) * n * Math.cos(a)];
+    const f: Vec2 = [-n * Math.abs(Math.sin(a)), -Math.sign(a) * n * Math.cos(a)];
     roer = { at: rudderAt, force: f, sturend: [0, f[1]], remmend: [f[0], 0], koppel: yawOf(rudderAt, f) };   // koppel > 0: the bow to bakboord
   }
 
   // -- a push by hand, for the first lesson
-  let duw = null;
+  let duw: Duw | null = null;
   if (push) {
     const at = heeled([push.x, 0.75, 0.95], theta);
-    const f = [0, -push.force];
+    const f: Vec2 = [0, -push.force];
     duw = { at, force: f, arm: push.x - lpH[0], koppel: yawOf(at, f) };      // koppel > 0: the bow to bakboord
   }
 
+  const helling: Helling = { phi: found.phi, theta: found.theta, omslaan, g: h.g, b: h.b, right: h.right, tip: h.tip,
+                             weight: wAll };
   return {
     course, side, V, tws, aws, awa, ware, vaartwind, schijnbaar,
     zeilen: zeilenH, zeilkracht: { at: ceH, force: sum, size: Math.hypot(...sum) }, voortstuwend, verlijerend,
     lp: lpH, drift, weerstand, verlijering,
     gier, perZeil, helmNeeded, rudderK, roerMaat, roer, duw,
-    helling: { phi: found.phi, theta: found.theta, omslaan, g: h.g, b: h.b, right: h.right, tip: h.tip,
-               weight: wAll },
+    helling,
   };
 }
 
+/** What solve finds: the forces for one moment. */
+export type Krachten = ReturnType<typeof solve>;
+
 /** The zeilpunt: where the side forces of the sails together work (each sail by how hard it pushes). */
-function centre(zeilen) {
-  let w = 0; const p = [0, 0, 0];
+function centre(zeilen: { point: Vec3; force: Vec2 }[]): Vec3 {
+  let w = 0; const p: Vec3 = [0, 0, 0];
   for (const z of zeilen) {
     const f = Math.hypot(...z.force);
     w += f; for (let i = 0; i < 3; i++) p[i] += f * z.point[i];
@@ -271,5 +351,5 @@ function centre(zeilen) {
     for (const z of zeilen) for (let i = 0; i < 3; i++) p[i] += z.point[i] / zeilen.length;
     return zeilen.length ? p : [3, 2.8, 0];
   }
-  return p.map((v) => v / w);
+  return p.map((v) => v / w) as Vec3;   // (a map of three is three)
 }

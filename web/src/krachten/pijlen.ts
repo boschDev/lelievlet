@@ -1,5 +1,5 @@
-// @ts-nocheck
 import * as THREE from 'three';
+import type { Vec2, Vec3 } from './model.ts';
 
 // Krachten, drawn on the boat: arrows, koppels and points in the 3D scene, over everything else
 // (a force under water or behind a sail must not be hidden), with their word beside them in the page.
@@ -24,26 +24,59 @@ import * as THREE from 'three';
 // Line widths are set in screen pixels (PX, the half-width of a force arrow): worked back to metres at the
 // distance looked at, so they stay the same however far off the camera is and however big the page.
 
+/** Where an item is drawn: the schema's views (schema.ts), and 'boot' for the boat. */
+export type View = 'boven' | 'achter' | 'romp' | 'boot';
+
+/** What any item can have (see above). */
+interface ItemBase {
+  label?: string;
+  labelAt?: number;
+  offset?: Vec2;
+  views?: readonly View[];
+}
+export interface PijlItem extends ItemBase { type: 'pijl'; from: Vec3; vec: Vec3; kleur: string; dun?: boolean }
+export interface LijnItem extends ItemBase { type: 'lijn'; a: Vec3; b: Vec3; kleur: string }
+export interface PuntItem extends ItemBase { type: 'punt'; at: Vec3; kleur: string }
+export interface BoogItem extends ItemBase { type: 'boog'; center: Vec3; as: 'x' | 'y'; r: number; start: number; sweep: number; kleur: string; vol?: boolean }
+export interface MaatItem extends ItemBase { type: 'maat'; a: Vec3; b: Vec3; kleur: string }
+export interface TekstItem extends ItemBase { type: 'tekst'; at: Vec3; kleur: string; label: string; groot?: boolean }
+export interface StroomItem extends ItemBase { type: 'stroom'; pts: Vec3[]; kleur: string; pijl?: boolean }
+export interface RuimteItem extends ItemBase { type: 'ruimte'; at: Vec3 }
+/** One thing to draw, on the boat and in the schema. */
+export type Item = PijlItem | LijnItem | PuntItem | BoogItem | MaatItem | TekstItem | StroomItem | RuimteItem;
+
+type Kind = 'shaft' | 'head' | 'dot';
+
+/** A word in the page, with where it goes kept on it between frames. */
+interface Label extends HTMLDivElement {
+  _w: number;                       // its width in pixels, 0: not measured yet
+  _k: number | undefined;           // the step it is moved off by, undefined: not placed yet
+  _shown: number;                   // the step it is drawn at, easing to _k
+  _at: THREE.Vector3;
+  _offset: Vec2;
+  _first: boolean;
+}
+
 const UP = new THREE.Vector3(0, 1, 0);
 const ORDER = 1000;
 const PX = 3;
 
-export function createPijlen({ scene, camera, controls, layer }) {
+export function createPijlen({ scene, camera, controls, layer }: { scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: { target: THREE.Vector3 }; layer: HTMLElement }) {
   const group = new THREE.Group(); group.name = 'krachten'; scene.add(group);
-  const materials = new Map();
-  const material = (kleur) => {
+  const materials = new Map<string, THREE.MeshBasicMaterial>();
+  const material = (kleur: string) => {
     if (!materials.has(kleur)) {
       materials.set(kleur, new THREE.MeshBasicMaterial({ color: kleur, depthTest: false, depthWrite: false, transparent: true, opacity: 0.96 }));
     }
-    return materials.get(kleur);
+    return materials.get(kleur)!;
   };
   // unit shapes along +y from the origin: a shaft, a head, a dot
   const shaftGeo = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true); shaftGeo.translate(0, 0.5, 0);
   const headGeo = new THREE.ConeGeometry(1, 1, 14); headGeo.translate(0, 0.5, 0);
   const dotGeo = new THREE.SphereGeometry(1, 16, 10);
-  const pools = { shaft: [], head: [], dot: [] };
-  const used = { shaft: 0, head: 0, dot: 0 };
-  const take = (kind, kleur) => {
+  const pools: Record<Kind, THREE.Mesh[]> = { shaft: [], head: [], dot: [] };
+  const used: Record<Kind, number> = { shaft: 0, head: 0, dot: 0 };
+  const take = (kind: Kind, kleur: string) => {
     let m = pools[kind][used[kind]];
     if (!m) {
       m = new THREE.Mesh({ shaft: shaftGeo, head: headGeo, dot: dotGeo }[kind]);
@@ -57,18 +90,18 @@ export function createPijlen({ scene, camera, controls, layer }) {
   const dir = new THREE.Vector3(); const a = new THREE.Vector3(); const b = new THREE.Vector3();
 
   /** A round bar from p to q, `r` thick. */
-  const bar = (p, q, r, kleur) => {
+  const bar = (p: THREE.Vector3, q: THREE.Vector3, r: number, kleur: string) => {
     dir.subVectors(q, p); const len = dir.length(); if (len < 1e-5) return;
     const m = take('shaft', kleur);
     m.position.copy(p); m.quaternion.setFromUnitVectors(UP, dir.divideScalar(len)); m.scale.set(r, len, r);
   };
-  const head = (tip, along, r, kleur) => {
+  const head = (tip: THREE.Vector3, along: THREE.Vector3, r: number, kleur: string) => {
     const len = 4.2 * r;
     const m = take('head', kleur);
     m.position.copy(tip).addScaledVector(along, -len); m.quaternion.setFromUnitVectors(UP, along); m.scale.set(1.9 * r, len, 1.9 * r);
   };
   /** Dashes along a polyline. */
-  const dashes = (points, r, kleur) => {
+  const dashes = (points: THREE.Vector3[], r: number, kleur: string) => {
     const dash = 5 * r; const gap = 3.5 * r; let carry = 0; let on = true;
     for (let i = 1; i < points.length; i++) {
       const p = points[i - 1]; const q = points[i];
@@ -81,8 +114,8 @@ export function createPijlen({ scene, camera, controls, layer }) {
       }
     }
   };
-  const arcPoints = (it, n = 36) => {
-    const c = new THREE.Vector3(...it.center); const pts = [];
+  const arcPoints = (it: BoogItem, n = 36) => {
+    const c = new THREE.Vector3(...it.center); const pts: THREE.Vector3[] = [];
     for (let i = 0; i <= n; i++) {
       const t = it.start + (it.sweep * i) / n;
       // a positive turn about y takes +x to -z; about x it takes +y to +z
@@ -93,10 +126,11 @@ export function createPijlen({ scene, camera, controls, layer }) {
   };
 
   // -- the words, in the page over the canvas
-  const labels = []; let labelsUsed = 0;
-  const label = (text, kleur, at, offset = [0, 0], first = false, groot = false) => {
+  const labels: Label[] = []; let labelsUsed = 0;
+  const label = (text: string, kleur: string, at: THREE.Vector3, offset: Vec2 = [0, 0], first = false, groot = false) => {
     let el = labels[labelsUsed];
-    if (!el) { el = document.createElement('div'); el.className = 'kr-label'; layer.append(el); labels.push(el); }
+    // (its _ fields are set below, before they are read)
+    if (!el) { el = document.createElement('div') as Label; el.className = 'kr-label'; layer.append(el); labels.push(el); }
     labelsUsed++;
     if (el.textContent !== text || el.classList.contains('kr-label-groot') !== groot) {
       el.textContent = text; el.classList.toggle('kr-label-groot', groot); el._w = 0; el._k = undefined;
@@ -106,14 +140,14 @@ export function createPijlen({ scene, camera, controls, layer }) {
     el._at = at.clone(); el._offset = offset; el._first = first;
   };
 
-  let shown = [];
+  let shown: Item[] = [];
   let visible = true;
   return {
-    set visible(on) { visible = on; group.visible = on; if (!on) for (const el of labels) el.hidden = true; },
-    draw(items) { shown = items; },
+    set visible(on: boolean) { visible = on; group.visible = on; if (!on) for (const el of labels) el.hidden = true; },
+    draw(items: Item[]) { shown = items; },
     /** Lays the items out for this camera; after the camera has moved, before the render. */
-    update(width, height) {
-      for (const k of Object.keys(used)) used[k] = 0;
+    update(width: number, height: number) {
+      for (const k of Object.keys(used) as Kind[]) used[k] = 0;
       labelsUsed = 0;
       if (visible) {
         const metresPerPx = (2 * Math.max(camera.position.distanceTo(controls.target), 2) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / Math.max(height, 1);
@@ -167,14 +201,14 @@ export function createPijlen({ scene, camera, controls, layer }) {
           }
         }
       }
-      for (const k of Object.keys(pools)) for (let i = used[k]; i < pools[k].length; i++) pools[k][i].visible = false;
+      for (const k of Object.keys(pools) as Kind[]) for (let i = used[k]; i < pools[k].length; i++) pools[k][i].visible = false;
       for (let i = labelsUsed; i < labels.length; i++) labels[i].hidden = true;
       // the words: projected after everything has its place, each moved off the ones before it - and off
       // the points, whose words come first - as little as it can
       const p = new THREE.Vector3();
-      const placed = [];
+      const placed: { x: number; y: number; w: number }[] = [];
       const H = 19;
-      const order = labels.slice(0, labelsUsed).sort((a, b) => b._first - a._first);   // the points keep their place
+      const order = labels.slice(0, labelsUsed).sort((a, b) => Number(b._first) - Number(a._first));   // the points keep their place
       for (const el of order) {
         p.copy(el._at).project(camera);
         if (p.z > 1) { el.hidden = true; continue; }
@@ -182,7 +216,7 @@ export function createPijlen({ scene, camera, controls, layer }) {
         const x = ((p.x + 1) / 2) * width + el._offset[0]; const y0 = ((1 - p.y) / 2) * height + el._offset[1];
         // its own place when free, else the step it had while that still fits: a word does not hop about
         // back to its own place from elsewhere only with room to spare: no hopping to and fro
-        const free = (k, ruim = 0) => !placed.some((q) => Math.abs(q.x - x) < (q.w + el._w) / 2 + 2 + ruim && Math.abs(q.y - (y0 + k * H)) < H + ruim);
+        const free = (k: number, ruim = 0) => !placed.some((q) => Math.abs(q.x - x) < (q.w + el._w) / 2 + 2 + ruim && Math.abs(q.y - (y0 + k * H)) < H + ruim);
         const k = free(0, el._k ? 6 : 0) ? 0 : el._k !== undefined && free(el._k) ? el._k : [-1, 1, -2, 2, -3, 3, -4, 4].find((n) => free(n)) ?? 0;
         el._shown = el._k === undefined ? k : el._shown + (k - el._shown) * 0.2; el._k = k;
         placed.push({ x, y: y0 + k * H, w: el._w });
