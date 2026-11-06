@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { unpack } from './config.ts';
 
@@ -6,11 +5,17 @@ import { unpack } from './config.ts';
 // identity transforms (x = transom -> bow, y = up, z = starboard), so a part is moved by giving
 // its meshes the transform "rotate about a pivot" or "carry this point to that point".
 
+/** Registers a node as a pickable part (main.ts / modes.ts). */
+export type AddPart = (node: THREE.Object3D, id: string, naam: string, groep: string, materiaal: string, maten: number[]) => void;
+
+/** Anything setOpacity can fade: a mesh with one material. */
+export interface Fadeable { visible: boolean; material: THREE.Material }
+
 const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 
 /** Rotate meshes about the line through `pivot` along unit `axis` (meshes start at identity). */
-export function pivotRotate(meshes, pivot, axis, angle) {
+export function pivotRotate(meshes: Iterable<THREE.Object3D>, pivot: THREE.Vector3, axis: THREE.Vector3, angle: number): void {
   _q.setFromAxisAngle(axis, angle);
   _v.copy(pivot).applyQuaternion(_q);
   for (const m of meshes) {
@@ -20,12 +25,12 @@ export function pivotRotate(meshes, pivot, axis, angle) {
 }
 
 /** Where a model-space point ends up under pivotRotate. */
-export function rotatedPoint(point, pivot, axis, angle, out = new THREE.Vector3()) {
+export function rotatedPoint(point: THREE.Vector3, pivot: THREE.Vector3, axis: THREE.Vector3, angle: number, out = new THREE.Vector3()): THREE.Vector3 {
   return out.copy(point).sub(pivot).applyAxisAngle(axis, angle).add(pivot);
 }
 
 /** Place meshes so that model point `from` lands on `to`, turned by quaternion `q` about it. */
-export function carry(meshes, from, to, q) {
+export function carry(meshes: Iterable<THREE.Object3D>, from: THREE.Vector3, to: THREE.Vector3, q: THREE.Quaternion): void {
   _v.copy(from).applyQuaternion(q);
   for (const m of meshes) {
     m.quaternion.copy(q);
@@ -39,9 +44,13 @@ export function carry(meshes, from, to, q) {
  * stay straight while they stretch.
  */
 export class RopeStretch {
-  constructor(meshes, weight) {
+  declare items: { mesh: THREE.Mesh; attr: THREE.BufferAttribute; rest: Float32Array; weights: Float32Array }[];
+  declare last: THREE.Vector3;
+
+  /** weight: how far a rest vertex (model space) follows the moving end, 0..1 */
+  constructor(meshes: THREE.Mesh[], weight: (p: THREE.Vector3) => number) {
     this.items = meshes.map((mesh) => {
-      const attr = mesh.geometry.attributes.position;
+      const attr = mesh.geometry.attributes.position as THREE.BufferAttribute;   // CAD geometry: never interleaved
       const rest = Float32Array.from(attr.array);
       const weights = new Float32Array(attr.count);
       const p = new THREE.Vector3();
@@ -52,7 +61,7 @@ export class RopeStretch {
   }
 
   /** delta: how far the moving end has travelled from its rest position */
-  update(delta) {
+  update(delta: THREE.Vector3): void {
     if (delta.distanceToSquared(this.last) < 1e-10) return;
     this.last.copy(delta);
     for (const { mesh, attr, rest, weights } of this.items) {
@@ -71,10 +80,19 @@ export class RopeStretch {
  * A rope that is laid anew whenever its ends move: a tube of fixed resolution along a polyline.
  * Used where stretching the CAD rope would not do, because the rope changes its route.
  */
-export class RopeLine {
-  constructor(points, radius, material, sides = 8) {
+export class RopeLine<M extends THREE.Material | THREE.Material[] = THREE.Material> {
+  declare n: number;
+  declare sides: number;
+  declare radius: number;
+  declare mesh: THREE.Mesh<THREE.BufferGeometry, M>;
+  declare t: THREE.Vector3;
+  declare u: THREE.Vector3;
+  declare w: THREE.Vector3;
+  declare last: Float64Array | undefined;     // the path laid last, flat; undefined until the first set()
+
+  constructor(points: number, radius: number, material: M, sides = 8) {
     this.n = points; this.sides = sides; this.radius = radius;
-    const index = [];
+    const index: number[] = [];
     for (let i = 0; i < points - 1; i++) {
       for (let k = 0; k < sides; k++) {
         const a = i * sides + k; const b = i * sides + ((k + 1) % sides);
@@ -92,20 +110,21 @@ export class RopeLine {
 
   /** path: array of Vector3; resampled by length to the resolution of the tube, unless it
    *  already has exactly that many points (a tackle: long straights and tight turns) */
-  set(path) {
+  set(path: readonly THREE.Vector3[]): void {
     // a rope at rest is handed the very same path every frame: then there is nothing to lay again
     const n3 = path.length * 3; let same = this.last?.length === n3;
     for (let i = 0; same && i < path.length; i++) {
-      const p = path[i]; same = p.x === this.last[i * 3] && p.y === this.last[i * 3 + 1] && p.z === this.last[i * 3 + 2];
+      const p = path[i]; same = p.x === this.last![i * 3] && p.y === this.last![i * 3 + 1] && p.z === this.last![i * 3 + 2];
     }
     if (same) return undefined;
     if (this.last?.length !== n3) this.last = new Float64Array(n3);
-    for (let i = 0; i < path.length; i++) { this.last[i * 3] = path[i].x; this.last[i * 3 + 1] = path[i].y; this.last[i * 3 + 2] = path[i].z; }
+    const last = this.last!;                     // just made, if it was not there
+    for (let i = 0; i < path.length; i++) { last[i * 3] = path[i].x; last[i * 3 + 1] = path[i].y; last[i * 3 + 2] = path[i].z; }
     if (path.length === this.n) return this.lay(path);
     const lengths = [0];
     for (let i = 1; i < path.length; i++) lengths.push(lengths[i - 1] + path[i].distanceTo(path[i - 1]));
     const total = lengths[lengths.length - 1] || 1e-9;
-    const P = []; let seg = 1;
+    const P: THREE.Vector3[] = []; let seg = 1;
     for (let i = 0; i < this.n; i++) {
       const s = (i / (this.n - 1)) * total;
       while (seg < path.length - 1 && lengths[seg] < s) seg++;
@@ -115,7 +134,7 @@ export class RopeLine {
     return this.lay(P);
   }
 
-  lay(P) {
+  lay(P: readonly THREE.Vector3[]): void {
     const pos = this.mesh.geometry.attributes.position.array;
     const nor = this.mesh.geometry.attributes.normal.array;
     const { t, u, w } = this;
@@ -141,24 +160,24 @@ export class RopeLine {
     this.mesh.geometry.computeBoundingSphere();            // keeps picking correct
   }
 }
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
 
 /**
  * Route of a rope from `from` to `to` that has to go round the front (+x) of a standing spar:
  * straight to the spar, round it, straight on. Worked out in plan; heights run evenly along it.
  */
-export function roundTheFront(from, to, centre, radius, out = []) {
+export function roundTheFront(from: THREE.Vector3, to: THREE.Vector3, centre: THREE.Vector3, radius: number, out: THREE.Vector3[] = []): THREE.Vector3[] {
   out.length = 0;
-  const tangent = (p) => {                                 // the tangent point nearest the front
+  const tangent = (p: THREE.Vector3): number => {                                 // the tangent point nearest the front
     const dx = p.x - centre.x; const dz = p.z - centre.z;
     const d = Math.max(Math.hypot(dx, dz), radius * 1.02);
     const base = Math.atan2(dz, dx); const spread = Math.acos(radius / d);
     const a = base + spread; const b = base - spread;
-    const wrap = (x) => Math.abs(Math.atan2(Math.sin(x), Math.cos(x)));
+    const wrap = (x: number): number => Math.abs(Math.atan2(Math.sin(x), Math.cos(x)));
     return wrap(a) < wrap(b) ? Math.atan2(Math.sin(a), Math.cos(a)) : Math.atan2(Math.sin(b), Math.cos(b));
   };
   const a0 = tangent(from); const a1 = tangent(to);
-  const plan = [[from.x, from.z]];
+  const plan: [number, number][] = [[from.x, from.z]];
   const steps = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 0.2));
   for (let i = 0; i <= steps; i++) {
     const a = a0 + ((a1 - a0) * i) / steps;
@@ -172,7 +191,7 @@ export function roundTheFront(from, to, centre, radius, out = []) {
 }
 
 /** Fade a set of meshes; fully faded meshes are hidden so they cannot be picked. */
-export function setOpacity(meshes, alpha) {
+export function setOpacity(meshes: Iterable<Fadeable>, alpha: number): void {
   for (const m of meshes) {
     m.visible = alpha > 0.02;
     // a painted decal (zeilteken, zeilnummer) must stay transparent or its patch shows as a block
@@ -185,7 +204,7 @@ export function setOpacity(meshes, alpha) {
 }
 
 /** Zwaardbout: the bolt through the zwaardkast that the midzwaard swings on. */
-export function makeZwaardbout() {
+export function makeZwaardbout(): THREE.Group {
   const steel = new THREE.MeshStandardMaterial({ color: 0x8d9298, metalness: 0.75, roughness: 0.4 });
   const group = new THREE.Group();
   const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, 0.118, 16), steel);
@@ -201,7 +220,7 @@ export function makeZwaardbout() {
 }
 
 /** Borgpen: the pin through the zwaardloper that rests on the kast top and holds the board up. */
-export function makeBorgpen() {
+export function makeBorgpen(): THREE.Group {
   const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.75, roughness: 0.35 });
   const group = new THREE.Group();
   const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, 0.085, 14), steel);
@@ -215,7 +234,7 @@ export function makeBorgpen() {
 }
 
 /** Kettinkje: the short chain from the kast top to the borgpen, so the pin cannot be lost. */
-export function makeKettinkje(links = 6) {
+export function makeKettinkje(links = 6): THREE.Group {
   const steel = new THREE.MeshStandardMaterial({ color: 0x81868c, metalness: 0.7, roughness: 0.45 });
   const group = new THREE.Group();
   const geometry = new THREE.TorusGeometry(0.0085, 0.0022, 5, 10);   // a small chain: five sides round, ten along
@@ -234,8 +253,8 @@ export function makeKettinkje(links = 6) {
  * face bulges towards n = (0,0,1) x t; the binormal is that constant (0,0,1), so unlike a Frenet
  * frame the section cannot flip where the curvature changes sign.
  */
-function sweepHalfRound(curve, thick, wide, arcSegments = 10) {
-  const profile = [];                                  // [along n, along z], counterclockwise
+function sweepHalfRound(curve: readonly (readonly [number, number, number, number])[], thick: number, wide: number, arcSegments = 10): THREE.BufferGeometry {
+  const profile: [number, number][] = [];                                  // [along n, along z], counterclockwise
   for (let k = 0; k <= arcSegments; k++) {
     const a = Math.PI - (Math.PI * k) / arcSegments;
     profile.push([k === 0 || k === arcSegments ? 0 : thick * Math.sin(a), (wide / 2) * Math.cos(a)]);
@@ -243,8 +262,8 @@ function sweepHalfRound(curve, thick, wide, arcSegments = 10) {
   profile.push([0, wide / 2], [0, -wide / 2]);         // the flat back gets its own two edges, so
   const M = profile.length;                            // it stays flat-shaded against the round one
   const N = curve.length;
-  const position = [];
-  const index = [];
+  const position: number[] = [];
+  const index: number[] = [];
   for (const [x, y, tx, ty] of curve) {
     for (const [u, w] of profile) position.push(x - u * ty, y + u * tx, w);
   }
@@ -278,7 +297,7 @@ function sweepHalfRound(curve, thick, wide, arcSegments = 10) {
  * lies in the fork, which is bent from half-round bar with the round side towards the oar.
  * Origin: on the pin axis at the top rim of the dolpot, the fork above it and the pin below.
  */
-export function makeDol() {
+export function makeDol(): THREE.Group {
   const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.75, roughness: 0.4 });
   const group = new THREE.Group();
 
@@ -295,7 +314,7 @@ export function makeDol() {
   const yFlare = yc + (2 * legLen) / 3;          // where the flare begins
   const rf = 0.020; const d = rf * Math.tan(FLARE / 2);   // fillet into it, so there is no kink
 
-  const half = [];                               // bottom of the U up the starboard leg
+  const half: [number, number, number, number][] = [];   // bottom of the U up the starboard leg
   for (let k = 0; k <= 24; k++) {
     const a = (Math.PI / 2) * (k / 24);
     half.push([R * Math.sin(a), yc - R * Math.cos(a), Math.cos(a), Math.sin(a)]);
@@ -307,7 +326,7 @@ export function makeDol() {
   }
   half.push([R + (legLen / 3) * Math.sin(FLARE), TIP, Math.sin(FLARE), Math.cos(FLARE)]);
 
-  const curve = [];                              // whole U: port tip, round the bend, starboard tip
+  const curve: [number, number, number, number][] = [];   // whole U: port tip, round the bend, starboard tip
   for (let i = half.length - 1; i >= 0; i--) {
     const [x, y, tx, ty] = half[i];
     curve.push([-x, y, tx, -ty]);
@@ -335,7 +354,7 @@ export function makeDol() {
 }
 
 /** Knevel: the toggle on the end of the dol's chain, dropped through a hole to stow the dol. */
-export function makeKnevel() {
+export function makeKnevel(): THREE.Group {
   const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.75, roughness: 0.4 });
   const group = new THREE.Group();
   const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.060, 14), steel);
@@ -353,7 +372,7 @@ const _along = new THREE.Vector3(); const _linkQ = new THREE.Quaternion(); const
 const _X = new THREE.Vector3(1, 0, 0);
 
 /** Lay the links of a kettinkje evenly along a path of points; every other link stands at right angles. */
-export function layChain(links, path) {
+export function layChain(links: readonly THREE.Object3D[], path: readonly THREE.Vector3[]): void {
   const run = [0];
   for (let i = 1; i < path.length; i++) run.push(run[i - 1] + path[i].distanceTo(path[i - 1]));
   const total = run[run.length - 1] || 1e-9;
@@ -378,7 +397,7 @@ export function layChain(links, path) {
  * Origin: the foot of the bar, which runs up local +y; the hoops lie in the local x-y plane with
  * the side hoop on the +x side.
  */
-export function makeMik() {
+export function makeMik(): THREE.Group {
   const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.75, roughness: 0.4 });
   const group = new THREE.Group();
 
@@ -395,10 +414,10 @@ export function makeMik() {
   // One hoop, swept as a tube along its centre-line: a straight leg down from x0, a semicircular
   // bend, a straight leg back up to x1. The curvature never changes sign, so the section cannot
   // flip. Returns the deepest point inside the bend, where a spar comes to rest.
-  const hoop = (x0, x1, tip) => {
+  const hoop = (x0: number, x1: number, tip: number): THREE.Vector3 => {
     const xc = (x0 + x1) / 2; const r = Math.abs(x1 - x0) / 2; const s = Math.sign(x1 - x0);
     const yc = tip - DEEP + ROD_R + r;           // centre of the bend
-    const P = [];
+    const P: THREE.Vector3[] = [];
     for (let k = 0; k < 4; k++) P.push(new THREE.Vector3(x0, tip - ((tip - yc) * k) / 4, 0));
     for (let k = 0; k <= 24; k++) {
       const a = (Math.PI * k) / 24;
@@ -443,10 +462,10 @@ export function makeMik() {
  * Stootwil: a dark blue fender, 300 mm over all and 82 ø, its ends rounded shut. Hangs from the
  * origin, its axis down -y.
  */
-export function makeStootwil() {
+export function makeStootwil(): THREE.Group {
   const vinyl = new THREE.MeshStandardMaterial({ color: 0x1a2b52, roughness: 0.45 });
   const L = 0.300; const R = 0.041; const END = 0.040;          // END: how far the rounding runs
-  const profile = [];
+  const profile: THREE.Vector2[] = [];
   for (let k = 0; k <= 8; k++) {                                // top: from the pole out to the side
     const a = (Math.PI / 2) * (k / 8);
     profile.push(new THREE.Vector2(R * Math.sin(a), -END * (1 - Math.cos(a))));
@@ -463,13 +482,13 @@ export function makeStootwil() {
   return group;
 }
 
-const galvanised = () => new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.75, roughness: 0.45 });
+const galvanised = (): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.75, roughness: 0.45 });
 
 /**
  * A rivet across the boat (along z) through `centre`, `half` from the middle to either outer face:
  * a shank of radius r, closed with a flattened head on both faces. Built where it is in model space.
  */
-export function makeRivet(centre, r, half) {
+export function makeRivet(centre: THREE.Vector3, r: number, half: number): THREE.Group {
   const steel = galvanised();
   const group = new THREE.Group();
   const shank = new THREE.CylinderGeometry(r, r, 2 * half, 16).rotateX(Math.PI / 2);
@@ -483,7 +502,7 @@ export function makeRivet(centre, r, half) {
 }
 
 /** Short hex-head bolts standing in holes of a flat plate: `points` are the hole centres on its top. */
-export function makeBolts(points, r) {
+export function makeBolts(points: Iterable<THREE.Vector3>, r: number): THREE.Group {
   const steel = galvanised();
   const group = new THREE.Group();
   const HEAD = 0.004;                            // M6: 10 mm across the flats, 4 mm high
@@ -496,12 +515,12 @@ export function makeBolts(points, r) {
 }
 
 /** Masthead wind vane: the red vane streams downwind, the wire frame points into the wind (+x). */
-export function makeWindVane() {
+export function makeWindVane(): THREE.Group {
   const group = new THREE.Group();
   const metal = new THREE.MeshStandardMaterial({ color: 0xb9bec4, metalness: 0.7, roughness: 0.35 });
   const red = new THREE.MeshStandardMaterial({ color: 0xcc1f2c, roughness: 0.6, side: THREE.DoubleSide });
-  const P = (x, y, z) => new THREE.Vector3(x, y, z);
-  const rod = (from, to, r = 0.0035) => {
+  const P = (x: number, y: number, z: number): THREE.Vector3 => new THREE.Vector3(x, y, z);
+  const rod = (from: THREE.Vector3, to: THREE.Vector3, r = 0.0035): THREE.Mesh => {
     const dir = new THREE.Vector3().subVectors(to, from);
     const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, dir.length(), 8), metal);
     mesh.position.copy(from).addScaledVector(dir, 0.5);
@@ -520,7 +539,7 @@ export function makeWindVane() {
 }
 
 /** Flat arrow on the water showing which way the boat is rowed: points along +x, tail at the origin. */
-export function makeCourseArrow() {
+export function makeCourseArrow(): THREE.Group {
   const s = new THREE.Shape();
   s.moveTo(0, -0.11); s.lineTo(0.95, -0.11); s.lineTo(0.95, -0.30); s.lineTo(1.55, 0);
   s.lineTo(0.95, 0.30); s.lineTo(0.95, 0.11); s.lineTo(0, 0.11); s.closePath();
@@ -534,7 +553,7 @@ export function makeCourseArrow() {
 }
 
 /** Flat arrow on the water showing where the wind comes from. */
-export function makeWindArrow() {
+export function makeWindArrow(): THREE.Group {
   const s = new THREE.Shape();                    // points along +x, tail at the origin
   s.moveTo(0, -0.14); s.lineTo(1.15, -0.14); s.lineTo(1.15, -0.38); s.lineTo(1.9, 0);
   s.lineTo(1.15, 0.38); s.lineTo(1.15, 0.14); s.lineTo(0, 0.14); s.closePath();
@@ -546,7 +565,7 @@ export function makeWindArrow() {
 
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 96;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   ctx.font = '700 64px "Helvetica Neue", Helvetica, Arial, sans-serif';
   ctx.fillStyle = '#1769c4'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText('wind', 128, 50);
@@ -562,10 +581,10 @@ export function makeWindArrow() {
 }
 
 /** Waterline of the hull at height `level`: half-breadths found by casting rays at the plating. */
-function waterlineOutline(level, hullMeshes) {
+function waterlineOutline(level: number, hullMeshes: THREE.Object3D[]): [number, number][] {
   const ray = new THREE.Raycaster();
   for (const m of hullMeshes) m.updateWorldMatrix(true, false);
-  const starboard = []; const port = [];
+  const starboard: [number, number][] = []; const port: [number, number][] = [];
   for (let x = -0.2; x <= 6.2; x += 0.04) {
     ray.set(new THREE.Vector3(x, level, 4), new THREE.Vector3(0, 0, -1));
     const sb = ray.intersectObjects(hullMeshes, false)[0];
@@ -577,7 +596,7 @@ function waterlineOutline(level, hullMeshes) {
 }
 
 /** Water surface with a hole where the boat is, so it does not show inside the hull. */
-export function makeWater(level, hullMeshes) {
+export function makeWater(level: number, hullMeshes: THREE.Object3D[]): THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> {
   const surface = new THREE.Shape();
   surface.absarc(2.8, 0, 14, 0, Math.PI * 2, false);
   const outline = waterlineOutline(level, hullMeshes);
@@ -617,15 +636,15 @@ const SIGN = { at: 1.2, post: 1.2, wide: 1.4, high: 0.5, drop: 2 };
 const LINES = ['PCRBVHGDvJfvDw==', 'KTNCQHCdvNa7KT9Ga4uP9uHjEj5TIYO1vsk='].map(unpack);
 
 /** The board: dark lettering on pale paint, two lines, the long one fitted to the width. */
-function lettering() {
+function lettering(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 1024; canvas.height = 366;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#efe4c8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.strokeStyle = '#c0ad84'; ctx.lineWidth = 8; ctx.strokeRect(16, 16, canvas.width - 32, canvas.height - 32);
   ctx.fillStyle = '#33291a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const put = (text, y, size) => {
-    const font = (px) => `700 ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const put = (text: string, y: number, size: number): void => {
+    const font = (px: number): string => `700 ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
     ctx.font = font(size);
     const wide = ctx.measureText(text).width;
     if (wide > 820) ctx.font = font(Math.floor((size * 820) / wide));
@@ -639,7 +658,7 @@ function lettering() {
 }
 
 /** Two posts and a board, the lettering on the +x face: the group is turned to face the boat. */
-function makeSign() {
+function makeSign(): THREE.Group {
   const group = new THREE.Group();
   const wood = new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.9 });
   const post = new THREE.CylinderGeometry(0.03, 0.03, SIGN.post, 10);
@@ -659,21 +678,38 @@ function makeSign() {
   return group;
 }
 
+export interface IslandInput {
+  centre: readonly number[];             // [x, z] in model space
+  waterline: number;
+  facing: readonly number[];             // [x, z] direction towards the boat
+  radius?: number;
+  height?: number;
+}
+
+/** The island and what can be done with it. */
+export interface Island {
+  group: THREE.Group;
+  height: number;                        // the crown over the water
+  radius: number;
+  rise(k: number): void;
+  shore(out: number): THREE.Vector3;
+}
+
 /**
  * The island off the bow. `centre` is [x, z] in model space, `facing` an [x, z] direction from
  * the island towards the boat: the sign looks that way and the beach is measured along it.
  */
-export function makeIsland({ centre, waterline, facing, radius = 3.5, height = 0.6 }) {
+export function makeIsland({ centre, waterline, facing, radius = 3.5, height = 0.6 }: IslandInput): Island {
   const toBoat = new THREE.Vector2(facing[0], facing[1]).normalize();
-  const wobble = (a) => 1 + 0.09 * Math.sin(3 * a + 0.7) + 0.05 * Math.sin(5 * a - 1.2);   // never a clean circle
-  const dome = (t) => (t >= 1 ? 0 : Math.cos((Math.PI / 2) * t) ** 2);   // rounded at the top, dying out level at the rim
-  const rim = (a) => radius * wobble(a);
-  const sand = (x, z) => height * dome(Math.hypot(x, z) / rim(Math.atan2(z, x)))
+  const wobble = (a: number): number => 1 + 0.09 * Math.sin(3 * a + 0.7) + 0.05 * Math.sin(5 * a - 1.2);   // never a clean circle
+  const dome = (t: number): number => (t >= 1 ? 0 : Math.cos((Math.PI / 2) * t) ** 2);   // rounded at the top, dying out level at the rim
+  const rim = (a: number): number => radius * wobble(a);
+  const sand = (x: number, z: number): number => height * dome(Math.hypot(x, z) / rim(Math.atan2(z, x)))
     + BUMP.h * dome(Math.hypot(x - BUMP.x, z - BUMP.z) / BUMP.r);
 
   // the beach: a fan of rings out from the crown, the rim at LIP above the water
-  const pos = [0, LIP + sand(0, 0), 0]; const index = [];
-  const outline = [];
+  const pos = [0, LIP + sand(0, 0), 0]; const index: number[] = [];
+  const outline: number[] = [];
   for (let j = 1; j <= RINGS; j++) {
     for (let i = 0; i < SEG; i++) {
       const a = (i / SEG) * Math.PI * 2; const r = (rim(a) * j) / RINGS;
@@ -682,7 +718,7 @@ export function makeIsland({ centre, waterline, facing, radius = 3.5, height = 0
       if (j === RINGS) outline.push(x, z);
     }
   }
-  const at = (j, i) => 1 + (j - 1) * SEG + (i % SEG);
+  const at = (j: number, i: number): number => 1 + (j - 1) * SEG + (i % SEG);
   for (let i = 0; i < SEG; i++) index.push(0, at(1, i + 1), at(1, i));
   for (let j = 1; j < RINGS; j++) {
     for (let i = 0; i < SEG; i++) {
@@ -696,7 +732,7 @@ export function makeIsland({ centre, waterline, facing, radius = 3.5, height = 0
   const mound = new THREE.Mesh(top, new THREE.MeshStandardMaterial({ color: SAND, roughness: 1 }));
 
   // and what is under water: the same outline shelving in to a flat bottom, so the island is solid
-  const wPos = []; const wIndex = [];
+  const wPos: number[] = []; const wIndex: number[] = [];
   for (let i = 0; i < SEG; i++) wPos.push(outline[i * 2], LIP, outline[i * 2 + 1], outline[i * 2] * 0.72, -SKIRT, outline[i * 2 + 1] * 0.72);
   wPos.push(0, -SKIRT, 0);
   const floor = SEG * 2;
@@ -727,13 +763,13 @@ export function makeIsland({ centre, waterline, facing, radius = 3.5, height = 0
     height: height + LIP,
     radius,
     /** Out of the water as k says, the sign coming up out of the sand over the last of it. */
-    rise(k) {
+    rise(k: number): void {
       group.visible = k > 0.001;
       group.position.y = waterline - (1 - k) * UNDER;
       sign.position.y = signY - (1 - k) * SIGN.drop;
     },
     /** A point on the beach `out` metres up from the water's edge, on the line towards the boat. */
-    shore(out) {
+    shore(out: number): THREE.Vector3 {
       const a = Math.atan2(toBoat.y, toBoat.x);
       const r = Math.max(0, rim(a) - out);
       const x = toBoat.x * r; const z = toBoat.y * r;
@@ -764,14 +800,21 @@ const POST_AT = 0.35; const POST_R = 0.06; const POST_H = 0.7;
 const POST_EYE = 0.55;                             // the towline takes its turns low round the post
 
 /** Half the beam `x` metres forward of the transom, `out` metres outboard of the planking. */
-const half = (x, out = 0) => (x < ROUND ? HALF - ROUND + Math.sqrt(Math.max(ROUND * ROUND - (ROUND - x) ** 2, 0)) : HALF) + out;
+const half = (x: number, out = 0): number => (x < ROUND ? HALF - ROUND + Math.sqrt(Math.max(ROUND * ROUND - (ROUND - x) ** 2, 0)) : HALF) + out;
 
 /** The plan of the slab between x0 and x1 as a shape: its x is the model's, its y the model's -z. */
-function slab(x0, x1, out) {
-  const N = 8; const points = [];
+function slab(x0: number, x1: number, out: number): THREE.Shape {
+  const N = 8; const points: THREE.Vector2[] = [];
   for (let i = 0; i <= N; i++) { const x = THREE.MathUtils.lerp(x0, x1, i / N); points.push(new THREE.Vector2(x, half(x, out))); }
   for (let i = N; i >= 0; i--) { const x = THREE.MathUtils.lerp(x0, x1, i / N); points.push(new THREE.Vector2(x, -half(x, out))); }
   return new THREE.Shape(points);
+}
+
+/** The stern of the sleepboot: `post` is where the towline is made fast (model space). */
+export interface TugStern {
+  group: THREE.Group;
+  post: THREE.Vector3;
+  fade(k: number): void;
 }
 
 /**
@@ -780,19 +823,19 @@ function slab(x0, x1, out) {
  * forward end can be faded out into nothing; fade(k) brings the whole of it in and out.
  * `post` is where the towline is made fast, in model space.
  */
-export function makeTugStern({ waterline, at = 15.8 }) {
+export function makeTugStern({ waterline, at = 15.8 }: { waterline: number; at?: number }): TugStern {
   const group = new THREE.Group();
   group.name = 'sleepboot';
   group.position.set(at, waterline, 0);
   group.visible = false;
-  const coats = [];                                // every material of it, with how solid it is at most
-  const coat = (colour, base, extra = {}) => {
+  const coats: { material: THREE.MeshStandardMaterial; base: number }[] = [];                                // every material of it, with how solid it is at most
+  const coat = (colour: number, base: number, extra: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial => {
     const material = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.75, transparent: true,
                                                       depthWrite: base > 0.999, opacity: base, ...extra });
     coats.push({ material, base });
     return material;
   };
-  const upright = (geometry, bottom, materials) => {
+  const upright = (geometry: THREE.BufferGeometry, bottom: number, materials: THREE.Material | THREE.Material[]): THREE.Mesh => {
     const mesh = new THREE.Mesh(geometry, materials);
     mesh.rotation.x = -Math.PI / 2;                // the extrusion, laid in plan, stands up out of the water
     mesh.position.y = bottom;
@@ -815,22 +858,22 @@ export function makeTugStern({ waterline, at = 15.8 }) {
     group,
     post: new THREE.Vector3(at + POST_AT, waterline + FREEBOARD + POST_H - POST_EYE, 0),
     /** There as far as k says, and gone at 0. */
-    fade(k) {
+    fade(k: number): void {
       group.visible = k > 0.001;
       for (const c of coats) c.material.opacity = c.base * k;
     },
   };
 }
 
-const BANDS = [[0.1, 0.1, 1], [0.9, 0.1, 1], [0.5, 0.3, 0.7]];   // across the wake: two edges and a lighter middle
+const BANDS: [number, number, number][] = [[0.1, 0.1, 1], [0.9, 0.1, 1], [0.5, 0.3, 0.7]];   // across the wake: two edges and a lighter middle
 const WAKE_Y = 0.005;                              // it lies this much over the water, and never writes depth
 
 /** Foam: streaks along the wake, rippled along its length so that scrolling it shows movement.
  *  The ripple runs round a whole number of times, so the texture tiles as it streams away. */
-function foam() {
+function foam(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 128; canvas.height = 512;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   const image = ctx.createImageData(canvas.width, canvas.height);
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
@@ -851,10 +894,10 @@ function foam() {
 }
 
 /** And what dies away at the far end of it: this one does not scroll, so the end stays where it is. */
-function dying() {
+function dying(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 4; canvas.height = 256;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   const grade = ctx.createLinearGradient(0, 0, 0, canvas.height);
   grade.addColorStop(0, '#ffffff'); grade.addColorStop(0.55, '#dddddd'); grade.addColorStop(1, '#000000');
   ctx.fillStyle = grade; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -863,12 +906,28 @@ function dying() {
   return texture;
 }
 
+export interface WakeInput {
+  waterline: number;
+  from: number;
+  length: number;
+  near: number;
+  far: number;
+  strength?: number;
+}
+
+/** A kielzog on the water. */
+export interface Wake {
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  fade(k: number): void;
+  stream(dt: number): void;
+}
+
 /**
  * The wake astern of a transom at `from` on the centreline: a flat V on the water, `length` metres
  * long, spreading from `near` to `far` (half widths) as it goes aft. It streams away by itself.
  */
-export function makeWake({ waterline, from, length, near, far, strength = 0.95 }) {
-  const position = []; const uv = []; const index = [];
+export function makeWake({ waterline, from, length, near, far, strength = 0.95 }: WakeInput): Wake {
+  const position: number[] = []; const uv: number[] = []; const index: number[] = [];
   const STEPS = 8;
   for (let i = 0; i <= STEPS; i++) {
     const v = i / STEPS; const wide = THREE.MathUtils.lerp(near, far, v);
@@ -892,9 +951,9 @@ export function makeWake({ waterline, from, length, near, far, strength = 0.95 }
   return {
     mesh,
     /** As much of it as k says; nothing at 0. */
-    fade(k) { mesh.visible = k > 0.001; material.opacity = k * strength; },
+    fade(k: number): void { mesh.visible = k > 0.001; material.opacity = k * strength; },
     /** The foam runs away astern while the boat is towed along. */
-    stream(dt) { map.offset.y -= dt * 0.35; },
+    stream(dt: number): void { map.offset.y -= dt * 0.35; },
   };
 }
 
@@ -907,10 +966,10 @@ export function makeWake({ waterline, from, length, near, far, strength = 0.95 }
 const NU = 28; const NV = 18;                                        // across the foot, up to the head
 const COLOURS = ['#d7282f', '#2a9d3f', '#f7d117', '#1e63b5'];        // red, green, yellow, blue
 
-function makeCloth() {
+function makeCloth(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512; canvas.height = 512;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   // panels running diagonally, the way the strokes of the logo do, the four colours over and over
   for (let i = -3; i < 7; i++) {
     ctx.fillStyle = COLOURS[((i % 4) + 4) % 4];
@@ -925,10 +984,20 @@ function makeCloth() {
   return texture;
 }
 
+/** The spinnaker: its cloth, laid by lay(), and its two schoten, laid by sheet(). */
+export interface Spinnaker {
+  sail: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  ropes: THREE.Group;
+  sheets: RopeLine[];
+  lay(H: THREE.Vector3, A: THREE.Vector3, B: THREE.Vector3, downwind: THREE.Vector3, belly: number, t: number, hoist: number): [THREE.Vector3, THREE.Vector3];
+  sheet(k: number, from: THREE.Vector3, to: THREE.Vector3): void;
+  out: THREE.Vector3;
+}
+
 /** The sail with its two sheets; `material` is the rope's. */
-export function initSpinnaker({ addPart, material }) {
+export function initSpinnaker({ addPart, material }: { addPart: AddPart; material: THREE.Material }): Spinnaker {
   const cloth = new THREE.BufferGeometry();
-  const position = new Float32Array((NU + 1) * (NV + 1) * 3); const uv = []; const index = [];
+  const position = new Float32Array((NU + 1) * (NV + 1) * 3); const uv: number[] = []; const index: number[] = [];
   for (let j = 0; j <= NV; j++) for (let i = 0; i <= NU; i++) uv.push(i / NU, j / NV);
   for (let j = 0; j < NV; j++) {
     for (let i = 0; i < NU; i++) {
@@ -948,7 +1017,7 @@ export function initSpinnaker({ addPart, material }) {
 
   const p = new THREE.Vector3(); const centre = new THREE.Vector3(); const across = new THREE.Vector3(); const out = new THREE.Vector3(); const up = new THREE.Vector3(0, 1, 0);
   const SHOULDER = 0.22;                                              // how far the edges bow out beyond the straight head-to-corner line, as a share of the foot
-  const shoulder = (v) => v * Math.pow(1 - v, 0.6) / 0.335;          // 0 at foot and head, 1 at about five eighths up
+  const shoulder = (v: number): number => v * Math.pow(1 - v, 0.6) / 0.335;          // 0 at foot and head, 1 at about five eighths up
   /**
    * Lay the cloth between head H and the two lower corners A and B, blown out along `downwind`
    * (horizontal unit vector) by `belly` metres at the fullest, at time t. The sail is broadest
@@ -956,7 +1025,7 @@ export function initSpinnaker({ addPart, material }) {
    * corners - and narrows to the foot. `hoist` 0..1 gathers the whole sail up at the head.
    * Returns the two corners as they are, for the sheets.
    */
-  const lay = (H, A, B, downwind, belly, t, hoist) => {
+  const lay = (H: THREE.Vector3, A: THREE.Vector3, B: THREE.Vector3, downwind: THREE.Vector3, belly: number, t: number, hoist: number): [THREE.Vector3, THREE.Vector3] => {
     across.subVectors(B, A); const footWidth = across.length(); across.normalize();
     for (let j = 0; j <= NV; j++) {
       const v = j / NV;
@@ -983,8 +1052,8 @@ export function initSpinnaker({ addPart, material }) {
     return [A.clone().lerp(H, 1 - hoist), B.clone().lerp(H, 1 - hoist)];
   };
   /** A sheet from a corner to an eye on the rail, hanging in a bight. */
-  const sheet = (k, from, to) => {
-    const path = [];
+  const sheet = (k: number, from: THREE.Vector3, to: THREE.Vector3): void => {
+    const path: THREE.Vector3[] = [];
     for (let i = 0; i <= 10; i++) {
       const s = i / 10; const q = new THREE.Vector3().lerpVectors(from, to, s);
       q.y -= 0.12 * from.distanceTo(to) * Math.sin(Math.PI * s);
@@ -1014,9 +1083,37 @@ const NIGHT = {
 // darker still, held only from outside (Zoeken, a ship's lights): no moon to speak of, only the lights are seen
 const DEEP = { sun: 0.004, hemi: 0.003, env: 0.002, water: 0x03060c, top: '#020409', bottom: '#050a14' };
 
-const smoothstep = (t) => t * t * (3 - 2 * t);
+const smoothstep = (t: number): number => t * t * (3 - 2 * t);
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
+
+/** A light the night dims (and, for the sun, colours). */
+export interface NightLight { intensity: number; color: THREE.Color }
+
+/** What initNight is handed by main.ts; see below. */
+export interface NightInput {
+  scene: THREE.Scene;
+  sun: NightLight;
+  hemi?: NightLight | null;
+  wrap: HTMLElement;
+  water?: { material: { color: THREE.Color; opacity: number } } | null;
+  toplicht?: { set(k: number): void } | null;
+  slowest?: number;
+  note?: (key: string) => void;
+}
+
+/** The night: update() it every frame; it returns how dark it is, 0 day .. 1 night. */
+export interface Night {
+  readonly on: boolean;
+  readonly k: number;
+  set(want: boolean): void;
+  update(dt: number, speed: number): number;
+  activity(): void;
+  hold(want: number | null): void;
+}
+
+/** A colour going from day to night; `now` is where it stands. */
+interface Fade { from: THREE.Color; to: THREE.Color; now: THREE.Color }
 
 /**
  * scene, sun, hemi: the lights to dim; wrap: the element the sky gradient hangs on
@@ -1025,13 +1122,13 @@ const lerp = THREE.MathUtils.lerp;
  * slowest:  the lowest value of the speed slider
  * note:     logboek.note, called once the first night has fully fallen
  */
-export function initNight({ scene, sun, hemi, wrap, water, toplicht, slowest = 0.25, note }) {
+export function initNight({ scene, sun, hemi, wrap, water, toplicht, slowest = 0.25, note }: NightInput): Night {
   const css = getComputedStyle(wrap);
   const day = {
     sun: sun.intensity, hemi: hemi?.intensity ?? 0, env: scene.environmentIntensity ?? 1,
     waterOpacity: water?.material.opacity ?? 0,
   };
-  const colours = (from, to) => ({ from: new THREE.Color(from), to: new THREE.Color(to), now: new THREE.Color() });
+  const colours = (from: THREE.ColorRepresentation, to: THREE.ColorRepresentation): Fade => ({ from: new THREE.Color(from), to: new THREE.Color(to), now: new THREE.Color() });
   const sunColour = colours(sun.color.getHex(), NIGHT.sunColor);
   const waterColour = colours(water ? water.material.color.getHex() : 0xffffff, NIGHT.water);
   const sky = {
@@ -1041,14 +1138,14 @@ export function initNight({ scene, sun, hemi, wrap, water, toplicht, slowest = 0
 
   let k = 0;              // 0 day, 1 night
   let on = false;         // where it is heading
-  let forced = null;      // the button overrules the slider until the slider is moved
-  let wasSlow = null;
+  let forced: boolean | null = null;      // the button overrules the slider until the slider is moved
+  let wasSlow: boolean | null = null;
   let idle = 0;
   let told = false;
-  let held = null;        // how dark something else has it, 0..2 (past 1: deep night); null: the night keeps its own time
+  let held: number | null = null;        // how dark something else has it, 0..2 (past 1: deep night); null: the night keeps its own time
   let deep = 0;           // 0..1 from night to deep night, only while held past 1
 
-  const mix = (c, s) => c.now.copy(c.from).lerp(c.to, s);
+  const mix = (c: Fade, s: number): THREE.Color => c.now.copy(c.from).lerp(c.to, s);
 
   const deeper = { water: new THREE.Color(DEEP.water), top: new THREE.Color(DEEP.top), bottom: new THREE.Color(DEEP.bottom) };
   const apply = () => {
@@ -1070,12 +1167,12 @@ export function initNight({ scene, sun, hemi, wrap, water, toplicht, slowest = 0
   /** Anything the user does: it puts off the night, but never sends it away once it is there. */
   const activity = () => { if (!on) idle = 0; };
 
-  const set = (want) => { forced = !!want; on = !!want; if (!want) idle = 0; };
+  const set = (want: boolean): void => { forced = !!want; on = !!want; if (!want) idle = 0; };
 
   /** Darkness from outside - a run of nachtklaar maken - `k` 0..1, or null to hand it back. */
-  const hold = (want) => { held = want; if (want !== null) { on = false; forced = null; idle = 0; } else if (deep) { deep = 0; apply(); } };
+  const hold = (want: number | null): void => { held = want; if (want !== null) { on = false; forced = null; idle = 0; } else if (deep) { deep = 0; apply(); } };
 
-  const update = (dt, speed) => {
+  const update = (dt: number, speed: number): number => {
     if (held !== null) {
       const want = Math.min(held, 1); const wantDeep = clamp(held - 1, 0, 1);
       if (Math.abs(want - k) > 1e-4 || Math.abs(wantDeep - deep) > 1e-4) { k = want; deep = wantDeep; apply(); }
