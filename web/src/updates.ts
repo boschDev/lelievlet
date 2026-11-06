@@ -1,4 +1,3 @@
-// @ts-nocheck
 // "Updates": per date, what changed in the viewer, a short line each, as a user notices it. The newest
 // date first; add to it with every version that goes out. Only what can be found in the menus. A second
 // update on a day that already has one gets nr: 2 (and so on), so it shows as new to who saw the first.

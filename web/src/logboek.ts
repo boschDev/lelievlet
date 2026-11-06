@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { unpack } from './config.ts';
 
 // The logboek: a star in the bottom left corner with a count, and behind it what has been done and found - how far
@@ -26,7 +25,8 @@ const ENTRIES = {
   nz: 'JSBOX2qUvN73BSI=',
   bi: 'KTNCQHCdvNa7KT9Ga4uP',
 };
-const KEYS = Object.keys(ENTRIES);
+type Entry = keyof typeof ENTRIES;
+const KEYS = Object.keys(ENTRIES) as Entry[];
 
 // What the lessons let happen when a thing is pushed too far - found by trying it, and counted in the logboek
 // under a heading of their own. A lesson reports one with gevolg(key); before the logboek is there it is lost.
@@ -40,41 +40,57 @@ export const GEVOLGEN = {
   brug: 'Mast tegen de brug',
   zuiging: 'Zuiging',
 };
-const melders = new Set();                                       // each viewer's logboek on the page
-/** A gevolg (a key of GEVOLGEN) was seen. */
-export const gevolg = (key) => { for (const m of melders) m(key); };
+export type Gevolg = keyof typeof GEVOLGEN;
 
-export function initLogboek(ui, { opslaan = true } = {}) {
-  const $ = (id) => ui.getElementById(id);
+/** How far the lessons and quizzes are (main.ts). */
+export interface Voortgang {
+  lessen: { naam: string; gevolgd: number; van: number }[];
+  quizzen: { naam: string; stand: string }[];
+}
+
+/** What initLogboek hands back. */
+export interface Logboek {
+  note(key: string): void;
+  readonly entries: string[];
+  set voortgang(fn: () => Voortgang);
+  refresh(): void;
+  dispose(): boolean;
+}
+const melders = new Set<(key: string) => void>();                                       // each viewer's logboek on the page
+/** A gevolg (a key of GEVOLGEN) was seen. */
+export const gevolg = (key: string): void => { for (const m of melders) m(key); };
+
+export function initLogboek(ui: ShadowRoot, { opslaan = true }: { opslaan?: boolean } = {}): Logboek {
+  const $ = (id: string) => ui.getElementById(id)!;
   const toggle = $('log-toggle'); const count = $('log-count'); const list = $('log-list');
 
-  let kept = []; let keptGevolgen = [];
+  let kept: string[] = []; let keptGevolgen: string[] = [];
   try {
     const raw = opslaan ? JSON.parse(localStorage.getItem(STORE) ?? 'null') : null;
     if (Array.isArray(raw?.entries)) kept = raw.entries;
     if (Array.isArray(raw?.gevolgen)) keptGevolgen = raw.gevolgen;
   } catch { /* no storage, or it holds something else: start from nothing */ }
-  const have = new Set(kept.filter((key) => key in ENTRIES));
-  const seen = new Set(keptGevolgen.filter((key) => key in GEVOLGEN));
+  const have = new Set<string>(kept.filter((key) => key in ENTRIES));
+  const seen = new Set<string>(keptGevolgen.filter((key) => key in GEVOLGEN));
   // how far the lessons and quizzes are: { lessen: [{ naam, gevolgd, van }], quizzen: [{ naam, stand }] }, from main.js
-  let voortgang = () => ({ lessen: [], quizzen: [] });
+  let voortgang = (): Voortgang => ({ lessen: [], quizzen: [] });
 
-  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
-  const regel = (naam, stand, klaar = false) => el('li', { className: `stand${klaar ? ' klaar' : ''}` }, el('span', { textContent: naam }), el('em', { textContent: stand }));
-  const deel = (kop, rows, hint) => [el('h3', { textContent: kop }), el('ul', {}, ...rows), ...(hint ? [el('p', { className: 'hint', textContent: hint })] : [])];
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...kids: (Node | string)[]) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const regel = (naam: string, stand: string, klaar = false) => el('li', { className: `stand${klaar ? ' klaar' : ''}` }, el('span', { textContent: naam }), el('em', { textContent: stand }));
+  const deel = (kop: string, rows: HTMLElement[], hint?: string) => [el('h3', { textContent: kop }), el('ul', {}, ...rows), ...(hint ? [el('p', { className: 'hint', textContent: hint })] : [])];
 
   const show = () => {
     const v = voortgang();
     const begonnen = v.lessen.some((l) => l.gevolgd) || v.quizzen.some((q) => q.stand);
     toggle.hidden = !(have.size || seen.size || begonnen);
     count.textContent = String(have.size + seen.size); count.hidden = !(have.size + seen.size);
-    const parts = [];
+    const parts: HTMLElement[] = [];
     if (v.lessen.length) {
       parts.push(...deel('Lessen', v.lessen.map((l) => regel(l.naam, l.gevolgd === l.van ? 'gevolgd' : `${l.gevolgd} van ${l.van}`, l.gevolgd === l.van))));
     }
     if (v.quizzen.length) parts.push(...deel('Quiz', v.quizzen.map((q) => regel(q.naam, q.stand || 'nog niet gedaan'))));
     // what was found, gevolgen and the rest in one list
-    const gevonden = [...Object.keys(GEVOLGEN).filter((key) => seen.has(key)).map((key) => GEVOLGEN[key]),
+    const gevonden = [...(Object.keys(GEVOLGEN) as Gevolg[]).filter((key) => seen.has(key)).map((key) => GEVOLGEN[key]),
       ...KEYS.filter((key) => have.has(key)).map((key) => unpack(ENTRIES[key]))];
     const open = Object.keys(GEVOLGEN).length + KEYS.length - gevonden.length;
     parts.push(...deel('Ontdekt', gevonden.map((naam) => el('li', { textContent: naam })),
@@ -93,11 +109,11 @@ export function initLogboek(ui, { opslaan = true } = {}) {
     show();
   };
   /** An entry, the first time: it is written down and the star says one more. */
-  const note = (key) => {
+  const note = (key: string) => {
     if (!(key in ENTRIES) || have.has(key)) return;
     have.add(key); write();
   };
-  const melden = (key) => {
+  const melden = (key: string) => {
     if (!(key in GEVOLGEN) || seen.has(key)) return;
     seen.add(key); write();
   };
@@ -105,7 +121,7 @@ export function initLogboek(ui, { opslaan = true } = {}) {
   show();
   return { note, get entries() { return [...have]; },
            /** Where the lessons and quizzes stand (see `voortgang` above); shown again at once. */
-           set voortgang(fn) { voortgang = fn; show(); },
+           set voortgang(fn: () => Voortgang) { voortgang = fn; show(); },
            /** Read the lessons and quizzes again. */
            refresh: show,
            /** The viewer taken down: no more gevolgen to this one. */

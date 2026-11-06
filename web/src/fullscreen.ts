@@ -1,4 +1,4 @@
-// @ts-nocheck
+import type { Config, RealTarget } from './config.ts';
 // Volledig scherm: the round button under Aanpassen, the `f` key and handle.fullscreen(). The
 // Fullscreen API is asked for the HOST element, so the whole shadow root travels with it and the
 // viewer keeps its own layout; with a shadow root it is that host, not anything inside, that
@@ -20,20 +20,32 @@ const SAVED = 'data-lv-vol-overflow';       // on the html element: the scrollin
  * Returns { toggle }: toggle(on) with `on` left out flips it. It gives back the promise of the
  * request, so a caller can wait for it - but only a real click or keypress is ever granted one.
  */
-export function initFullscreen({ ui, host, config, signal, engaged, realTarget, onDestroy, asApp = false }) {
-  const button = ui.getElementById('fullscreen-toggle');
+// Safari's own spellings
+type WebkitHost = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+type WebkitDocument = Document & {
+  webkitExitFullscreen?: () => Promise<void> | void; webkitFullscreenElement?: Element | null; webkitFullscreenEnabled?: boolean;
+};
+
+export interface FullscreenOptions {
+  ui: ShadowRoot; host: HTMLElement; config: Config; signal: AbortSignal;
+  engaged: () => boolean; realTarget: RealTarget; onDestroy: (f: () => void) => void; asApp?: boolean;
+}
+
+export function initFullscreen({ ui, host, config, signal, engaged, realTarget, onDestroy, asApp = false }: FullscreenOptions): { toggle(on?: boolean): Promise<void> } {
+  const button = ui.getElementById('fullscreen-toggle')!;
+  const doc = document as WebkitDocument;
   // installed as an app the viewer has the whole window already: there is nothing to go full screen to
   if (!config.volledigScherm || asApp) {        // no button, no key, and the handle does nothing
     button.hidden = true;
     return { toggle: () => Promise.resolve() };
   }
-  const icons = button.querySelectorAll('[data-icon]');
+  const icons = button.querySelectorAll<HTMLElement>('[data-icon]');
 
   // Safari has its own spelling of every one of these, and an old one returns no promise.
-  const request = host.requestFullscreen ?? host.webkitRequestFullscreen;
-  const leave = document.exitFullscreen ?? document.webkitExitFullscreen;
-  const fullscreenElement = () => document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
-  const native = Boolean(request) && (document.fullscreenEnabled ?? document.webkitFullscreenEnabled) !== false;
+  const request = host.requestFullscreen ?? (host as WebkitHost).webkitRequestFullscreen;
+  const leave = doc.exitFullscreen ?? doc.webkitExitFullscreen;
+  const fullscreenElement = () => doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+  const native = Boolean(request) && (doc.fullscreenEnabled ?? doc.webkitFullscreenEnabled) !== false;
 
   const isOn = () => fullscreenElement() === host || host.hasAttribute(FILLING);
 
@@ -51,7 +63,7 @@ export function initFullscreen({ ui, host, config, signal, engaged, realTarget, 
   // had is given back on the way out. Two viewers on one page know nothing of each other, so the
   // page's own value is parked on the page itself: the first one in locks it and remembers it there,
   // the last one out gives it back - neither of them can leave the page unscrollable behind.
-  function fill(on) {
+  function fill(on: boolean) {
     if (on === host.hasAttribute(FILLING)) return;
     const root = document.documentElement;
     const locked = () => document.querySelector(`[${FILLING}]`);
@@ -65,7 +77,7 @@ export function initFullscreen({ ui, host, config, signal, engaged, realTarget, 
     draw();
   }
 
-  async function set(on) {
+  async function set(on: boolean) {
     if (on === isOn()) return;
     if (!on) {
       if (fullscreenElement() === host) await leave.call(document);   // the change event redraws
@@ -101,5 +113,5 @@ export function initFullscreen({ ui, host, config, signal, engaged, realTarget, 
   });
 
   draw();
-  return { toggle: (on) => set(on ?? !isOn()) };
+  return { toggle: (on?: boolean) => set(on ?? !isOn()) };
 }

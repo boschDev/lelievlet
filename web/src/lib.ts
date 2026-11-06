@@ -42,7 +42,7 @@ const live = new WeakMap<Element, { destroy(): void }>();  // element -> the vie
  *               the user had done it; `direct: true` jumps. Called before `ready`, it is applied
  *               together with the configuration's own toestand, at once.
  */
-export function create(element: Element, config: object = {}): Handle {
+export function create(element: Element, config: Record<string, unknown> = {}): Handle {
   if (!(element instanceof Element)) {
     throw new TypeError('[lelievlet] create(element, config): het eerste argument is geen element');
   }

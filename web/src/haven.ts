@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // A wooden steiger to lie alongside: a deck of planks on two rows of piles, a gording along the

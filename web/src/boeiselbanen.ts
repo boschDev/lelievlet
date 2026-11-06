@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // The boeisel painted in lengthwise bands, as some groups have a flag on the sides of a boat (Aanpassen › Bekend:
@@ -15,17 +14,19 @@ const MAX = 4;                         // bands at most
 const N = 256;                         // heights of the edges along the boat
 
 /** The strake's edges along it: { x0, x1, rand: [lower, upper] y at N places from x0 to x1 }, in the mesh's space. */
-function edgesOf(mesh) {
+type Huid = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+
+function edgesOf(mesh: Huid): { x0: number; x1: number; rand: Float32Array<ArrayBuffer> } {
   const g = mesh.geometry; const pos = g.attributes.position; const index = g.index;
   const pts = Array.from({ length: pos.count }, (_, i) => new THREE.Vector3().fromBufferAttribute(pos, i));
   // the same point once, however often the mesh has it (split for its normals)
-  const ids = new Map(); const one = pts.map((p) => {
+  const ids = new Map<string, number>(); const one = pts.map((p) => {
     const k = `${p.x.toFixed(5)},${p.y.toFixed(5)},${p.z.toFixed(5)}`;
     if (!ids.has(k)) ids.set(k, ids.size);
-    return ids.get(k);
+    return ids.get(k)!;
   });
-  const corner = (t, j) => (index ? index.getX(3 * t + j) : 3 * t + j);
-  const edges = new Map();                             // edge -> [triangles on it, its two corners]
+  const corner = (t: number, j: number): number => (index ? index.getX(3 * t + j) : 3 * t + j);
+  const edges = new Map<string, [number, number, number]>();   // edge -> [triangles on it, its two corners]
   for (let t = 0; t < (index ? index.count : pos.count) / 3; t++) {
     const v = [0, 1, 2].map((j) => corner(t, j));
     for (let j = 0; j < 3; j++) {
@@ -36,43 +37,43 @@ function edgesOf(mesh) {
   }
   // the border, walked round: one loop round the strake (holes in it, if any, make loops of their own: the longest is
   // the one round it). From its aftmost point to its foremost and back are its two long sides: the higher the upper.
-  const next = new Map();
+  const next = new Map<number, number[]>();
   for (const [n, a, b] of edges.values()) {
     if (n !== 1) continue;
-    for (const [u, w] of [[a, b], [b, a]]) (next.get(one[u]) ?? next.set(one[u], []).get(one[u])).push(one[w]);
+    for (const [u, w] of [[a, b], [b, a]]) (next.get(one[u]) ?? next.set(one[u], []).get(one[u])!).push(one[w]);
   }
-  const punt = new Map();
+  const punt = new Map<number, THREE.Vector3>();
   pts.forEach((p, i) => punt.set(one[i], p));
-  const seen = new Set(); let om = [];
+  const seen = new Set<number>(); let om: number[] = [];
   for (const start of next.keys()) {
     if (seen.has(start)) continue;
     const loop = [start]; seen.add(start);
     for (;;) {
-      const verder = next.get(loop.at(-1)).find((v) => !seen.has(v));
+      const verder = next.get(loop.at(-1)!)!.find((v) => !seen.has(v));
       if (verder === undefined) break;
       seen.add(verder); loop.push(verder);
     }
     if (loop.length > om.length) om = loop;
   }
-  const P = om.map((v) => punt.get(v));
+  const P = om.map((v) => punt.get(v)!);
   const xs = P.map((p) => p.x);
   const i0 = xs.indexOf(Math.min(...xs)); const i1 = xs.indexOf(Math.max(...xs));
   const [lo, hi] = i0 < i1 ? [i0, i1] : [i1, i0];
   const zijden = [P.slice(lo, hi + 1), [...P.slice(hi), ...P.slice(0, lo + 1)]];
-  const gem = (z) => z.reduce((sum, p) => sum + p.y, 0) / z.length;
+  const gem = (z: THREE.Vector3[]): number => z.reduce((sum, p) => sum + p.y, 0) / z.length;
   // each side as heights along the boat, its points in order of x; the ends left out, which run up or across the boat
-  const langs = (p, q) => Math.abs(q.y - p.y) <= 0.7 * q.distanceTo(p) && Math.abs(q.x - p.x) >= 0.3 * q.distanceTo(p);
-  const curve = (z) => z.filter((p, i) => [z[i - 1], z[i + 1]].some((q) => q && langs(p, q)))
+  const langs = (p: THREE.Vector3, q: THREE.Vector3): boolean => Math.abs(q.y - p.y) <= 0.7 * q.distanceTo(p) && Math.abs(q.x - p.x) >= 0.3 * q.distanceTo(p);
+  const curve = (z: THREE.Vector3[]): THREE.Vector3[] => z.filter((p, i) => [z[i - 1], z[i + 1]].some((q) => q && langs(p, q)))
     .sort((a, b) => a.x - b.x);
   // past its end a side runs on as it ran over its last 10 cm: where the end is cut off at a slant (the spiegel), the
   // bands run straight on into the cut, not bent along it
-  const verder = (c, x, a, dir) => {
+  const verder = (c: THREE.Vector3[], x: number, a: THREE.Vector3, dir: number): number => {
     const b = c.find((p) => Math.abs(p.x - a.x) >= 0.1 && Math.sign(p.x - a.x) === dir) ?? a;
     return a.y + (b.x === a.x ? 0 : (b.y - a.y) / (b.x - a.x) * (x - a.x));
   };
-  const op = (c, x) => {
+  const op = (c: THREE.Vector3[], x: number): number => {
     if (x <= c[0].x) return verder(c, x, c[0], 1);
-    if (x >= c.at(-1).x) return verder(c, x, c.at(-1), -1);
+    if (x >= c.at(-1)!.x) return verder(c, x, c.at(-1)!, -1);
     let a = 0; let b = c.length - 1;
     while (b - a > 1) { const m = (a + b) >> 1; if (c[m].x <= x) a = m; else b = m; }
     return c[a].y + (c[b].y - c[a].y) * (x - c[a].x) / Math.max(c[b].x - c[a].x, 1e-9);
@@ -89,7 +90,7 @@ function edgesOf(mesh) {
 
 /** meshes: the outer skins of the boeisel, both sides. set(colours | null, voor): the bands, top first; null: none.
  *  voor: the colour of the fore half (a THREE.Color, followed as it changes: the bakskleur's); null: as the rest. */
-export function makeBoeiselBanen(meshes) {
+export function makeBoeiselBanen(meshes: Huid[]): { set(colours: string[] | null, voor?: THREE.Color | null): void } {
   const uniforms = {
     uBanen: { value: 0 },
     uBaan: { value: Array.from({ length: MAX }, () => new THREE.Color()) },
@@ -137,7 +138,7 @@ export function makeBoeiselBanen(meshes) {
     }
   };
   return {
-    set(colours, voor = null) {
+    set(colours: string[] | null, voor: THREE.Color | null = null) {
       const banen = Array.isArray(colours) ? colours.slice(0, MAX) : [];
       if (banen.length || voor) prepare();
       uniforms.uBanen.value = banen.length;

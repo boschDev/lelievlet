@@ -1,4 +1,3 @@
-// @ts-nocheck
 // What the quiz asks about: only the numbered names of the class's parts drawing ("Lelievlet",
 // 84 names; reference/book/onderdelen_lelievlet.json). The model has many more parts than have to
 // be learnt. Per name: the drawing's number, the name as it is taught (where the owner corrected the

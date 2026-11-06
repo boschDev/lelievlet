@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Zoeken › Begrippen: the zeil- and roeitermen, each with a short uitleg (after the Sint Maarten lesboeken where they
 // have the term, else the inventory in notities/begrippen) and where the viewer shows it: a lesson onderwerp, a step of a
 // handeling, an item of another Zoeken page, or a part. `bron` says where the uitleg comes from, for us only: it is not shown.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Configuration of one viewer. A group embeds the model in its own page and passes what differs for
 // them: the colours and lettering their boats have, the names they use (many parts go by more than
 // one name, and which one is taught differs per group), what their quiz asks, and whether the
@@ -42,7 +41,24 @@
 // The Aanpassen values REPLACE the viewer's own defaults for this instance; what the user saved in
 // this browser still wins over them, unless `aanpassen.opslaan` is false.
 
-export const DEFAULTS = {
+/** A quiz entry: the standard ones (quizdata.ts) and those a page adds (`quiz.erbij`). */
+export interface QuizEntry { nr: number; naam: string; niveau?: number; delen: string[]; eigen?: boolean }
+
+/** The configuration in force (see above). Keys the viewer does not know are kept as they were given. */
+export interface Config {
+  assets: string | null;
+  volledigScherm: boolean;
+  installeren: boolean;
+  adres: boolean;
+  feedback: false | { url: string | null };
+  aanpassen: { opslaan: boolean; [key: string]: unknown };
+  toestand: Record<string, unknown>;
+  quiz: { weg: (number | string)[]; erbij: Partial<QuizEntry>[]; niveau: number };
+  debug: { modelnummer: boolean; quiztabellen: boolean; toestand: boolean };
+  [key: string]: unknown;
+}
+
+export const DEFAULTS: Config = {
   assets: null,
   volledigScherm: true,
   installeren: true,
@@ -54,10 +70,10 @@ export const DEFAULTS = {
   debug: { modelnummer: false, quiztabellen: false, toestand: false },
 };
 
-const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isPlain = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** Deep merge of plain objects; arrays and everything else are taken whole from `over`. */
-export function merge(base, over) {
+export function merge(base: unknown, over: unknown): unknown {
   if (!isPlain(over)) return over === undefined ? base : over;
   const out = { ...(isPlain(base) ? base : {}) };
   for (const [key, value] of Object.entries(over)) out[key] = merge(out[key], value);
@@ -69,12 +85,12 @@ export function merge(base, over) {
  * the debug aids on at once. Unknown keys are kept (and reported once), so a typing mistake in a
  * page's configuration shows up in the console instead of silently doing nothing.
  */
-export function resolveConfig(given = {}) {
-  const config = merge(DEFAULTS, given);
+export function resolveConfig(given: Record<string, unknown> = {}): Config {
+  const config = merge(DEFAULTS, given) as Config;
   // debug: true switches every aid on; anything that is no object (null, 0, 'ja') counts as on or off by
   // what it is worth
   if (given.debug !== undefined && (given.debug === null || typeof given.debug !== 'object')) {
-    config.debug = Object.fromEntries(Object.keys(DEFAULTS.debug).map((key) => [key, Boolean(given.debug)]));
+    config.debug = Object.fromEntries(Object.keys(DEFAULTS.debug).map((key) => [key, Boolean(given.debug)])) as Config['debug'];
   }
   if (given.feedback === true || given.feedback === null) config.feedback = { url: null };   // no receiver of our own: saved as a file
   const unknown = Object.keys(given).filter((key) => !(key in DEFAULTS));
@@ -82,24 +98,27 @@ export function resolveConfig(given = {}) {
   return config;
 }
 
+/** Where an event really began, inside the shadow root too (main.ts); it may be no element at all. */
+export type RealTarget = (e: Event) => EventTarget & Partial<Pick<Element, 'closest'>>;
+
 /** What keeps a key to itself: a field the user types in (here, or on the page around the viewer). */
 export const TYPING = 'input:not([type=checkbox]), textarea, select, [contenteditable]:not([contenteditable="false"])';
 
 /** Whether any debug aid is on: the handle is only handed out then. */
-export const debugOn = (config) => Object.values(config?.debug ?? {}).some(Boolean);
+export const debugOn = (config: Partial<Config> | null | undefined): boolean => Object.values(config?.debug ?? {}).some(Boolean);
 
 
 /** The quiz entries for this configuration: the standard list less `weg`, plus `erbij`. */
-export function quizEntries(config, standard) {
+export function quizEntries<E extends QuizEntry>(config: Partial<Config> | null | undefined, standard: E[]): (E | QuizEntry)[] {
   const weg = new Set((config?.quiz?.weg ?? []).map((x) => (typeof x === 'number' ? x : String(x).toLowerCase())));
   const kept = standard.filter((e) => !weg.has(e.nr) && !weg.has(e.naam.toLowerCase()));
   const extra = (config?.quiz?.erbij ?? []).filter((e) => e && e.naam && Array.isArray(e.delen) && e.delen.length)
-    .map((e, i) => ({ nr: e.nr ?? 1000 + i, niveau: 3, ...e, eigen: true }));
+    .map((e, i) => ({ nr: e.nr ?? 1000 + i, niveau: 3, ...e, eigen: true }) as QuizEntry);
   return [...kept, ...extra];
 }
 
 // Text that is kept packed in the source and unpacked where it is used.
 const KEY = [...'lelievlet'].map((c) => c.charCodeAt(0));
-const mix = (b, i) => b ^ KEY[i % KEY.length] ^ ((i * 29 + 7) & 0xff);
-export const unpack = (s) => new TextDecoder().decode(Uint8Array.from(atob(s), (c, i) => mix(c.charCodeAt(0), i)));
-export const pack = (t) => btoa(String.fromCharCode(...new TextEncoder().encode(t).map(mix)));
+const mix = (b: number, i: number): number => b ^ KEY[i % KEY.length] ^ ((i * 29 + 7) & 0xff);
+export const unpack = (s: string): string => new TextDecoder().decode(Uint8Array.from(atob(s), (c, i) => mix(c.charCodeAt(0), i)));
+export const pack = (t: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(t).map(mix)));

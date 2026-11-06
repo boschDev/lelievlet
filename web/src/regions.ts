@@ -1,5 +1,22 @@
-// @ts-nocheck
 import * as THREE from 'three';
+import type { ModelDeel } from './bootonderdelen/onderdeel.ts';
+
+type Bron = THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
+/** A seam as uv segment: u0, v0, u1, v1. */
+type Naad = [number, number, number, number];
+
+/** A gebied as it joins `parts`: a pseudo-part, its overlays as meshes. */
+export interface Gebied {
+  node: THREE.Object3D;
+  meshes: THREE.Mesh[];
+  sources: Bron[];
+  covered: Map<Bron, Set<string>>;
+  box(out: THREE.Box3): THREE.Box3;
+  extras: { id: string; naam: string; groep: string; gebied: true };
+  raak?(hit: THREE.Intersection | null | undefined): number;
+  toon?(hit: THREE.Intersection): boolean;
+  verberg?(): void;
+}
 
 // Gebieden: numbers in the parts drawing of the class that name an AREA instead of an object - the
 // boeg is the forward end of the romp, a kleed is one panel of the grootzeil. Each one joins
@@ -24,7 +41,7 @@ const KLEED = 3;                 // the third cloth counted from the schoothoek 
  * at 0 to the steven at 5.6, y up, z to starboard), with the centroid, the mesh the triangle is of
  * and its three vertex indices.
  */
-const GEBIEDEN = [
+const GEBIEDEN: { id: string; naam: string; groep: string; sources: string[]; inside(centroid: THREE.Vector3, mesh: Bron, tri: number[]): boolean }[] = [
   { id: 'boeg', naam: 'Boeg', groep: 'romp', sources: BOEG,
     inside: (centroid) => centroid.x > BOEG_X },
   { id: 'kleed', naam: 'Kleed', groep: 'zeil', sources: ['grootzeil'],
@@ -35,11 +52,11 @@ const GEBIEDEN = [
 // schoothoek -> piek (Vlettenboek p. 60). The seams sit in the sail data (extras.zeil.naden) as uv
 // segments, so a triangle is placed by the uv of its centroid: the cloths are counted from the
 // schoothoek up, and a triangle lies in cloth n when n - 1 seams stand between it and that corner.
-const SCHOOTHOEK = [1, 0];       // uv of the clew: u = 1 is the achterlijk, v = 0 the onderlijk
-const sideOfSeam = ([u0, v0, u1, v1], u, v) => (u1 - u0) * (v - v0) - (v1 - v0) * (u - u0);
+const SCHOOTHOEK: [number, number] = [1, 0];       // uv of the clew: u = 1 is the achterlijk, v = 0 the onderlijk
+const sideOfSeam = ([u0, v0, u1, v1]: Naad, u: number, v: number): number => (u1 - u0) * (v - v0) - (v1 - v0) * (u - u0);
 
-function clothAt(mesh, tri) {
-  const { naden } = mesh.userData.part.userData.zeil;      // the sail data of the part this mesh is of
+function clothAt(mesh: THREE.Object3D & { geometry: THREE.BufferGeometry }, tri: number[]): number {
+  const { naden } = mesh.userData.part.userData.zeil as { naden: Naad[] };      // the sail data of the part this mesh is of
   const uv = mesh.geometry.attributes.uv;
   let u = 0; let v = 0;
   for (const i of tri) { u += uv.getX(i) / 3; v += uv.getY(i) / 3; }
@@ -54,10 +71,10 @@ const _centroid = new THREE.Vector3();
  * position attribute, which is the entire romp or the whole zeil, so the vertices it uses are
  * walked by hand - and only under a source mesh that is there in this mode.
  */
-function spanBox(spans, out) {
+function spanBox(spans: { overlay: THREE.Mesh; used: Uint32Array }[], out: THREE.Box3): THREE.Box3 {
   out.makeEmpty();
   for (const { overlay, used } of spans) {
-    if (!overlay.parent.visible) continue;
+    if (!overlay.parent!.visible) continue;
     const position = overlay.geometry.attributes.position;
     overlay.updateWorldMatrix(true, false);
     for (const i of used) out.expandByPoint(_v.fromBufferAttribute(position, i).applyMatrix4(overlay.matrixWorld));
@@ -70,9 +87,9 @@ function spanBox(spans, out) {
  * The overlays take no part in picking, so `hit.object` is the source mesh that was clicked - the
  * quiz asks this to tell a click on the boeg from one on the same plank further aft.
  */
-export function regionAt(region, hit) {
-  const faces = region?.covered?.get(hit?.object);
-  return Boolean(faces && hit.face && faces.has(`${hit.face.a},${hit.face.b},${hit.face.c}`));
+export function regionAt(region: { covered?: Map<THREE.Object3D, Set<string>> } | null | undefined, hit: THREE.Intersection | null | undefined): boolean {
+  const faces = hit ? region?.covered?.get(hit.object) : undefined;
+  return Boolean(faces && hit?.face && faces.has(`${hit.face.a},${hit.face.b},${hit.face.c}`));
 }
 
 /**
@@ -81,14 +98,14 @@ export function regionAt(region, hit) {
  * the whole zeil. raak(hit): the cloth a click landed on (its number), or 0; toon(hit): light that cloth up;
  * verberg(): put it out again. The overlays are made the first time a cloth is shown, as the gebied's own are.
  */
-function kledenVan(sources, material) {
-  const made = new Map();                                  // `${mesh.uuid} ${n}` -> overlay
-  let shown = null;
-  const raak = (hit) => (hit?.face && sources.includes(hit.object) ? clothAt(hit.object, [hit.face.a, hit.face.b, hit.face.c]) : 0);
-  const overlay = (mesh, n) => {
+function kledenVan(sources: Bron[], material: THREE.Material): Required<Pick<Gebied, 'raak' | 'toon' | 'verberg'>> {
+  const made = new Map<string, THREE.Mesh>();              // `${mesh.uuid} ${n}` -> overlay
+  let shown: THREE.Mesh | null = null;
+  const raak = (hit: THREE.Intersection | null | undefined): number => (hit?.face && sources.includes(hit.object as Bron) ? clothAt(hit.object as Bron, [hit.face.a, hit.face.b, hit.face.c]) : 0);
+  const overlay = (mesh: Bron, n: number): THREE.Mesh => {
     const key = `${mesh.uuid} ${n}`;
-    if (made.has(key)) return made.get(key);
-    const index = mesh.geometry.index; const keep = [];
+    if (made.has(key)) return made.get(key)!;
+    const index = mesh.geometry.index!; const keep: number[] = [];
     for (let t = 0; t < index.count; t += 3) {
       const tri = [index.getX(t), index.getX(t + 1), index.getX(t + 2)];
       if (clothAt(mesh, tri) === n) keep.push(...tri);
@@ -102,35 +119,37 @@ function kledenVan(sources, material) {
     return o;
   };
   const verberg = () => { if (shown) shown.visible = false; shown = null; };
-  const toon = (hit) => {
+  const toon = (hit: THREE.Intersection): boolean => {
     verberg();
     const n = raak(hit);
     if (!n) return false;
-    shown = overlay(hit.object, n); shown.visible = true;
+    shown = overlay(hit.object as Bron, n); shown.visible = true;
     return true;
   };
   return { raak, toon, verberg };
 }
 
 /** Builds every gebied and pushes it into `parts`; returns them. */
-export function initRegions({ parts, groups, highlight }) {
+export function initRegions({ parts, groups, highlight }: {
+  parts: (ModelDeel | Gebied)[]; groups: Map<string, { node: THREE.Object3D }>; highlight: THREE.ColorRepresentation;
+}): Gebied[] {
   const byId = new Map(parts.map((p) => [p.extras.id, p]));
   const material = new THREE.MeshBasicMaterial({
     color: highlight, transparent: true, opacity: 0.34, side: THREE.DoubleSide, depthWrite: false,
     // the overlay lies ON the source: a normal offset is impossible with shared vertices
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
-  const made = [];
+  const made: Gebied[] = [];
   for (const def of GEBIEDEN) {
-    const sources = def.sources.flatMap((id) => byId.get(id)?.meshes ?? []);
-    const overlays = [];
-    const spans = [];                                      // { overlay, used }: for its bounding box
-    const covered = new Map();                             // source mesh -> the triangles it covers
+    const sources = def.sources.flatMap((id) => byId.get(id)?.meshes ?? []) as Bron[];
+    const overlays: THREE.Mesh[] = [];
+    const spans: { overlay: THREE.Mesh; used: Uint32Array }[] = [];   // for its bounding box
+    const covered = new Map<Bron, Set<string>>();          // source mesh -> the triangles it covers
     for (const mesh of sources) {
       const index = mesh.geometry.index;
       if (!index) continue;                                // geometry built in the viewer (ropes)
       const position = mesh.geometry.attributes.position;
-      const keep = [];
+      const keep: number[] = [];
       for (let t = 0; t < index.count; t += 3) {
         const tri = [index.getX(t), index.getX(t + 1), index.getX(t + 2)];
         _centroid.set(0, 0, 0);
@@ -148,15 +167,15 @@ export function initRegions({ parts, groups, highlight }) {
       mesh.add(overlay);
       overlays.push(overlay);
       spans.push({ overlay, used: Uint32Array.from(new Set(keep)) });
-      const faces = new Set();                             // as Raycaster reports them: face.a, .b, .c
+      const faces = new Set<string>();                     // as Raycaster reports them: face.a, .b, .c
       for (let t = 0; t < keep.length; t += 3) faces.add(`${keep[t]},${keep[t + 1]},${keep[t + 2]}`);
       covered.set(mesh, faces);
     }
     // a node of its own, under the group node, so the gebied hides with its group like any part
     const node = new THREE.Object3D();
     node.name = def.id;
-    groups.get(def.groep).node.add(node);
-    const part = { node, meshes: overlays, sources, covered, box: (out) => spanBox(spans, out),
+    groups.get(def.groep)!.node.add(node);
+    const part: Gebied = { node, meshes: overlays, sources, covered, box: (out) => spanBox(spans, out),
                    extras: { id: def.id, naam: def.naam, groep: def.groep, gebied: true } };
     if (def.id === 'kleed') Object.assign(part, kledenVan(sources, material));
     parts.push(part);

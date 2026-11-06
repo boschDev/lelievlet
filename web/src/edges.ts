@@ -1,5 +1,5 @@
-// @ts-nocheck
 import * as THREE from 'three';
+import type { ModelDeel } from './bootonderdelen/onderdeel.ts';
 
 // Lines along the creases of every part, in a darker shade of its own colour: panels in one paint
 // (the kuip, the romp) and parts that touch (a doft on the vlonder) are told apart by their edges.
@@ -14,15 +14,15 @@ const MOVING = ['zeil', 'lopend_want'];   // reshaped every frame: lines built o
  * it is done after the first picture, a few parts at a time between frames: the boat is there at
  * once, and its lines come in a moment later. `signal`: stop when the viewer goes.
  */
-export function addEdges(parts, { signal } = {}) {
-  const hsl = {};
-  const queue = [];
+export function addEdges(parts: ModelDeel[], { signal }: { signal?: AbortSignal } = {}): void {
+  const hsl = { h: 0, s: 0, l: 0 };
+  const queue: ModelDeel['meshes'] = [];
   for (const p of parts) {
     if (MOVING.includes(p.extras.groep)) continue;
     for (const mesh of p.meshes) if (mesh.isMesh && mesh.material.color) queue.push(mesh);
   }
-  const lineFor = (mesh) => {
-    const position = mesh.geometry.attributes.position;
+  const lineFor = (mesh: ModelDeel['meshes'][number]) => {
+    const position = mesh.geometry.attributes.position as THREE.BufferAttribute;
     const built = position.version;
     const line = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, CREASE),
       new THREE.LineBasicMaterial({ transparent: true }));
@@ -45,7 +45,7 @@ export function addEdges(parts, { signal } = {}) {
   const work = () => {
     if (signal?.aborted) return;
     const until = performance.now() + BATCH_MS;
-    while (queue.length && performance.now() < until) lineFor(queue.shift());
+    while (queue.length && performance.now() < until) lineFor(queue.shift()!);
     if (queue.length) setTimeout(work, 0);
   };
   setTimeout(work, 0);

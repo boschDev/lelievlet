@@ -1,5 +1,5 @@
-// @ts-nocheck
 import * as THREE from 'three';
+import type { ModelDeel } from './bootonderdelen/onderdeel.ts';
 
 // The spiegel painted above the berghout in a colour of its own, as some groups carry a band like the boeisel round
 // the stern (Aanpassen › Bekend: groepen.js spiegelBand). With spiegelPunt the band runs on down the middle of the
@@ -12,7 +12,7 @@ const BERGHOUT = 0.753;                // m: the boeisel's lower edge, the top o
 const PUNT = 0.75;                     // the point: this part of the way down from the top of the spiegel
 
 /** set(colour | null, punt): the band above the berghout, running down to a point or not; null: none. */
-export function makeSpiegelBand(parts) {
+export function makeSpiegelBand(parts: ModelDeel[]): { set(colour: string | null, punt: boolean): void } {
   const skin = parts.find((p) => p.extras.id === 'spiegel')?.meshes.find((m) => m.material.name === 'romp');
   skin?.geometry.computeBoundingBox();
   const box = skin?.geometry.boundingBox;
@@ -23,7 +23,7 @@ export function makeSpiegelBand(parts) {
   };
   let ready = false;
   const prepare = () => {
-    if (ready || !skin) return;
+    if (ready || !skin || !box) return;
     ready = true;
     const top = box.max.y; const half = Math.max(box.max.z, -box.min.z);
     const own = { uVorm: { value: new THREE.Vector3(BERGHOUT, top - PUNT * (top - box.min.y), half) } };
@@ -51,7 +51,7 @@ export function makeSpiegelBand(parts) {
     material.needsUpdate = true;
   };
   return {
-    set(colour, punt) {
+    set(colour: string | null, punt: boolean) {
       if (colour) { prepare(); uniforms.uBandKleur.value.set(colour); }
       uniforms.uBand.value = colour ? 1 : 0;
       uniforms.uPunt.value = punt ? 1 : 0;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The markup of one viewer: what used to be the body of index.html, unchanged, wrapped in the one
 // element everything is laid out against. create() puts this in a shadow root of its own, so the
 // ids below live in that root alone and two viewers on one page never see each other’s.

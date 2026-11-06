@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Bekende groepen: the colours of the lelievletten of scouting groups, as their members reported them (Aanpassen ›
 // Bekend › Melden) and they were checked. Each entry:
 //
@@ -44,13 +43,57 @@
 // Picked in Bekend, a group gives its colours and its plaats on the hull; one of its boats also its zeilnummer,
 // naam and bakskleur. Found by either plaats.
 // the Dutch flag, as some boats have it on the boeisel
+import type { Keuze } from './bootonderdelen/index.ts';
+
+/** The paint zones a group gives a colour, as customize.ts ZONES has them. */
+export type Zone = 'romp' | 'berghout' | 'boeisel' | 'dolboord' | 'voordek' | 'achterdek' | 'kuip' | 'zwaardkast';
+
+/** One boat of a group; what she has of her own is hers instead of the group's. */
+export interface Boot {
+  zeilnummer: string;
+  naam: string;                       // '' when the group did not give it
+  bakskleur?: string;
+  boeiselBanen?: string[];
+  spiegelBand?: string;
+  spiegelPunt?: boolean;
+}
+
+/** A group as above. A colour is '#rrggbb', or BAKSKLEUR; a colour of beslag may also be RVS. */
+export interface Groep {
+  groep: string;
+  plaats: string;
+  plaatsOpBoot?: string;
+  plaatsIsNummer?: boolean;
+  kleuren: Partial<Record<Zone, string>>;
+  bakskleur?: string;
+  zeilkleur?: number;
+  naamKleur?: string;
+  plaatsKleur?: string;
+  rompnummer?: boolean;
+  naamBordje?: boolean;
+  plechtKleur?: string;
+  roerKleur?: string;
+  roerbeslagKleur?: string;
+  beslagKleur?: string;
+  lummelKleur?: string;
+  spiegelKleur?: string;
+  spiegelTekst?: string;
+  spiegelTekstKleur?: string;
+  spiegelBand?: string;
+  spiegelPunt?: boolean;
+  boeiselBanen?: string[];
+  boeiselVoor?: boolean;
+  onderdelen?: Keuze;
+  boten: Boot[];
+}
+
 const VLAG = ['#ae1c28', '#ffffff', '#21468b'];
 // in place of a colour: the bakskleur of the boat (customize.js paintOf)
 export const BAKSKLEUR = '$bakskleur';
 // in place of a colour: bare stainless steel (customize.js applyZone)
 export const RVS = '$rvs';
 
-export const GROEPEN = [
+export const GROEPEN: Groep[] = [
   {
     groep: 'Zwolsche Zeeverkenners', plaats: 'Zwolle',
     kleuren: {
