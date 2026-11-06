@@ -1,7 +1,8 @@
-# only web/ and the LICENSE go into the build
+# only web/, the nginx config and the LICENSE go into the build
 *
 !LICENSE
 !web/
+!docker/
 web/node_modules/
 web/dist/
 web/dist-lib/
