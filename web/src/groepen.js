@@ -28,11 +28,18 @@
 //   boeiselBanen            the boeisel in lengthwise bands of these colours, top first (a flag on the sides), for
 //                           the group or one boat: boeiselBanen: VLAG
 //   boeiselVoor             true: the fore half of the boeisel in the bakskleur, the aft half in the boeisel's own
+//   roerbeslagKleur         the roerkoning, the roerhaken and the vingerlingen in this colour (left out: the roerkoning
+//                           and the roerhaken the roer's, the vingerlingen the romp's)
+//   mikKleur                the mikhouders painted in this colour (left out: galvanised)
+//
+// Any of these colours may be BAKSKLEUR: each boat's own bakskleur.
 //
 // Picked in Bekend, a group gives its colours and its plaats on the hull; one of its boats also its zeilnummer,
 // naam and bakskleur. Found by either plaats.
 // the Dutch flag, as some boats have it on the boeisel
 const VLAG = ['#ae1c28', '#ffffff', '#21468b'];
+// in place of a colour: the bakskleur of the boat (customize.js paintOf)
+export const BAKSKLEUR = '$bakskleur';
 
 export const GROEPEN = [
   {
@@ -216,6 +223,25 @@ export const GROEPEN = [
       { zeilnummer: '200', naam: 'Hector', bakskleur: '#a1a1a1' },
       { zeilnummer: '911', naam: 'Mauritius', bakskleur: '#ff7605' },
       { zeilnummer: '892', naam: 'Eendracht', bakskleur: '#3ba800' },
+    ],
+  },
+  {
+    groep: 'Baracuda', plaats: '', plaatsOpBoot: '',
+    kleuren: {
+      romp: '#0a0a0b', berghout: BAKSKLEUR, boeisel: '#c4c7c3', dolboord: BAKSKLEUR,   // the boeisel in Epifanes no. 18, light grey
+      voordek: '#8f9499', achterdek: '#8f9499', kuip: '#8f9499', zwaardkast: BAKSKLEUR,
+    },
+    zeilkleur: 10,
+    spiegelKleur: BAKSKLEUR, roerbeslagKleur: BAKSKLEUR, mikKleur: BAKSKLEUR,
+    // the bakskleuren as Epifanes numbers them, where the group gave a number
+    boten: [
+      { zeilnummer: '286', naam: '', bakskleur: '#e0620a' },             // oranje
+      { zeilnummer: '913', naam: '', bakskleur: '#f5c20d' },             // Epifanes 37, yellow
+      { zeilnummer: '1008', naam: '', bakskleur: '#e57fa8' },            // roze
+      { zeilnummer: '1053', naam: '', bakskleur: '#c8102e' },            // Epifanes 16, bright red
+      { zeilnummer: '1100', naam: '', bakskleur: '#0b4ea2' },            // Epifanes 7, bright blue
+      { zeilnummer: '1768', naam: '', bakskleur: '#00a36c' },            // Epifanes 218, jade green
+      { zeilnummer: '1802', naam: '', bakskleur: '#6a2c91' },            // paars
     ],
   },
 ];
