@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The way the boats go in a situatie of Voorrang (lessen/voorrang.js), apart from three.js so that it can be
 // checked by itself. Over the water, seen from where the view stands still: she comes along her course to where
 // she lies now (her middle at C) at time T, each other boat to where they would meet (its stern at treffen). They
@@ -12,6 +11,58 @@
 // one of Alles op een rij (lessen/voorrang-oefen.js) has boten: [hers, ...others], each { soort, richting, treffen,
 // v, wijkt, draai }.
 
+/** How a boat moves (and which of bpr/schepen.ts it is). */
+export type Soort = 'motor' | 'zeil' | 'spier' | 'groot';
+/** A point over the water, [x, z] in metres. */
+export type Punt = [number, number];
+/** A box of land, [x0, x1, z0, z1]. */
+export type Box = [number, number, number, number];
+/** Who goes first: she ('jij'), the other, or both to stuurboord. */
+export type Voor = 'jij' | 'ander' | 'beide';
+/** The banks: of a vaarwater along her course ({ sb, bb }), an engte, or a vaarwater across it ({ dwars, mond }). */
+export type Wal = 'engte'
+  | { sb: number; bb: number; dwars?: undefined; mond?: undefined }
+  | { dwars: [number, number]; mond: number; sb?: undefined; bb?: undefined };
+
+/** Another boat of a situatie of Alles op een rij: its stern at treffen at time T. */
+export interface PadBoot { soort: Soort; richting: number; treffen: Punt; v?: number; wijkt?: boolean; draai?: number }
+/** Hers, the first of the boten of Alles op een rij. */
+export interface EigenBoot { soort: Soort; wijkt?: boolean; draai?: number }
+
+interface BasisSituatie {
+  jij: 'zeilen' | 'roeien';
+  koers: number;
+  wal?: Wal | null;
+  engte?: Punt;
+  /** The one that gives way stops; 'stil': it lies where it was. */
+  wacht?: boolean | 'stil';
+}
+/** A situatie of a lesson onderwerp: one other boat. */
+export interface EenSituatie extends BasisSituatie {
+  boten?: undefined;
+  soort: Soort;
+  richting: number;
+  treffen: Punt;
+  voor?: Voor;
+  draai?: number;
+  omgekeerd?: boolean;
+}
+/** A situatie of Alles op een rij: boten, hers first. */
+export interface RijSituatie extends BasisSituatie {
+  boten: [EigenBoot, ...PadBoot[]];
+  treffen?: undefined;
+}
+export type PadSituatie = EenSituatie | RijSituatie;
+
+/** A boat where it sets out. */
+export interface VlootBoot { soort: Soort; haar?: boolean; x: number; z: number; kop: number; v: number; draai: number; wijkt: boolean }
+/** Where a boat is now: kop in radians. */
+export interface Plaats { x: number; z: number; kop: number }
+/** When and how the ones that give way do it (plan). */
+export interface Wijk { van: number; vanStop?: number; houd: number; hoek: number; stop?: boolean[] }
+/** A hull as a capsule: from x0 to x1 along it, r to either side. */
+export interface Romp { x0: number; x1: number; r: number }
+
 export const C = 2.8;
 export const T = 9;                                                       // s to where they meet
 export const RONDE = T * 1.6;                                             // s: one round, then they start again
@@ -19,12 +70,12 @@ export const SNEL = { motor: 3, zeil: 2, spier: 1.2, groot: 3.2 };        // m/s
 export const LANG = { motor: 9, zeil: 7, spier: 4.5, groot: 30 };         // m: as bpr/schepen.js builds them
 export const BREED = { motor: 3, zeil: 2.5, spier: 1.4, groot: 5 };
 export const ENGTE = 6;                                                   // m: half the width of an engte
-export const engte = (sit) => sit.engte ?? [C + 4, C + 40];               // x where it starts and ends
+export const engte = (sit: PadSituatie): Punt => sit.engte ?? [C + 4, C + 40];               // x where it starts and ends
 
 // The land round the water, as boxes [x0, x1, z0, z1]: the banks of a vaarwater along her course (wal { sb, bb }),
 // those of an engte, or (wal { dwars: [x0, x1], mond }) a vaarwater across her course, from x0 to x1, that she comes
 // into from a zijvaart mond m to either side wide
-export function landen(sit) {
+export function landen(sit: PadSituatie): Box[] {
   const w = sit.wal;
   if (!w) return [];
   if (w === 'engte') { const [x0, x1] = engte(sit); return [[x0, x1, ENGTE, ENGTE + 8], [x0, x1, -ENGTE - 8, -ENGTE]]; }
@@ -32,7 +83,7 @@ export function landen(sit) {
   return [[-60, 120, w.sb, w.sb + 10], [-60, 120, w.bb - 10, w.bb]];
 }
 // how far a point is from a box: below 0 inside it
-const buiten = ([x, z], [x0, x1, z0, z1]) => {
+const buiten = ([x, z]: Punt, [x0, x1, z0, z1]: Box) => {
   const dx = Math.max(x0 - x, x - x1); const dz = Math.max(z0 - z, z - z1);
   return dx < 0 && dz < 0 ? Math.max(dx, dz) : Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
 };
@@ -40,15 +91,15 @@ const UIT = 3;                                                            // s t
 const STOP = 2.5;                                                         // s for one that waits to lose its way
 // the rate of turn over a bocht of hoek rad, d from its start: it comes on and goes off smoothly, so the wake
 // has no corners
-const zacht = (d, hoek) => (d >= 0 && d < UIT ? (hoek / UIT) * (1 - Math.cos(2 * Math.PI * d / UIT)) : 0);
+const zacht = (d: number, hoek: number) => (d >= 0 && d < UIT ? (hoek / UIT) * (1 - Math.cos(2 * Math.PI * d / UIT)) : 0);
 
-export const vo = (sit) => (sit.jij === 'roeien' ? 1 : 1.4);              // m/s: her own speed
+export const vo = (sit: PadSituatie) => (sit.jij === 'roeien' ? 1 : 1.4);              // m/s: her own speed
 
 // The boats of a situatie, hers first, where they set out: { soort, haar, x, z, kop, v, wijkt, draai }
-export function vloot(sit) {
+export function vloot(sit: PadSituatie): VlootBoot[] {
   const v = vo(sit);
-  const haar = { soort: sit.jij === 'roeien' ? 'spier' : 'zeil', haar: true, x: C - v * T, z: 0, kop: 0, v, draai: 1 };
-  const uit = (b) => {
+  const haar = { soort: (sit.jij === 'roeien' ? 'spier' : 'zeil') as Soort, haar: true, x: C - v * T, z: 0, kop: 0, v, draai: 1 };
+  const uit = (b: PadBoot & { v: number }): VlootBoot => {
     const h = b.richting * Math.PI / 180; const [mx, mz] = b.treffen;
     return { soort: b.soort, x: mx - b.v * Math.cos(h) * T, z: mz - b.v * Math.sin(h) * T, kop: h, v: b.v, draai: b.draai ?? 1, wijkt: Boolean(b.wijkt) };
   };
@@ -63,11 +114,11 @@ export function vloot(sit) {
 }
 
 // all of them over the round up to u s: their places [{ x, z, kop }], hers first; elk(places, k) after each step
-export function vaar(sit, u, wijk, elk = null) {
+export function vaar(sit: PadSituatie, u: number, wijk: Wijk | null, elk: ((nu: Plaats[], k: number) => void) | null = null): Plaats[] {
   const bs = vloot(sit);
-  const nu = bs.map((b) => ({ x: b.x, z: b.z, kop: b.kop }));
+  const nu = bs.map((b): Plaats => ({ x: b.x, z: b.z, kop: b.kop }));
   const stap = 0.05; const stil = sit.wacht === 'stil';
-  const stopt = bs.map((b, i) => Boolean(wijk) && b.wijkt && (wijk.stop?.[i] ?? Boolean(sit.wacht)));
+  const stopt = bs.map((b, i) => Boolean(wijk) && b.wijkt && (wijk!.stop?.[i] ?? Boolean(sit.wacht)));
   for (let k = 0; k < u; k += stap) {
     bs.forEach((b, i) => {
       const p = nu[i];
@@ -89,11 +140,11 @@ export function vaar(sit, u, wijk, elk = null) {
 }
 
 // the nearest distance of two segments, each [[x, z], [x, z]]
-function lijn([p, q], [r, s]) {
+function lijn([p, q]: [Punt, Punt], [r, s]: [Punt, Punt]) {
   const d1 = [q[0] - p[0], q[1] - p[1]]; const d2 = [s[0] - r[0], s[1] - r[1]]; const w = [p[0] - r[0], p[1] - r[1]];
   const A = d1[0] * d1[0] + d1[1] * d1[1]; const E = d2[0] * d2[0] + d2[1] * d2[1]; const B = d1[0] * d2[0] + d1[1] * d2[1];
   const D = d1[0] * w[0] + d1[1] * w[1]; const F = d2[0] * w[0] + d2[1] * w[1];
-  const klem = (v) => Math.min(Math.max(v, 0), 1);
+  const klem = (v: number) => Math.min(Math.max(v, 0), 1);
   let sc = A * E - B * B > 1e-9 ? klem((B * F - D * E) / (A * E - B * B)) : 0;
   let tc = E > 1e-9 ? (B * sc + F) / E : 0;
   if (tc < 0) { tc = 0; sc = klem(-D / A); } else if (tc > 1) { tc = 1; sc = klem((B - D) / A); }
@@ -101,18 +152,18 @@ function lijn([p, q], [r, s]) {
 }
 
 // the corners of a hull, as a box from x0 to x1 along it and hw to either side
-const hoeken = (p, x0, x1, hw) => [[x0, -hw], [x1, -hw], [x1, hw], [x0, hw]]
-  .map(([a, b]) => [p.x + a * Math.cos(p.kop) - b * Math.sin(p.kop), p.z + a * Math.sin(p.kop) + b * Math.cos(p.kop)]);
+const hoeken = (p: Plaats, x0: number, x1: number, hw: number) => [[x0, -hw], [x1, -hw], [x1, hw], [x0, hw]]
+  .map(([a, b]): Punt => [p.x + a * Math.cos(p.kop) - b * Math.sin(p.kop), p.z + a * Math.sin(p.kop) + b * Math.cos(p.kop)]);
 
 // The hull of each as a capsule round its middle line, [from, to] along it from its place and r to either side:
 // hers from her deck (haar: { x0, x1, r } from her middle), the others' from length and beam (from the stern)
-const romp = (b, haar) => (b.haar ? { x0: haar.x0, x1: haar.x1, r: haar.r } : { x0: 0, x1: LANG[b.soort], r: BREED[b.soort] / 2 });
-const langs = (p, m) => [[p.x + (m.x0 + m.r) * Math.cos(p.kop), p.z + (m.x0 + m.r) * Math.sin(p.kop)], [p.x + (m.x1 - m.r) * Math.cos(p.kop), p.z + (m.x1 - m.r) * Math.sin(p.kop)]];
+const romp = (b: VlootBoot, haar: Romp): Romp => (b.haar ? { x0: haar.x0, x1: haar.x1, r: haar.r } : { x0: 0, x1: LANG[b.soort], r: BREED[b.soort] / 2 });
+const langs = (p: Plaats, m: Romp): [Punt, Punt] => [[p.x + (m.x0 + m.r) * Math.cos(p.kop), p.z + (m.x0 + m.r) * Math.sin(p.kop)], [p.x + (m.x1 - m.r) * Math.cos(p.kop), p.z + (m.x1 - m.r) * Math.sin(p.kop)]];
 
 // How it goes with a wijk, over the round: ruimte, how close any two come; speling, how much room is left over the
 // marge each pair needs (3 m by a groot schip, else 2); and wal, how close any comes to a bank - below 0 is in it,
 // and one that waits for an engte may not be in it
-export function meet(sit, haar, wijk) {
+export function meet(sit: PadSituatie, haar: Romp, wijk: Wijk | null) {
   const bs = vloot(sit); const maten = bs.map((b) => romp(b, haar));
   const land = landen(sit); const [ex0, ex1] = sit.wal === 'engte' ? engte(sit) : [0, 0];
   let ruimte = Infinity; let speling = Infinity; let wal = Infinity;
@@ -142,14 +193,14 @@ const VAN = [2, 1.5, 1, 0.5];
 const VAN_STOP = [5.5, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5];
 const HOEK = [0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.1];                       // rad; a groot schip turns half of it
 const HOUD = [1, 2, 3, 4, 6, 8];
-export function plan(sit, haar) {
+export function plan(sit: PadSituatie, haar: Romp): (Wijk & { ok: boolean }) | null {
   const bs = vloot(sit);
   const wijkers = bs.map((b, i) => (b.wijkt ? i : -1)).filter((i) => i >= 0);
   if (!wijkers.length) return null;
   if (sit.wacht === 'stil') return { van: 0, houd: 0, hoek: 0, ok: true };
-  const goed = (w) => { const m = meet(sit, haar, w); return m.speling >= 0 && m.wal >= 0.5; };
+  const goed = (w: Wijk) => { const m = meet(sit, haar, w); return m.speling >= 0 && m.wal >= 0.5; };
   // which of them stop: as the situatie says, or each way, the fewest stopping first
-  const keuzes = [];
+  const keuzes: boolean[][] = [];
   if (sit.boten) {
     for (let n = 0; n < 1 << wijkers.length; n++) keuzes.push(bs.map((b, i) => wijkers.includes(i) && Boolean(n & (1 << wijkers.indexOf(i)))));
     keuzes.sort((a, b) => a.filter(Boolean).length - b.filter(Boolean).length);

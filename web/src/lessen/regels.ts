@@ -1,9 +1,19 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { CONFIGS, makeShip } from '../bpr/schepen.ts';
 import { LICHT_UITLEG } from '../bpr/lichtuitleg.ts';
 import { createPijlen } from '../krachten/pijlen.ts';
 import { createLesKaart, kies } from './kaart.ts';
+import type { Onderwerp } from './kaart.ts';
+import type { Item } from '../krachten/pijlen.ts';
+import type { Aanzicht, Les, LesContext } from './typen.ts';
+
+/** An onderwerp of Regels: the ships of Zoeken › Lichten it shows (config ids), with the 20 m rod by them (maat), or
+ *  her name on the boeisel (naam); its vraag shows that ship. */
+export interface RegelsOnderwerp extends Onderwerp<{ schip?: string }> {
+  schepen?: string[];
+  maat?: boolean;
+  naam?: boolean;
+}
 
 // Regels: a lesson after Sint Maarten Kielboot III § 4.2 Algemene bepalingen and § 4.6 Overige regels, with what the
 // CWO handboek Kielboot (2022, 402) asks of them: groot en klein schip (BPR 1.01), zeilschip and zeilplank, goed
@@ -12,27 +22,27 @@ import { createLesKaart, kies } from './kaart.ts';
 // Where a ship shows it, a ship of Zoeken › Lichten (bpr/schepen.js) lies beside the boat, with a 20 m rod by it.
 
 const C = 2.8;
-const cfg = (id) => CONFIGS.find((c) => c.id === id);
+const cfg = (id: string | null) => CONFIGS.find((c) => c.id === id);
 const KLEUR = { maat: '#36454f', groot: '#c96f00', klein: '#16833a' };
 // what the buttons call them
-const KORT = { groot_motorschip: 'Vrachtschip', klein_motorschip_a: 'Motorboot', passagiersschip_klein: 'Rondvaartboot', sleepboot: 'Sleepboot',
+const KORT: Record<string, string> = { groot_motorschip: 'Vrachtschip', klein_motorschip_a: 'Motorboot', passagiersschip_klein: 'Rondvaartboot', sleepboot: 'Sleepboot',
   lelievlet_zeilen: 'Lelievlet', groot_zeilschip: 'Groot zeilschip', groot_zeil_en_motor: 'Zeil én motor', lelievlet_zeil_en_motor: 'Lelievlet met motor' };
 // what each ship is, by the BPR: of the first onderwerp groot or klein, of the second zeilschip or motorschip
-const SOORT = {
+const SOORT: Record<string, ['groot' | 'klein', string]> = {
   groot_motorschip: ['groot', 'Een vrachtschip van 55 m: langer dan 20 m, dus een groot schip.'],
   klein_motorschip_a: ['klein', 'Een motorboot korter dan 20 m: een klein schip.'],
   passagiersschip_klein: ['groot', 'Een rondvaartboot korter dan 20 m, maar hij mag meer dan 12 passagiers meenemen: hij telt als groot schip. Overdag voert hij een gele ruit.'],
   sleepboot: ['groot', 'Een sleepboot die grote schepen sleept, telt als groot schip, ook als hij korter is dan 20 m.'],
   lelievlet_zeilen: ['klein', 'Een lelievlet is 5,6 m lang: een klein schip, en een zeilschip korter dan 7 m.'],
 };
-const ZEIL_OF_MOTOR = {
+const ZEIL_OF_MOTOR: Record<string, [string, string]> = {
   groot_zeilschip: ['Zeilschip', 'Een groot zeilschip dat alleen op zijn zeilen vaart: een zeilschip.'],
   groot_zeil_en_motor: ['Motorschip', 'Een zeilschip met de motor bij is volgens het BPR een motorschip, ook al staan de zeilen. Overdag voert het een kegel met de punt omlaag.'],
   lelievlet_zeilen: ['Zeilschip', 'De lelievlet op haar zeilen: een zeilschip.'],
   lelievlet_zeil_en_motor: ['Motorschip', 'De lelievlet met de buitenboordmotor bij: een motorschip, ook met de zeilen op.'],
 };
 
-export const REGELS = [
+export const REGELS: RegelsOnderwerp[] = [
   {
     id: 'groot', titel: 'Groot en klein schip', cwo: 'KB I', schepen: ['groot_motorschip', 'klein_motorschip_a', 'passagiersschip_klein', 'sleepboot', 'lelievlet_zeilen'], maat: true,
     kort: [
@@ -115,27 +125,28 @@ export const REGELS = [
   },
 ];
 
-export function initRegels({ sleutel, wrap, scene, camera, controls, fly, setCoveredRight, opslaan, onOpen }) {
+export function initRegels({ sleutel, wrap, scene, camera, controls, fly, setCoveredRight, opslaan, onOpen }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-regels', sleutel, titel: 'Regels', lessen: REGELS, store: 'lelievlet.les.regels.v1', opslaan, fly, setCoveredRight, onOpen });
-  const waterline = scene.getObjectByName('lelievlet').userData.tuig?.waterlijn_m ?? 0.3;
+  const waterline = scene.getObjectByName('lelievlet')!.userData.tuig?.waterlijn_m ?? 0.3;
   const pijlen = createPijlen({ scene, camera, controls, layer: lk.layer });
   const holder = new THREE.Group(); holder.name = 'les-regels'; holder.visible = false; scene.add(holder);
   const plaatje = document.createElement('div'); plaatje.className = 'les-sein'; lk.host.append(plaatje);
-  const built = new Map(); let schip = null; let model = null; let lang = 10;
+  const built = new Map<string, { m: THREE.Group; lang: number; min: number; hoog: number }>();
+  let schip: string | null = null; let model: THREE.Group | null = null; let lang = 10;
   let lengte = 10;                                                          // the length that counts: of a sleep, the sleepboot's own
   const Z = 14;                                                             // the ship lies alongside, this far to stuurboord
   let maatX = 0;                                                            // where the 20 m rod begins
   let eigen = false;                                                        // the lelievlet asked about is her own boat
   let hoog = 0;                                                             // the ship's height, its mast to the top
 
-  const zet = (id) => {
+  const zet = (id: string) => {
     schip = id;
     if (model) model.removeFromParent();
     if (!built.has(id)) {
-      const m = makeShip(cfg(id)); m.updateMatrixWorld(true);
+      const m = makeShip(cfg(id)!); m.updateMatrixWorld(true);
       const b = new THREE.Box3().setFromObject(m); built.set(id, { m, lang: b.max.x - b.min.x, min: b.min.x, hoog: b.max.y });
     }
-    const b = built.get(id); model = b.m; lang = b.lang; hoog = b.hoog;
+    const b = built.get(id)!; model = b.m; lang = b.lang; hoog = b.hoog;
     // alongside her, its stern level with hers, parallel
     model.position.set(-b.min, waterline, Z); model.rotation.y = 0;
     // a lelievlet beside the rod is her: no second boat, the rod beside her own
@@ -143,14 +154,14 @@ export function initRegels({ sleutel, wrap, scene, camera, controls, fly, setCov
     if (eigen) model.removeFromParent(); else holder.add(model);
     // the 20 m rod beside the ship itself, and its length: of a sleep the sleepboot's, not the line and the ship it tows
     model.updateMatrixWorld(true);
-    let sleper = null; model.traverse((o) => { if (o.userData.deel === 'sleper') sleper = o; });
+    let sleper: THREE.Object3D | null = null; model.traverse((o) => { if (o.userData.deel === 'sleper') sleper = o; });
     const sb = sleper ? new THREE.Box3().setFromObject(sleper) : null;
     maatX = sb ? sb.min.x : 0; lengte = sb ? sb.max.x - sb.min.x : lang;
     const s = SOORT[id]; const zm = lk.les.maat ? null : ZEIL_OF_MOTOR[id];
-    plaatje.innerHTML = `<p><b>${cfg(id).naam}</b></p><p class="hint">${s && lk.les.maat ? `${s[0] === 'groot' ? 'Groot schip' : 'Klein schip'} · ongeveer ${Math.round(lengte)} m` : zm ? zm[0] : ''}</p>`;
+    plaatje.innerHTML = `<p><b>${cfg(id)!.naam}</b></p><p class="hint">${s && lk.les.maat ? `${s[0] === 'groot' ? 'Groot schip' : 'Klein schip'} · ongeveer ${Math.round(lengte)} m` : zm ? zm[0] : ''}</p>`;
     lk.renderControls(); lk.frame();
   };
-  const kijk = () => {
+  const kijk = (): Aanzicht => {
     const l = lk.les;
     if (l.naam) return { hoogte: 3.5, breedte: 7, doel: [4.6, 0.9, 1.6], richting: [0.15, 0.25, 1] };   // her name on the boeisel, stuurboord
     if (!l.schepen) return 'achterboven';
@@ -162,7 +173,7 @@ export function initRegels({ sleutel, wrap, scene, camera, controls, fly, setCov
   lk.koppel({
     begin(l) {
       holder.visible = Boolean(l.schepen);
-      if (l.schepen) { zet(l.schepen[0]); return [kies('Schip', l.schepen.map((id) => [id, KORT[id] ?? cfg(id).naam]), () => schip, zet)]; }
+      if (l.schepen) { zet(l.schepen[0]); return [kies('Schip', l.schepen.map((id): [string, string] => [id, KORT[id] ?? cfg(id)!.naam]), () => schip!, zet)]; }
       plaatje.innerHTML = '';
       return [];
     },
@@ -171,11 +182,11 @@ export function initRegels({ sleutel, wrap, scene, camera, controls, fly, setCov
     aanzicht: kijk,
   });
 
-  function update(dt, width, height) {
+  function update(dt: number, width: number, height: number) {
     if (!lk.tick(width)) return;
     const l = lk.les;
     model?.userData.update?.(0, 0, camera);
-    const items = [];
+    const items: Item[] = [];
     if (l.maat && model) {
       // a rod of 20 m on the water between her and the ship: is it longer or shorter?
       const z = eigen ? 2.2 : Z / 2;                                        // beside her own stuurboord side, or between her and the ship
@@ -183,8 +194,8 @@ export function initRegels({ sleutel, wrap, scene, camera, controls, fly, setCov
     }
     pijlen.visible = items.length > 0; pijlen.draw(items); pijlen.update(width, height);
     // what it is, as the onderwerp asks: groot or klein, zeilschip or motorschip
-    const s = l.maat ? SOORT[schip] : ZEIL_OF_MOTOR[schip];
-    lk.status(l.schepen && s ? s[1] : l.schepen ? (LICHT_UITLEG[schip]?.betekenis ?? cfg(schip)?.naam ?? '') : l.naam ? 'Kijk op het boeisel: de naam van de boot. Je eigen naam en kleuren zet je in Aanpassen.' : '');
+    const s = l.maat ? SOORT[schip!] : ZEIL_OF_MOTOR[schip!];
+    lk.status(l.schepen && s ? s[1] : l.schepen ? ((LICHT_UITLEG as Record<string, { betekenis?: string }>)[schip!]?.betekenis ?? cfg(schip)?.naam ?? '') : l.naam ? 'Kijk op het boeisel: de naam van de boot. Je eigen naam en kleuren zet je in Aanpassen.' : '');
   }
 
   return { update, open: lk.open, close: lk.close, onderwerpen: REGELS,

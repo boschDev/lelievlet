@@ -1,10 +1,34 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { CONFIGS, makeShip } from '../bpr/schepen.ts';
 import { createPijlen } from '../krachten/pijlen.ts';
 import { createKaart } from '../zeiltermen/kaart.ts';
 import { deckOutline } from './boot.ts';
 import { BREED, C, LANG, RONDE, T, landen, plan, vaar, vloot, vo } from './voorrang-pad.ts';
+import type { EenSituatie, Plaats, Punt, Romp, Soort, VlootBoot, Wijk } from './voorrang-pad.ts';
+import type { OefenSituatie } from './voorrang-oefen.ts';
+import type { KaartItem } from '../zeiltermen/kaart.ts';
+import type { Item } from '../krachten/pijlen.ts';
+import type { EigenAanzicht, LesContext } from './typen.ts';
+
+/** What kind of meeting it is (the first page of the lesson). */
+export type Ontmoeting = 'kruisend' | 'tegengesteld' | 'oplopen';
+/** A situatie of an onderwerp of the lesson Voorrang (lessen/voorrang.ts). */
+export interface LesSituatie extends EenSituatie {
+  naam: string;
+  /** What voortgang knows it by, when not by its naam. */
+  key?: string;
+  ontmoeting?: Ontmoeting;
+  regel: string;
+  artikel?: string;
+  /** Its id as a deel of its onderwerp (lessen/voortgang.ts). */
+  deel?: string;
+  letters?: undefined;
+  antwoord?: undefined;
+}
+/** What the picture shows: a situatie of the lesson, or one of the quiz. */
+export type BeeldSituatie = LesSituatie | OefenSituatie;
+
+export type VoorrangBeeldOpties = Pick<LesContext, 'scene' | 'camera' | 'controls' | 'parts' | 'modes'> & { layer: HTMLElement; host: HTMLElement };
 
 // What a situatie of Voorrang looks like, on the water and in the map of the card: the lelievlet and the other
 // boats (bpr/schepen.js) on their way (lessen/voorrang-pad.js), the banks, the wind, and once it is answered who
@@ -17,40 +41,41 @@ import { BREED, C, LANG, RONDE, T, landen, plan, vaar, vloot, vo } from './voorr
 //   kijk()                where the camera goes (krachtView's names, main.js)
 //   release()             the card closes
 
-const SCHIP = { motor: 'klein_motorschip_a', zeil: 'klein_zeilschip_lt7m', spier: 'klein_schip_spierkracht', groot: 'groot_motorschip' };
+const SCHIP: Record<Soort, string> = { motor: 'klein_motorschip_a', zeil: 'klein_zeilschip_lt7m', spier: 'klein_schip_spierkracht', groot: 'groot_motorschip' };
 const KLEUR = { voor: '#16833a', wijkt: '#c96f00', ander: '#36454f', wind: '#1b64c4' };
 
-export function createVoorrangBeeld({ scene, camera, controls, parts, modes, layer, host }) {
-  const waterline = scene.getObjectByName('lelievlet').userData.tuig?.waterlijn_m ?? 0.3;
+export function createVoorrangBeeld({ scene, camera, controls, parts, modes, layer, host }: VoorrangBeeldOpties) {
+  const waterline = scene.getObjectByName('lelievlet')!.userData.tuig?.waterlijn_m ?? 0.3;
   const deck = deckOutline(parts, scene);
-  const haar = { x0: Math.min(...deck.map((q) => q[0])) - C, x1: Math.max(...deck.map((q) => q[0])) - C, r: Math.max(...deck.map((q) => Math.abs(q[1]))) };
+  const haar: Romp = { x0: Math.min(...deck.map((q) => q[0])) - C, x1: Math.max(...deck.map((q) => q[0])) - C, r: Math.max(...deck.map((q) => Math.abs(q[1]))) };
   const pijlen = createPijlen({ scene, camera, controls, layer });
   const kaart = createKaart(host);
   const holder = new THREE.Group(); holder.name = 'les-voorrang'; holder.visible = false; scene.add(holder);
   // the banks of the water: along her course, of an engte, or of a vaarwater across it
   const wal = new THREE.Group(); holder.add(wal);
   const landMat = new THREE.MeshStandardMaterial({ color: 0x7f9a5c, roughness: 0.9 });
-  const strook = (x0, x1, z0, z1) => { const b = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 1.0, z1 - z0), landMat); b.position.set((x0 + x1) / 2, waterline + 0.1, (z0 + z1) / 2); return b; };
+  const strook = (x0: number, x1: number, z0: number, z1: number) => { const b = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 1.0, z1 - z0), landMat); b.position.set((x0 + x1) / 2, waterline + 0.1, (z0 + z1) / 2); return b; };
 
   // more water: the viewer's own is a disc of 14 m round her (rig.js makeWater), and the others sail far beyond it -
   // so a ring of the same water goes on from its edge while Voorrang is open, with it as it moves along with her
   const zee = new THREE.Mesh(new THREE.RingGeometry(13.98, 320, 96, 1), modes.water?.material);
   zee.position.set(C, 0, 0); zee.renderOrder = 1;
-  const meerWater = (aan) => { if (!modes.water) return; if (aan) modes.water.add(zee); else zee.removeFromParent(); };
+  const meerWater = (aan: boolean) => { if (!modes.water) return; if (aan) modes.water.add(zee); else zee.removeFromParent(); };
 
   // the groot schip a short one, some 30 m, for room and time between them; one of each soort per place in the row
-  const built = new Map();
-  const bouw = (soort, i) => {
+  const built = new Map<string, THREE.Group>();
+  const bouw = (soort: Soort, i: number) => {
     const key = `${soort}#${i}`;
-    if (!built.has(key)) built.set(key, makeShip({ ...CONFIGS.find((c) => c.id === SCHIP[soort]), lengte: LANG[soort], breedte: BREED[soort] }));
-    return built.get(key);
+    if (!built.has(key)) built.set(key, makeShip({ ...CONFIGS.find((c) => c.id === SCHIP[soort])!, lengte: LANG[soort], breedte: BREED[soort] }));
+    return built.get(key)!;
   };
 
-  let sit = null; let boten = []; let schepen = []; let wijk = null; let gaan = false; let t = 0;
+  let sit: BeeldSituatie | null = null; let boten: VlootBoot[] = []; let schepen: (THREE.Group | null)[] = []; let wijk: (Wijk & { ok: boolean }) | null = null;
+  let gaan = false; let t = 0;
   const quiz = () => Boolean(sit?.letters);
 
-  let windBij = null;                                             // points of their ways, for where the wind goes in the map
-  function zet(s) {
+  let windBij: Punt[] | null = null;                                             // points of their ways, for where the wind goes in the map
+  function zet(s: BeeldSituatie) {
     sit = s; gaan = false; t = 0; kader = null; windBij = null;
     for (const m of schepen) m?.removeFromParent();
     boten = vloot(sit);
@@ -67,16 +92,16 @@ export function createVoorrangBeeld({ scene, camera, controls, parts, modes, lay
   const antwoord = () => { gaan = true; t = 0; };
 
   // the map's frame, the same all the way: round where they all set out and where they would be at the end
-  let kader = null;
+  let kader: Punt[] | null = null;
   // each one by its place (her middle, the others' stern) and its bow, so a long ship is in it whole
-  const romptop = (p, i) => {
+  const romptop = (p: Plaats, i: number): Punt[] => {
     if (boten[i].haar) return [[p.x + haar.x0 * Math.cos(p.kop), p.z + haar.x0 * Math.sin(p.kop)], [p.x + haar.x1 * Math.cos(p.kop), p.z + haar.x1 * Math.sin(p.kop)]];
     const lang = LANG[boten[i].soort];
     return [[p.x, p.z], [p.x + lang * Math.cos(p.kop), p.z + lang * Math.sin(p.kop)]];
   };
   const omvang = () => {
-    const a = vaar(sit, 0, null); const b = vaar(sit, RONDE, null);
-    const pts = [...a.flatMap(romptop), ...b.flatMap(romptop)].concat(sit.treffen ? [sit.treffen] : [[C, 0]]);
+    const a = vaar(sit!, 0, null); const b = vaar(sit!, RONDE, null);
+    const pts = [...a.flatMap(romptop), ...b.flatMap(romptop)].concat(sit!.treffen ? [sit!.treffen] : [[C, 0]]);
     const xs = pts.map((q) => q[0]); const zs = pts.map((q) => q[1]);
     return [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
   };
@@ -87,7 +112,7 @@ export function createVoorrangBeeld({ scene, camera, controls, parts, modes, lay
     return kader;
   };
   // the view stands still over the whole of it: from where she sets out to beyond where they meet
-  const kijk = () => {
+  const kijk = (): EigenAanzicht => {
     const groot = boten.some((b) => b.soort === 'groot');
     if (!sit || !quiz()) {
       const [mx, mz] = sit?.treffen ?? [C + 6, 0];
@@ -103,61 +128,61 @@ export function createVoorrangBeeld({ scene, camera, controls, parts, modes, lay
   };
 
   // who goes first, by place in the row: hers is 0
-  const voorrang = (i) => !boten[i].wijkt;
-  const naam = (i) => (quiz() ? sit.letters[i] : i === 0 ? 'jij' : '');
+  const voorrang = (i: number) => !boten[i].wijkt;
+  const naam = (i: number) => (quiz() ? sit!.letters![i] : i === 0 ? 'jij' : '');
   // what it says by each once answered: voorrang or wijkt; of three, its place in the order (1e, 2e, 3e)
-  const wat = (i) => (sit.antwoord?.length === 3 ? `${sit.antwoord.indexOf(sit.letters[i]) + 1}e` : voorrang(i) ? 'voorrang' : 'wijkt');
+  const wat = (i: number) => (sit!.antwoord?.length === 3 ? `${sit!.antwoord.indexOf(sit!.letters![i]) + 1}e` : voorrang(i) ? 'voorrang' : 'wijkt');
   // where a boat's word goes on the map: square to its way or ahead of or behind it, wherever it is furthest from the
   // other boats (their hulls, by a few points along each) and from the words already put down
-  const plekLabel = (i, p, mid, geplaatst, nu) => {
+  const plekLabel = (i: number, p: Plaats, mid: Punt[], geplaatst: Punt[], nu: Plaats[]) => {
     const c = Math.cos(p.kop); const s = Math.sin(p.kop);
     const lang = boten[i].haar ? haar.x1 - haar.x0 : LANG[boten[i].soort];
     const af = 3.5 + (boten[i].haar ? 0 : BREED[boten[i].soort] / 2);
     const kandidaten = [[s * af, -c * af], [-s * af, c * af], [c * (lang / 2 + 3), s * (lang / 2 + 3)], [-c * (lang / 2 + 3), -s * (lang / 2 + 3)]]
-      .map(([dx, dz]) => [mid[i][0] + dx, mid[i][1] + dz]);
-    const anderen = [];
+      .map(([dx, dz]): Punt => [mid[i][0] + dx, mid[i][1] + dz]);
+    const anderen: Punt[] = [];
     nu.forEach((q, j) => {
       if (j === i) return;
       const [a, b] = romptop(q, j);
       for (let k = 0; k <= 4; k++) anderen.push([a[0] + (b[0] - a[0]) * k / 4, a[1] + (b[1] - a[1]) * k / 4]);
     });
     anderen.push(...geplaatst);
-    const ruimte = (pt) => Math.min(...anderen.map((q) => Math.hypot(q[0] - pt[0], q[1] - pt[1])), Infinity);
+    const ruimte = (pt: Punt) => Math.min(...anderen.map((q) => Math.hypot(q[0] - pt[0], q[1] - pt[1])), Infinity);
     const beste = kandidaten.reduce((x, y) => (ruimte(y) > ruimte(x) + 0.5 ? y : x));
     geplaatst.push(beste);
     return beste;
   };
-  const romp = (lang, breed) => [[0, -breed / 2], [lang * 0.8, -breed / 2], [lang, 0], [lang * 0.8, breed / 2], [0, breed / 2]];
+  const romp = (lang: number, breed: number) => [[0, -breed / 2], [lang * 0.8, -breed / 2], [lang, 0], [lang * 0.8, breed / 2], [0, breed / 2]];
 
-  function update(dt, width, height, blad) {
+  function update(dt: number, width: number, height: number, blad: boolean) {
     if (!sit) return;
     if (gaan) t += dt;                                                    // still until it is answered
     const nu = vaar(sit, t % RONDE, gaan ? wijk : null);
     const jij = nu[0];
     modes.kracht.plek = { x: jij.x - C, z: jij.z, kop: jij.kop };
     // a point of her, from where she lies now (the boat's frame) to where she is on her way
-    const opHaar = ([x, z]) => [jij.x + (x - C) * Math.cos(jij.kop) - z * Math.sin(jij.kop), jij.z + (x - C) * Math.sin(jij.kop) + z * Math.cos(jij.kop)];
+    const opHaar = ([x, z]: Punt): Punt => [jij.x + (x - C) * Math.cos(jij.kop) - z * Math.sin(jij.kop), jij.z + (x - C) * Math.sin(jij.kop) + z * Math.cos(jij.kop)];
     // each other one: its stern where the path is, its bow along its heading; mid, its middle
-    const mid = nu.map((p, i) => {
+    const mid = nu.map((p, i): Punt => {
       if (boten[i].haar) return [p.x, p.z];
-      const s = schepen[i]; s.position.set(p.x, waterline, p.z); s.rotation.y = -p.kop; s.userData.update?.(t, 0, camera);
+      const s = schepen[i]!; s.position.set(p.x, waterline, p.z); s.rotation.y = -p.kop; s.userData.update?.(t, 0, camera);
       const lang = s.userData.length ?? LANG[boten[i].soort];
       return [p.x + Math.cos(p.kop) * lang / 2, p.z + Math.sin(p.kop) * lang / 2];
     });
-    const hoog = (i) => (boten[i].haar ? 3.2 : boten[i].soort === 'groot' ? 6 : 4);
+    const hoog = (i: number) => (boten[i].haar ? 3.2 : boten[i].soort === 'groot' ? 6 : 4);
 
     // on the water: who is who (the quiz), and once answered who goes first (not on the first page of the lesson:
     // there it is only what kind of meeting it is)
-    const items = [];
+    const items: Item[] = [];
     nu.forEach((p, i) => {
-      const w = gaan && !sit.ontmoeting ? wat(i) : '';
+      const w = gaan && !sit!.ontmoeting ? wat(i) : '';
       const label = quiz() ? (w ? `${naam(i)}: ${w}` : naam(i)) : w && (i === 0 ? `jij: ${w}` : w);
       if (label) items.push({ type: 'tekst', at: [mid[i][0], hoog(i), mid[i][1]], label, kleur: !w ? KLEUR.ander : voorrang(i) ? KLEUR.voor : KLEUR.wijkt });
     });
     pijlen.visible = true; pijlen.draw(items); pijlen.update(width, height);
 
     if (!blad) return;
-    const m = []; const geplaatst = [];
+    const m: KaartItem[] = []; const geplaatst: Punt[] = [];
     for (const [x0, x1, z0, z1] of landen(sit)) m.push({ type: 'vlak', pts: [[x0, z0], [x1, z0], [x1, z1], [x0, z1]], fill: '#c5cdb0' });
     nu.forEach((p, i) => {
       const b = boten[i]; const c = Math.cos(p.kop); const s = Math.sin(p.kop);
@@ -165,12 +190,12 @@ export function createVoorrangBeeld({ scene, camera, controls, parts, modes, lay
         m.push({ type: 'pijl', from: opHaar([C + 3.5, 0]), vec: [c * 6, s * 6], kleur: KLEUR.ander, dun: true });
         m.push({ type: 'vlak', pts: deck.map(opHaar), fill: '#f7f4ec', stroke: '#36454f' });
       } else {
-        const lang = schepen[i].userData.length ?? LANG[b.soort];
+        const lang = schepen[i]!.userData.length ?? LANG[b.soort];
         m.push({ type: 'pijl', from: [p.x + c * lang, p.z + s * lang], vec: [c * 6, s * 6], kleur: KLEUR.ander, dun: true });
         m.push({ type: 'vlak', pts: romp(lang, BREED[b.soort]).map(([x, z]) => [p.x + x * c - z * s, p.z + x * s + z * c]), fill: '#9aa5ae', stroke: KLEUR.ander });
       }
       const at = plekLabel(i, p, mid, geplaatst, nu);
-      const w = gaan && !sit.ontmoeting ? wat(i) : '';
+      const w = gaan && !sit!.ontmoeting ? wat(i) : '';
       const label = quiz() ? (w ? `${naam(i)}: ${w}` : naam(i)) : w;
       if (label) m.push({ type: 'tekst', at, label, kleur: !w ? KLEUR.ander : voorrang(i) ? KLEUR.voor : KLEUR.wijkt });
       if (!quiz() && i === 0) m.push({ type: 'tekst', at: [p.x, p.z + 4], label: 'jij', kleur: KLEUR.ander, klein: true });
@@ -186,8 +211,8 @@ export function createVoorrangBeeld({ scene, camera, controls, parts, modes, lay
       // from the boats' ways - worked out once, so that it stands still; each arrow and the word kept inside the frame
       const hx = (x1 - x0) / 2; const hz = (z1 - z0) / 2;
       const rand = Math.min(Math.abs(wx) > 1e-6 ? hx / Math.abs(wx) : Infinity, Math.abs(wz) > 1e-6 ? hz / Math.abs(wz) : Infinity) - L * 0.6;
-      const binnen = (a, b) => {                                          // shift a stretch a..b so that all of it is inside
-        const m = L * 0.25; const sh = [0, 0];
+      const binnen = (a: Punt, b: Punt): [Punt, Punt] => {                                          // shift a stretch a..b so that all of it is inside
+        const m = L * 0.25; const sh: Punt = [0, 0];
         for (const k of [0, 1]) {
           const lo = (k ? z0 : x0) + m; const hi = (k ? z1 : x1) - m;
           const min = Math.min(a[k], b[k]); const max = Math.max(a[k], b[k]);
@@ -195,16 +220,16 @@ export function createVoorrangBeeld({ scene, camera, controls, parts, modes, lay
         }
         return [[a[0] + sh[0], a[1] + sh[1]], [b[0] + sh[0], b[1] + sh[1]]];
       };
-      const bij = windBij ??= [0, 0.25, 0.5, 0.75, 1].flatMap((f) => vaar(sit, f * RONDE, null).map((q) => [q.x, q.z]));
+      const bij = windBij ??= [0, 0.25, 0.5, 0.75, 1].flatMap((f) => vaar(sit!, f * RONDE, null).map((q): Punt => [q.x, q.z]));
       const verst = [-0.6, -0.3, 0, 0.3, 0.6].map((t) => t * Math.max(hx, hz)).map((d) => {
         const [c] = binnen([midden[0] + wx * (rand - L / 2) - wz * d, midden[1] + wz * (rand - L / 2) + wx * d], [midden[0] + wx * (rand - L / 2) - wz * d, midden[1] + wz * (rand - L / 2) + wx * d]);
         return { d, ruim: Math.min(...bij.map((q) => Math.hypot(q[0] - c[0], q[1] - c[1]))) };
       }).sort((a, b) => b.ruim - a.ruim)[0].d;
-      const a = [midden[0] + wx * rand - wz * verst, midden[1] + wz * rand + wx * verst];
+      const a: Punt = [midden[0] + wx * rand - wz * verst, midden[1] + wz * rand + wx * verst];
       const [from, to] = binnen(a, [a[0] - wx * L, a[1] - wz * L]);
       m.push({ type: 'pijl', from, vec: [to[0] - from[0], to[1] - from[1]], kleur: KLEUR.wind });
       // the word beside it, square to the wind, clear of the arrow itself
-      const [woord] = binnen(...Array(2).fill([midden[0] + wx * (rand - L / 2) - wz * (verst + 0.7 * L), midden[1] + wz * (rand - L / 2) + wx * (verst + 0.7 * L)]));
+      const [woord] = binnen(...(Array(2).fill([midden[0] + wx * (rand - L / 2) - wz * (verst + 0.7 * L), midden[1] + wz * (rand - L / 2) + wx * (verst + 0.7 * L)]) as [Punt, Punt]));
       m.push({ type: 'tekst', at: woord, label: 'wind', kleur: KLEUR.wind });
     }
     // the map stands still too: its frame alone sets what it takes in, not the boats going by

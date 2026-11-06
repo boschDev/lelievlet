@@ -1,10 +1,19 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { makeZee } from './boot.ts';
 import { GELUIDEN, GELUID_GROEPEN } from '../bpr/geluiden.ts';
 import { makeHoorn, patroonSvg } from '../bpr/hoorn.ts';
 import { CONFIGS, makeShip } from '../bpr/schepen.ts';
 import { createLesKaart, keuze, kies, knoppen, ernst } from './kaart.ts';
+import type { Onderwerp, Rij, Vraag } from './kaart.ts';
+import type { EigenAanzicht, Les, LesContext } from './typen.ts';
+
+/** An onderwerp of Geluidsseinen: its seinen ([id, label]), or for Zelf verkennen all of them in groups. */
+export interface GeluidOnderwerp extends Onderwerp<string> {
+  standen?: [string, string][];
+  verken?: [string, [string, string][]][];
+}
+/** What the boat out ahead does when it gives the signal. */
+type Doet = 'sb' | 'bb' | 'achteruit' | 'drijft' | 'keren-sb' | 'keren-bb';
 
 // Geluidsseinen: a lesson after Sint Maarten Kielboot III § 4.5 - the eight sound signals the CWO handboek
 // Kielboot (2022, Gevorderd, 402: BPR 4.01, 4.02, 4.04 and bijlage 6 A) asks, each heard on the hoorn of Zoeken (bpr/hoorn.js) and drawn as its stoten. A small
@@ -12,19 +21,19 @@ import { createLesKaart, keuze, kies, knoppen, ernst } from './kaart.ts';
 // verkennen has every signal of the BPR, and leads on to Zoeken › Geluidsseinen.
 
 const C = 2.8;
-const sein = (id) => GELUIDEN.find((g) => g.id === id);
+const sein = (id: string | null) => GELUIDEN.find((g) => g.id === id);
 // what the CWO asks (bijlage 6 A, as the handboek lists it); `cwo` in bpr/geluiden.js follows an older, wider book
 const CWO = new Set(['attentie', 'stuurboord-uit', 'bakboord-uit', 'achteruit', 'niet-manoeuvreren', 'noodsein', 'blijf-weg', 'brug-sluis']);
-const KIJK = { hoogte: 12, breedte: 34, doel: [C + 14, 1.5, 0], richting: [-1, 0.55, 0.45] };
+const KIJK: EigenAanzicht = { hoogte: 12, breedte: 34, doel: [C + 14, 1.5, 0], richting: [-1, 0.55, 0.45] };
 // what the boat out ahead does when it gives the signal
-const DOET = {
+const DOET: Record<string, Doet> = {
   'stuurboord-uit': 'sb', 'bakboord-uit': 'bb', achteruit: 'achteruit', 'niet-manoeuvreren': 'drijft',
   'keren-sb': 'keren-sb', 'keren-bb': 'keren-bb', 'haven-sb': 'sb', 'haven-bb': 'bb',
 };
 
-const onderwerp = (id, titel, kort, standen, vraag, meer = []) => ({ id, titel, cwo: 'KB III', kort, standen, vraag, meer });
+const onderwerp = (id: string, titel: string, kort: string[], standen: [string, string][], vraag: Vraag<string>, meer: GeluidOnderwerp['meer'] = []): GeluidOnderwerp => ({ id, titel, cwo: 'KB III', kort, standen, vraag, meer });
 
-export const GELUIDSSEINEN = [
+export const GELUIDSSEINEN: GeluidOnderwerp[] = [
   onderwerp('stoten', 'Kort en lang', [
     'Met <b>geluidsseinen</b> laten schepen elkaar weten wat ze doen. Een sein is een rij <b>korte stoten</b> (ongeveer 1 seconde) en <b>lange stoten</b> (ongeveer 4 seconden), met steeds een korte pauze ertussen.',
     'Een groot schip geeft ze zo nodig om een aanvaring te voorkomen. Een <b>klein schip</b>, zoals de lelievlet, geeft zo nodig <b>attentie</b>, <b>ik kan niet manoeuvreren</b> en het <b>noodsein</b>; de seinen om uit te wijken of achteruit te slaan geeft het niet. Neem dus een hoorn mee.',
@@ -67,28 +76,28 @@ export const GELUIDSSEINEN = [
       'Hier staan alle seinen van het BPR, ook die de CWO niet vraagt: voorbijlopen, keren, havens in en uit, mist. In Zoeken › Geluidsseinen vind je ze ook, met wat je moet doen.',
     ],
     meer: [], zoeken: ['geluiden', 'Geluidsseinen'],
-    verken: GELUID_GROEPEN.map((g) => [g, GELUIDEN.filter((x) => x.groep === g).map((x) => [x.id, `${x.naam}${CWO.has(x.id) ? '' : ' (geen CWO)'}`])]),
+    verken: GELUID_GROEPEN.map((g): [string, [string, string][]] => [g, GELUIDEN.filter((x) => x.groep === g).map((x): [string, string] => [x.id, `${x.naam}${CWO.has(x.id) ? '' : ' (geen CWO)'}`])]),
   },
 ];
 
-export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCoveredRight, opslaan, onOpen, naarZoeken }) {
+export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCoveredRight, opslaan, onOpen, naarZoeken }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-geluiden', sleutel, titel: 'Geluidsseinen', lessen: GELUIDSSEINEN, store: 'lelievlet.les.geluiden.v1', opslaan, fly, setCoveredRight, onOpen, naarZoeken });
-  const waterline = scene.getObjectByName('lelievlet').userData.tuig?.waterlijn_m ?? 0.3;
+  const waterline = scene.getObjectByName('lelievlet')!.userData.tuig?.waterlijn_m ?? 0.3;
   const hoorn = makeHoorn();
   const plaatje = document.createElement('div'); plaatje.className = 'les-sein'; lk.host.append(plaatje);
   // the boat that gives the signals: a small motorboat out ahead, coming her way
-  const boot = makeShip(CONFIGS.find((c) => c.id === 'klein_motorschip_a'));
+  const boot = makeShip(CONFIGS.find((c) => c.id === 'klein_motorschip_a')!);
   const holder = new THREE.Group(); holder.visible = false; holder.add(boot); scene.add(holder);
-  const water = (op) => { holder.visible = op; if (modes?.water) modes.water.visible = !op; };
+  const water = (op: boolean) => { holder.visible = op; if (modes?.water) modes.water.visible = !op; };
   // where it starts: dead ahead, heading towards her - one kort then gives a pass bakboord langs bakboord
   const START = [C + 34, 0]; const KOP = Math.PI;
-  let id = null; let doet = null; let vanaf = 0; let t = 0; let klinkt = false;
+  let id: string | null = null; let doet: Doet | null = null; let vanaf = 0; let t = 0; let klinkt = false;
   // her water is clear and reaches 14 m (rig.js makeWater): the boat out ahead lies on an opaque sea instead
   const zee = makeZee(modes, 400); holder.add(zee);
 
-  const zet = (key) => { id = key; doet = null; vanaf = 0; t = 0; hoorn.stop(); toon(); lk.renderControls(); };
+  const zet = (key: string) => { id = key; doet = null; vanaf = 0; t = 0; hoorn.stop(); toon(); lk.renderControls(); };
   const toon = () => {
-    const g = sein(id);
+    const g = sein(id)!;
     plaatje.innerHTML = `<div class="les-sein-patroon">${patroonSvg(g.patroon, { h: 34, k: 18 })}</div><p><b>${g.naam}</b></p>`;
   };
   const speel = () => {
@@ -96,16 +105,16 @@ export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCove
     klinkt = true; lk.renderControls();
     hoorn.play(g.patroon, { herhaald: g.herhaald, klaar: () => { klinkt = false; lk.renderControls(); } });
     // the boat out ahead does it, as it sounds - from where it is now, not from the start again
-    t = doet ? 0 : t % 11; vanaf = t + 1; doet = DOET[id] ?? null;
+    t = doet ? 0 : t % 11; vanaf = t + 1; doet = DOET[id!] ?? null;
   };
 
   lk.koppel({
     begin(l) {
       water(true); t = 0; doet = null; vanaf = 0;
-      zet(l.standen ? l.standen[0][0] : l.verken[0][1][0][0]);
-      const rows = [];
-      if (l.verken) rows.push(keuze('Sein', l.verken, () => id, zet));
-      if (l.standen) rows.push(kies('Sein', l.standen, () => id, zet));
+      zet(l.standen ? l.standen[0][0] : l.verken![0][1][0][0]);
+      const rows: Rij[] = [];
+      if (l.verken) rows.push(keuze('Sein', l.verken, () => id!, zet));
+      if (l.standen) rows.push(kies('Sein', l.standen, () => id!, zet));
       rows.push(knoppen([['speel', 'Laat horen', true]], speel, () => !klinkt));
       return rows;
     },
@@ -115,7 +124,7 @@ export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCove
   });
 
   // the boat out ahead: on its way to her, and doing what it signalled
-  const pad = (s) => {
+  const pad = (s: number) => {
     let x = START[0]; let z = START[1]; let kop = KOP; const v = 2.2;
     const stap = 0.05;
     for (let u = 0; u < Math.min(s, vanaf + 13); u += stap) {
@@ -123,7 +132,7 @@ export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCove
       let draai = 0; let snel = v;
       const d = u - vanaf;                                                   // s since it gave the signal
       if (bezig && (doet === 'sb' || doet === 'bb')) draai = (doet === 'sb' ? 1 : -1) * (d < 3 ? 0.22 : 0);
-      if (bezig && doet.startsWith('keren')) draai = (doet === 'keren-sb' ? 1 : -1) * (d < Math.PI / 0.45 ? 0.45 : 0);
+      if (bezig && doet!.startsWith('keren')) draai = (doet === 'keren-sb' ? 1 : -1) * (d < Math.PI / 0.45 ? 0.45 : 0);
       if (bezig && doet === 'achteruit') snel = Math.max(v - d * 1.6, -0.9);
       if (bezig && doet === 'drijft') { snel = Math.max(v - d * 1.2, 0); z += 0.25 * stap; draai = 0.05; }
       kop -= draai * stap;                                                 // + : to its stuurboord, which is a turn the other way about y
@@ -132,7 +141,7 @@ export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCove
     return { x, z, kop };
   };
 
-  function update(dt, width) {
+  function update(dt: number, width: number) {
     if (!lk.tick(width)) return;
     t += dt;
     // a loop: it comes on, does what it signals, and starts again
@@ -143,8 +152,8 @@ export function initGeluiden({ sleutel, wrap, scene, camera, modes, fly, setCove
     if (doet && t > vanaf + 13) { doet = null; vanaf = 0; t = 0; }
     const g = sein(id);
     // the signals of danger and of need in that colour
-    const NIVEAU = { 'blijf-weg': 'rood', 'gevaar-aanvaring': 'rood', noodsein: 'rood', 'medische-hulp': 'oranje', 'niet-manoeuvreren': 'oranje' };
-    lk.status(g ? `${g.naam}: ${g.betekenis}${lk.les.verken && g.lelievlet ? ` ${g.lelievlet}` : ''}` : '', NIVEAU[g?.id] ?? ernst(g?.betekenis));
+    const NIVEAU: Record<string, string> = { 'blijf-weg': 'rood', 'gevaar-aanvaring': 'rood', noodsein: 'rood', 'medische-hulp': 'oranje', 'niet-manoeuvreren': 'oranje' };
+    lk.status(g ? `${g.naam}: ${g.betekenis}${lk.les.verken && g.lelievlet ? ` ${g.lelievlet}` : ''}` : '', NIVEAU[g?.id!] ?? ernst(g?.betekenis));
   }
 
   return { update, open: lk.open, close: lk.close, onderwerpen: GELUIDSSEINEN,

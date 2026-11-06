@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Alles op een rij, in Voorrang (lessen/voorrang.js): situaties to practise on, made here from the rules rather than
 // written out one by one, and sorted makkelijk / normaal / moeilijk by the rule that decides them. The boats are
 // A, B (and C): one of them is the lelievlet - sailing or rowing - the others come from Zoeken › Lichten. The rules
@@ -14,26 +13,53 @@
 // three boats the antwoord is their order ('CAB': C first, then A, then B).
 
 import { C, T, LANG, SNEL } from './voorrang-pad.ts';
+import type { EigenBoot, PadBoot, RijSituatie, Soort, Wal } from './voorrang-pad.ts';
+
+export type Niveau = 'makkelijk' | 'normaal' | 'moeilijk';
+/** A situatie to practise on: one for voorrang-pad.ts, with its letters, antwoord and regel. */
+export interface OefenSituatie extends RijSituatie {
+  naam: string;
+  niveau: Niveau;
+  /** The letter of each boat, hers first. */
+  letters: string[];
+  /** The letter of the one that goes first, 'beide', or of three their order ('CAB'). */
+  antwoord: string;
+  /** Which rules decide it. */
+  regel: string;
+  soorten: Soort[];
+  /** (only a situatie of the lesson's first page has one) */
+  ontmoeting?: undefined;
+}
+
+// A boat while the situatie is made: a little before they meet (for the rules), and pad as voorrang-pad.ts takes it
+interface OefenBoot {
+  soort: Soort; kop: number; v: number; x: number; z: number;
+  haar?: boolean; wal?: boolean; draai?: number; letter?: string; pad?: PadBoot;
+}
+// Who of two goes first, the rule that decides it, and the words for it
+interface Beslissing { wie: OefenBoot | 'beide'; regel: string; tekst: () => string }
+type Beslist = (bs: OefenBoot[]) => { wie: OefenBoot | 'beide'; volgorde?: string; tekst: () => string };
+interface Opzet { niveau: Niveau; koers: number; jij: 'zeilen' | 'roeien'; boten: OefenBoot[]; wal: Wal | null; beslist: Beslist }
 
 const NAAM = { zeil: 'een zeilschip', spier: 'een schip op spierkracht', motor: 'een motorschip', groot: 'een groot schip' };
 export const SOORT = { zeil: 'zeilboot', spier: 'roeiboot', motor: 'motorboot', groot: 'groot schip' };
-const RANG = { zeil: 3, spier: 2, motor: 1 };
-const KORT = { zeil: 'zeil', spier: 'spierkracht', motor: 'motor' };
+const RANG: Partial<Record<Soort, number>> = { zeil: 3, spier: 2, motor: 1 };
+const KORT: Partial<Record<Soort, string>> = { zeil: 'zeil', spier: 'spierkracht', motor: 'motor' };
 const KOERS = [45, 70, 90, 120, 150, -45, -70, -90, -120, -150];        // hers, off the wind: + over stuurboord
 const RICHTING = [60, 90, 120, -60, -90, -120, 180, 0];                  // the other's heading, from her bow
 
-const hoek = (a) => ((a + 540) % 360) - 180;                             // degrees into -180..180
-const rad = (d) => d * Math.PI / 180;
+const hoek = (a: number) => ((a + 540) % 360) - 180;                             // degrees into -180..180
+const rad = (d: number) => d * Math.PI / 180;
 
 // The wind on a zeilschip heading kop (degrees from her bow), with her koers: + over its stuurboord
-const wind = (koers, kop) => hoek(koers - kop);
+const wind = (koers: number, kop: number) => hoek(koers - kop);
 // it can sail that way - and not plat voor de wind, where no one can tell over which side the wind comes in
-const kan = (koers, b) => b.soort !== 'zeil' || (Math.abs(wind(koers, b.kop)) >= 45 && Math.abs(wind(koers, b.kop)) < 170);
+const kan = (koers: number, b: OefenBoot) => b.soort !== 'zeil' || (Math.abs(wind(koers, b.kop)) >= 45 && Math.abs(wind(koers, b.kop)) < 170);
 
 // What kind of meeting two boats have. Oplopen as BPR 6.01 lid 1b has it: the one comes up from more than 22°30'
 // abaft the other's beam (112,5° off its bow, seen from where they are a little before they meet)
-const peiling = (van, naar) => Math.abs(hoek(Math.atan2(naar.z - van.z, naar.x - van.x) * 180 / Math.PI - van.kop));
-function ontmoeting(p, q) {
+const peiling = (van: OefenBoot, naar: OefenBoot) => Math.abs(hoek(Math.atan2(naar.z - van.z, naar.x - van.x) * 180 / Math.PI - van.kop));
+function ontmoeting(p: OefenBoot, q: OefenBoot) {
   if (peiling(p, q) > 112.5 || peiling(q, p) > 112.5) return 'oplopen';
   return Math.abs(hoek(q.kop - p.kop)) > 145 ? 'tegengesteld' : 'kruisend';
 }
@@ -41,9 +67,9 @@ const ONTMOETING = { oplopen: 'Oplopen', tegengesteld: 'Tegengestelde koersen', 
 
 // Who of p and q goes first: { wie: p | q | 'beide', regel, tekst(letter) }; p and q are { soort, kop, x, z (a little
 // before they meet), wal }
-function voorrang(p, q, koers, metWal) {
+function voorrang(p: OefenBoot, q: OefenBoot, koers: number, metWal: boolean): Beslissing {
   const soort = ontmoeting(p, q);
-  const L = (b) => b.letter;
+  const L = (b: OefenBoot) => b.letter;
   if (soort === 'oplopen') {
     // the oploper is the one that comes up from behind the other
     const [o, v] = peiling(p, q) > 112.5 ? [q, p] : [p, q];
@@ -58,7 +84,7 @@ function voorrang(p, q, koers, metWal) {
     return { wie: g, regel: 'groot', tekst: () => `${L(g)} is ${NAAM.groot}, ${L(k)} ${NAAM[k.soort]}: groot gaat voor klein. ${L(g)} gaat voor.` };
   }
   if (p.soort !== q.soort) {
-    const [h, l] = RANG[p.soort] > RANG[q.soort] ? [p, q] : [q, p];
+    const [h, l] = RANG[p.soort]! > RANG[q.soort]! ? [p, q] : [q, p];
     return { wie: h, regel: `${h.soort}-${l.soort}`, tekst: () => `${L(h)} is ${NAAM[h.soort]}, ${L(l)} ${NAAM[l.soort]}: ${KORT[h.soort]} gaat voor ${KORT[l.soort]}. ${L(h)} gaat voor.` };
   }
   if (p.soort === 'zeil') {
@@ -80,7 +106,7 @@ function voorrang(p, q, koers, metWal) {
 }
 
 // How hard: the rule that decides it
-const NIVEAU = {
+const NIVEAU: Record<string, Niveau> = {
   oplopen: 'makkelijk', 'zeil-motor': 'makkelijk', 'spier-motor': 'makkelijk',
   'zeil-spier': 'normaal', groot: 'normaal', boeg: 'normaal', 'gelijk-tegen': 'normaal', 'gelijk-kruis': 'normaal',
   loef: 'moeilijk', wal: 'moeilijk',
@@ -88,7 +114,7 @@ const NIVEAU = {
 
 // A boat of a situatie, a little before they meet (for the rules) and as lessen/voorrang-pad.js takes it: its middle
 // at mid at time T
-function boot(soort, kop, mid, v) {
+function boot(soort: Soort, kop: number, mid: [number, number], v: number): OefenBoot {
   const d = [Math.cos(rad(kop)), Math.sin(rad(kop))]; const half = (LANG[soort] ?? 6) / 2;
   return {
     soort, kop, v,
@@ -96,21 +122,22 @@ function boot(soort, kop, mid, v) {
     pad: { soort, richting: kop, v, treffen: [mid[0] - d[0] * half, mid[1] - d[1] * half] },
   };
 }
-const haarV = (soort) => (soort === 'spier' ? 1 : 1.4);
-const haarBoot = (soort) => ({ soort, kop: 0, v: haarV(soort), x: C - haarV(soort) * 3, z: 0, haar: true });
+const haarV = (soort: Soort) => (soort === 'spier' ? 1 : 1.4);
+const haarBoot = (soort: Soort): OefenBoot => ({ soort, kop: 0, v: haarV(soort), x: C - haarV(soort) * 3, z: 0, haar: true });
 
 // letters for n boats, shuffled by the number of the situatie so that she is not always A
-const PERMS = { 2: [[0, 1], [1, 0]], 3: [[0, 1, 2], [1, 2, 0], [2, 0, 1], [0, 2, 1], [1, 0, 2], [2, 1, 0]] };
-const letters = (n, i) => PERMS[n][(i * 7 + 3) % PERMS[n].length].map((k) => 'ABC'[k]);
+const PERMS: Record<number, number[][]> = { 2: [[0, 1], [1, 0]], 3: [[0, 1, 2], [1, 2, 0], [2, 0, 1], [0, 2, 1], [1, 0, 2], [2, 1, 0]] };
+const letters = (n: number, i: number) => PERMS[n][(i * 7 + 3) % PERMS[n].length].map((k) => 'ABC'[k]);
 
-function situatie(niveau, koers, jij, boten, wal, beslist, nr) {
+// (regel still the function that words it: oefenSituaties words it)
+function situatie(niveau: Niveau, koers: number, jij: 'zeilen' | 'roeien', boten: OefenBoot[], wal: Wal | null, beslist: Beslist, nr: number) {
   const ls = letters(boten.length, nr);
   boten.forEach((b, i) => { b.letter = ls[i]; });
   const regels = beslist(boten);
   const wie = regels.wie;
   return {
     naam: `${niveau} ${nr}`, niveau, koers, jij, wal,
-    boten: boten.map((b) => (b.haar ? { soort: b.soort, wijkt: wie !== b, draai: b.draai ?? 1 } : { ...b.pad, wijkt: wie === 'beide' || wie !== b, draai: b.draai ?? 1 })),
+    boten: boten.map((b): EigenBoot | PadBoot => (b.haar ? { soort: b.soort, wijkt: wie !== b, draai: b.draai ?? 1 } : { ...b.pad!, wijkt: wie === 'beide' || wie !== b, draai: b.draai ?? 1 })),
     letters: ls, antwoord: regels.volgorde ?? (wie === 'beide' ? 'beide' : wie.letter), regel: regels.tekst, soorten: boten.map((b) => b.soort),
   };
 }
@@ -118,8 +145,8 @@ function situatie(niveau, koers, jij, boten, wal, beslist, nr) {
 // Two boats: hers and one other, every way that makes sense - one of each kind of case per heading of the other and
 // side the wind is on, the wind (her koers) taken by turns so they do not all sail the same course
 function tweetallen() {
-  const uit = []; const gezien = new Set(); let draai = 0;
-  for (const haar of ['zeil', 'spier']) for (const ander of ['zeil', 'motor', 'spier', 'groot']) for (const r of RICHTING) for (const koers of [...KOERS.slice(draai % KOERS.length), ...KOERS.slice(0, draai++ % KOERS.length)]) {
+  const uit: Opzet[] = []; const gezien = new Set(); let draai = 0;
+  for (const haar of ['zeil', 'spier'] as const) for (const ander of ['zeil', 'motor', 'spier', 'groot'] as const) for (const r of RICHTING) for (const koers of [...KOERS.slice(draai % KOERS.length), ...KOERS.slice(0, draai++ % KOERS.length)]) {
     const h = haarBoot(haar);
     if (ander === 'groot' && Math.abs(r) === 60) continue;               // a groot schip from behind at an angle: no way out
     let v = SNEL[ander];
@@ -149,8 +176,8 @@ function tweetallen() {
 // the water, or that one keeps its stuurboordzijde and she is on its side. Crossing: she keeps her stuurboordzijde and
 // a zeilboot or motorboot comes across the water to her bank (opkruisend, or making for the other side).
 function walSituaties() {
-  const uit = [];
-  for (const haar of ['zeil', 'spier']) for (const ander of ['motor', 'groot']) for (const zijdeVanHaar of [true, false]) {
+  const uit: Opzet[] = [];
+  for (const haar of ['zeil', 'spier'] as const) for (const ander of ['motor', 'groot'] as const) for (const zijdeVanHaar of [true, false]) {
     const koers = haar === 'zeil' ? 90 : 120;
     const h = { ...haarBoot(haar), wal: zijdeVanHaar };
     // her stuurboordwal 4 m off and the other down the middle of it, on her line; or the other 3 m off its own
@@ -161,7 +188,7 @@ function walSituaties() {
     uit.push({ niveau: 'moeilijk', koers, jij: haar === 'spier' ? 'roeien' : 'zeilen', boten: [h, a], wal, beslist: (bs) => voorrang(bs[0], bs[1], koers, true) });
   }
   // crossing: the other comes from her bakboord side across the water, and turns back (to its bakboord) to give way
-  for (const haar of ['zeil', 'spier']) for (const [ander, r, koers] of [['zeil', 60, -120], ['zeil', 120, -90], ['motor', 90, haar === 'zeil' ? 90 : 120]]) {
+  for (const haar of ['zeil', 'spier'] as const) for (const [ander, r, koers] of [['zeil', 60, -120], ['zeil', 120, -90], ['motor', 90, haar === 'zeil' ? 90 : 120]] as [Soort, number, number][]) {
     const h = { ...haarBoot(haar), wal: true };
     const a = { ...boot(ander, r, [C + 3, 0], SNEL[ander]), wal: false, draai: -1 };
     if (!kan(koers, h) || !kan(koers, a)) continue;
@@ -172,8 +199,8 @@ function walSituaties() {
 
 // Three boats: hers and two others, where one goes before both - the one asked for
 function drietallen() {
-  const uit = [];
-  const sets = [['zeil', 'motor', 'groot'], ['zeil', 'spier', 'motor'], ['spier', 'zeil', 'motor'], ['spier', 'motor', 'groot'], ['zeil', 'zeil', 'motor'], ['spier', 'spier', 'motor']];
+  const uit: Opzet[] = [];
+  const sets: [Soort, Soort, Soort][] = [['zeil', 'motor', 'groot'], ['zeil', 'spier', 'motor'], ['spier', 'zeil', 'motor'], ['spier', 'motor', 'groot'], ['zeil', 'zeil', 'motor'], ['spier', 'spier', 'motor']];
   const wegen = [[90, 180], [-90, 180], [90, -90], [120, -120], [-60, 180]];
   let n = 0;
   for (const [haar, b, c] of sets) for (const [rb, rc] of wegen) {
@@ -193,9 +220,9 @@ function drietallen() {
 }
 // the order of three, and why: first the one that goes before both others, then the one that goes before the last;
 // volgorde their letters in that order ('CAB'), and each pair's rule
-const drie = (koers) => (bs) => {
+const drie = (koers: number): Beslist => (bs) => {
   const paren = [[0, 1], [0, 2], [1, 2]].map(([i, j]) => voorrang(bs[i], bs[j], koers, false));
-  const wint = (x) => paren.filter((pr) => pr.wie === x).length;
+  const wint = (x: OefenBoot | 'beide') => paren.filter((pr) => pr.wie === x).length;
   const rij = [...bs].sort((a, b) => wint(b) - wint(a));
   const uitleg = [...paren].sort((a, b) => wint(b.wie) - wint(a.wie));
   return { wie: rij[0], volgorde: rij.map((x) => x.letter).join(''),
@@ -203,13 +230,13 @@ const drie = (koers) => (bs) => {
 };
 
 // All of them, by niveau: { makkelijk: [...], normaal: [...], moeilijk: [...] }
-export function oefenSituaties() {
+export function oefenSituaties(): Record<Niveau, OefenSituatie[]> {
   const alle = [...tweetallen(), ...walSituaties(), ...drietallen()];
-  const per = { makkelijk: [], normaal: [], moeilijk: [] };
+  const per: Record<Niveau, OefenSituatie[]> = { makkelijk: [], normaal: [], moeilijk: [] };
   alle.forEach((x, i) => {
     const sit = situatie(x.niveau, x.koers, x.jij, x.boten.map((b) => ({ ...b, pad: b.pad && { ...b.pad } })), x.wal, x.beslist, i + 1);
-    sit.regel = sit.regel();
-    per[x.niveau].push(sit);
+    (sit as Omit<OefenSituatie, 'regel'> & { regel: string | (() => string) }).regel = sit.regel();
+    per[x.niveau].push(sit as unknown as OefenSituatie);
   });
   return per;
 }

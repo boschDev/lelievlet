@@ -1,8 +1,16 @@
-// @ts-nocheck
 import { createLesKaart, kies } from './kaart.ts';
 import { voortgang } from './voortgang.ts';
 import { C } from './voorrang-pad.ts';
 import { createVoorrangBeeld } from './voorrang-beeld.ts';
+import type { LesSituatie, Ontmoeting } from './voorrang-beeld.ts';
+import type { Voor } from './voorrang-pad.ts';
+import type { Onderwerp, Rij } from './kaart.ts';
+import type { Les, LesContext } from './typen.ts';
+
+/** An onderwerp of Voorrang: its situaties, each a deel of it (null: none, the last page). */
+export interface VoorrangOnderwerp extends Onderwerp { situaties: LesSituatie[] | null }
+/** A situatie as written out below: s() fills in what most share. */
+type SituatieOpzet = Omit<LesSituatie, 'jij' | 'koers' | 'treffen'> & Partial<Pick<LesSituatie, 'jij' | 'koers' | 'treffen'>>;
 
 // Voorrang: a lesson after Sint Maarten Kielboot III § 4.3, with the rules as the BPR has them (6.03, 6.04, 6.07,
 // 6.09, 6.10, 6.13 and 6.14 for keren and vertrekken, 6.16, 6.17) and as far as the CWO handboek Kielboot (2022, 402)
@@ -25,12 +33,12 @@ import { createVoorrangBeeld } from './voorrang-beeld.ts';
 // houd: s it holds its new heading before it turns back (lessen/voorrang-pad.js).
 // A situatie of the first page has ontmoeting ('kruisend' 'tegengesteld' 'oplopen') in place of voor and artikel.
 
-const ANTWOORD = [['jij', 'Ik ga voor'], ['ander', 'De ander gaat voor'], ['beide', 'Allebei naar stuurboord']];
+const ANTWOORD: [Voor, string][] = [['jij', 'Ik ga voor'], ['ander', 'De ander gaat voor'], ['beide', 'Allebei naar stuurboord']];
 // on the first page there is no voorrang yet: only what kind of meeting it is - and they pass clear, no one turns
-const ONTMOETING = [['kruisend', 'Kruisende koersen'], ['tegengesteld', 'Tegengestelde koersen'], ['oplopen', 'Oplopen']];
-const s = (o) => ({ jij: 'zeilen', koers: 90, treffen: [C + 6, 0], ...o });
+const ONTMOETING: [Ontmoeting, string][] = [['kruisend', 'Kruisende koersen'], ['tegengesteld', 'Tegengestelde koersen'], ['oplopen', 'Oplopen']];
+const s = (o: SituatieOpzet): LesSituatie => ({ jij: 'zeilen', koers: 90, treffen: [C + 6, 0], ...o });
 
-export const VOORRANG = [
+export const VOORRANG: VoorrangOnderwerp[] = [
   {
     id: 'soorten', titel: 'Kruisen, tegemoet, oplopen', cwo: 'KB I',
     kort: [
@@ -145,14 +153,14 @@ export const VOORRANG = [
 ];
 // each situatie is a deel of its onderwerp (lessen/voortgang.js): answered right it is gehaald - shown green, and
 // the onderwerp counts, and lets you go on, only once all its situaties are; 'Alles op een rij' has them all again
-for (const o of VOORRANG) if (o.situaties) { for (const x of o.situaties) x.deel = `${o.id}:${x.key ?? x.naam}`; o.delen = o.situaties.map((x) => x.deel); }
+for (const o of VOORRANG) if (o.situaties) { for (const x of o.situaties) x.deel = `${o.id}:${x.key ?? x.naam}`; o.delen = o.situaties.map((x) => x.deel!); }
 
-export function initVoorrang({ sleutel, wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen, naarQuiz }) {
+export function initVoorrang({ sleutel, wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen, naarQuiz }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-voorrang', sleutel, titel: 'Voorrang', lessen: VOORRANG, store: 'lelievlet.les.voorrang.v1', opslaan, fly, setCoveredRight, onOpen, naarQuiz });
   const beeld = createVoorrangBeeld({ scene, camera, controls, parts, modes, layer: lk.layer, host: lk.host });
-  let alle = []; let sit = null; let gekozen = null;
+  let alle: LesSituatie[] = []; let sit: LesSituatie | null = null; let gekozen: string | null = null;
 
-  const zet = (key) => {
+  const zet = (key: string | undefined) => {
     sit = alle.find((x) => x.naam === key) ?? alle[0]; gekozen = null;
     beeld.zet(sit);
     lk.renderControls(); lk.frame();
@@ -162,22 +170,22 @@ export function initVoorrang({ sleutel, wrap, scene, camera, controls, parts, mo
   // answered and a wrong one red - and another may still be tried. An answer sets them going, from the start
   const juist = () => sit?.ontmoeting ?? sit?.voor;
   const wieGaatVoor = () => {
-    const vraag = document.createElement('div'); vraag.className = 'kr-vraag les-wie';
+    const vraag: Rij = document.createElement('div'); vraag.className = 'kr-vraag les-wie';
     vraag.innerHTML = '<h3>Vraag</h3><p></p><div class="kr-opties"></div>';
-    const lijst = vraag.querySelector('.kr-opties'); let set = null;
+    const lijst = vraag.querySelector('.kr-opties')!; let set: [string, string][] | null = null;
     vraag.sync = () => {
       const nu = sit?.ontmoeting ? ONTMOETING : ANTWOORD;
       if (nu !== set) {
         set = nu;
         lijst.innerHTML = nu.map(([k, tekst]) => `<button type="button" data-k="${k}">${tekst}</button>`).join('');
-        for (const b of lijst.children) b.addEventListener('click', () => {
-          gekozen = b.dataset.k; beeld.antwoord();
-          if (gekozen === juist()) voortgang.gehaald(sleutel, sit.deel);
+        for (const b of lijst.children as HTMLCollectionOf<HTMLElement>) b.addEventListener('click', () => {
+          gekozen = b.dataset.k!; beeld.antwoord();
+          if (gekozen === juist()) voortgang.gehaald(sleutel, sit!.deel!);
           lk.renderControls(); status(); inBeeld();
         });
       }
-      vraag.querySelector('p').textContent = sit?.ontmoeting ? `${sit.naam}: wat voor ontmoeting is dit?` : `${sit?.naam}: wie gaat voor?`;
-      for (const b of lijst.children) {
+      vraag.querySelector('p')!.textContent = sit?.ontmoeting ? `${sit.naam}: wat voor ontmoeting is dit?` : `${sit?.naam}: wie gaat voor?`;
+      for (const b of lijst.children as HTMLCollectionOf<HTMLElement>) {
         b.classList.toggle('goed', Boolean(gekozen) && b.dataset.k === juist());
         b.classList.toggle('fout', b.dataset.k === gekozen && gekozen !== juist());
       }
@@ -189,25 +197,25 @@ export function initVoorrang({ sleutel, wrap, scene, camera, controls, parts, mo
   // the line under the controls: nothing until it is answered, then the rule
   const status = () => {
     if (!gekozen) return lk.status('');
-    if (sit.ontmoeting) return lk.status(`${gekozen === sit.ontmoeting ? 'Goed! ' : 'Niet helemaal. '}${sit.regel}`);
-    const goed = gekozen === sit.voor;
-    lk.status(`${goed ? 'Goed! ' : 'Niet helemaal. '}${sit.regel}`, goed ? '' : 'oranje');   // wrong here is a collision
+    if (sit!.ontmoeting) return lk.status(`${gekozen === sit!.ontmoeting ? 'Goed! ' : 'Niet helemaal. '}${sit!.regel}`);
+    const goed = gekozen === sit!.voor;
+    lk.status(`${goed ? 'Goed! ' : 'Niet helemaal. '}${sit!.regel}`, goed ? '' : 'oranje');   // wrong here is a collision
   };
 
-  const gehaald = (naam) => voortgang.isGehaald(sleutel, alle.find((x) => x.naam === naam)?.deel);
+  const gehaald = (naam: string | undefined) => voortgang.isGehaald(sleutel, alle.find((x) => x.naam === naam)?.deel!);
 
   lk.koppel({
     begin(l) {
       if (!l.situaties) { beeld.release(); sit = null; return []; }
       alle = l.situaties;
       zet(alle[0].naam);
-      return [kies('Situatie', alle.map((x) => [x.naam, x.naam]), () => sit?.naam, zet, gehaald), wieGaatVoor()];
+      return [kies<string | undefined>('Situatie', alle.map((x): [string, string] => [x.naam, x.naam]), () => sit?.naam, zet, gehaald), wieGaatVoor()];
     },
     release() { beeld.release(); sit = null; },
     aanzicht: () => beeld.kijk(),
   });
 
-  function update(dt, width, height) {
+  function update(dt: number, width: number, height: number) {
     if (!lk.tick(width) || !sit) return;
     status();
     beeld.update(dt, width, height, lk.bladOpen);

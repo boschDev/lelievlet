@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { makeZee } from './boot.ts';
 import { CONFIGS, makeShip } from '../bpr/schepen.ts';
@@ -6,6 +5,34 @@ import { LICHT_UITLEG, LICHT_GROEPEN } from '../bpr/lichtuitleg.ts';
 import { createLesKaart, segmented, keuze, kies, ernst } from './kaart.ts';
 import { createKaart } from '../zeiltermen/kaart.ts';
 import { cwoLicht } from '../bpr/cwo.ts';            // what the CWO asks, as Zoeken and its quiz have it
+import type { ScheepsDagmerk, ScheepsLicht, ShipConfig } from '../bpr/schepen.ts';
+import type { KaartItem } from '../zeiltermen/kaart.ts';
+import type { Onderwerp, Rij } from './kaart.ts';
+import type { EigenAanzicht, Les, LesContext } from './typen.ts';
+
+/** Where you see her from. */
+type Kant = 'voor' | 'bb' | 'sb' | 'achter';
+type P2 = [number, number];
+type P3 = [number, number, number];
+/** What an answer shows on the boat: another side, or another ship. */
+interface LichtLaat { kant?: Kant; schip?: string }
+/** An onderwerp of Lichten: its ships ([id, naam]), or for Zelf verkennen all of them in groups (verken). */
+export interface LichtOnderwerp extends Onderwerp<LichtLaat> {
+  nacht: boolean;
+  sectoren?: boolean;
+  kant: Kant;
+  schepen?: [string, string][];
+  verken?: [string, [string, string][]][];
+}
+// an entry of bpr/lichtuitleg.ts, by the id of its ship (its entries do not all have every field)
+interface Uitleg { naam: string; groep: string; artikel: string; lichten?: string; dagmerk?: string; betekenis: string; lelievlet?: string }
+type Uitlegs = Record<string, Uitleg | undefined>;
+// a ship as makeShip builds it (bpr/schepen.ts group.userData)
+type Schip = THREE.Group & {
+  userData: { config: ShipConfig; length: number; lights: ScheepsLicht[]; axis?: number; dagmerken: ScheepsDagmerk[]; update?(t: number, night: number, camera: THREE.Camera): void };
+};
+// a part of her, flat: its points in her own frame
+interface Deel { o: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[]>; romp: boolean; pts: P3[]; kleur: string }
 
 // Lichten en dagtekens: a lesson after Sint Maarten Kielboot III hoofdstuk 5, Optische tekens - with only what the
 // CWO handboek Kielboot (2022, Gevorderd, 402) asks: BPR 3.01a (the four kinds of light), 3.05, 3.07, 3.08 lid 1 and
@@ -17,30 +44,30 @@ import { cwoLicht } from '../bpr/cwo.ts';            // what the CWO asks, as Zo
 // small boat. Zelf verkennen has every ship of Zoeken, and leads on to it.
 
 const C = 2.8;
-const cfg = (id) => CONFIGS.find((c) => c.id === id);
-const KANTEN = [['voor', 'Voren'], ['bb', 'Bakboord'], ['sb', 'Stuurboord'], ['achter', 'Achteren']];
-const DRAAI = { voor: Math.PI, bb: Math.PI / 2, sb: -Math.PI / 2, achter: 0 };     // her bow: at you, to your left, to your right, away
-const SECTOR = { toplicht: '#f5f1d8', sb: '#1fa34a', bb: '#d0202a', heklicht: '#f5f1d8', rondom: '#f5d77a' };
-const NAAM = { toplicht: 'toplicht', sb: 'boordlicht', bb: 'boordlicht', heklicht: 'heklicht', rondom: 'rondom schijnend' };
+const cfg = (id: string) => CONFIGS.find((c) => c.id === id);
+const KANTEN: [Kant, string][] = [['voor', 'Voren'], ['bb', 'Bakboord'], ['sb', 'Stuurboord'], ['achter', 'Achteren']];
+const DRAAI: Record<Kant, number> = { voor: Math.PI, bb: Math.PI / 2, sb: -Math.PI / 2, achter: 0 };     // her bow: at you, to your left, to your right, away
+const SECTOR: Partial<Record<string, string>> = { toplicht: '#f5f1d8', sb: '#1fa34a', bb: '#d0202a', heklicht: '#f5f1d8', rondom: '#f5d77a' };
+const NAAM: Partial<Record<string, string>> = { toplicht: 'toplicht', sb: 'boordlicht', bb: 'boordlicht', heklicht: 'heklicht', rondom: 'rondom schijnend' };
 
 // the colour of a light as a dot in a picture
-const LICHT = { wit: '#fff4d8', rood: '#ff3b30', groen: '#34e26b', geel: '#ffd23a', blauw: '#5a8cff' };
-const glim = (u, v, kleur, r) => `<circle cx="${u}" cy="${v}" r="${r * 2.6}" fill="${LICHT[kleur] ?? kleur}" opacity="0.28"/><circle cx="${u}" cy="${v}" r="${r}" fill="${LICHT[kleur] ?? kleur}"/>`;
+const LICHT: Partial<Record<string, string>> = { wit: '#fff4d8', rood: '#ff3b30', groen: '#34e26b', geel: '#ffd23a', blauw: '#5a8cff' };
+const glim = (u: number | string, v: number | string, kleur: string, r: number) => `<circle cx="${u}" cy="${v}" r="${r * 2.6}" fill="${LICHT[kleur] ?? kleur}" opacity="0.28"/><circle cx="${u}" cy="${v}" r="${r}" fill="${LICHT[kleur] ?? kleur}"/>`;
 /**
  * A picture for a question that tells of lights in words: each panel { label, dots: [[kleur, x, y]] } a bit of night
  * with the dots where the words put them (x across, -1 to 1; y up, 0 to 2).
  */
-function stippen(panelen) {
+function stippen(panelen: { label?: string; dots: [string, number, number][] }[]) {
   return `<div class="les-stippen">${panelen.map(({ label, dots }) => `<svg viewBox="0 0 120 84" role="img" aria-label="${label ?? 'De lichten'}">
     <rect width="120" height="84" rx="6" fill="#0b1220"/><rect y="66" width="120" height="18" fill="#132338"/>
     ${dots.map(([k, x, y]) => glim(60 + x * 34, 60 - y * 22, k, 3.6)).join('')}
     ${label ? `<text x="6" y="80" font-size="9" fill="#9fb0c8">${label}</text>` : ''}</svg>`).join('')}</div>`;
 }
 
-const schepen = (ids) => ids.map((id) => [id, LICHT_UITLEG[id]?.naam ?? cfg(id).naam]);
-const onderwerp = (o) => ({ cwo: 'KB III', meer: [], ...o });
+const schepen = (ids: string[]) => ids.map((id): [string, string] => [id, (LICHT_UITLEG as Uitlegs)[id]?.naam ?? cfg(id)!.naam]);
+const onderwerp = (o: Omit<LichtOnderwerp, 'cwo' | 'meer'> & Partial<Pick<LichtOnderwerp, 'cwo' | 'meer'>>): LichtOnderwerp => ({ cwo: 'KB III', meer: [], ...o });
 
-export const LICHTEN = [
+export const LICHTEN: LichtOnderwerp[] = [
   onderwerp({
     id: 'soorten', titel: 'Vier soorten lichten', nacht: true, sectoren: true, kant: 'voor',
     kort: [
@@ -148,35 +175,35 @@ export const LICHTEN = [
       'Hier staan alle schepen van Zoeken, ook die de CWO niet vraagt. In Zoeken › Lichten en Dagmerken vind je ze ook.',
     ],
     meer: [], zoeken: ['lichten', 'Lichten'],
-    verken: LICHT_GROEPEN.map((g) => [g, Object.entries(LICHT_UITLEG).filter(([id, u]) => u.groep === g && cfg(id))
-      .map(([id, u]) => [id, `${u.naam}${cwoLicht(u.artikel) ? '' : ' (geen CWO)'}`])]).filter(([, l]) => l.length),
+    verken: LICHT_GROEPEN.map((g): [string, [string, string][]] => [g, Object.entries(LICHT_UITLEG as Record<string, Uitleg>).filter(([id, u]) => u.groep === g && cfg(id))
+      .map(([id, u]): [string, string] => [id, `${u.naam}${cwoLicht(u.artikel) ? '' : ' (geen CWO)'}`])]).filter(([, l]) => l.length),
   },
 ];
 
-export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCoveredRight, opslaan, onOpen, naarZoeken, setDark }) {
+export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCoveredRight, opslaan, onOpen, naarZoeken, setDark }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-lichten', sleutel, titel: 'Lichten en dagtekens', lessen: LICHTEN, store: 'lelievlet.les.lichten.v1', opslaan, fly, setCoveredRight, onOpen, naarZoeken });
-  const waterline = scene.getObjectByName('lelievlet').userData.tuig?.waterlijn_m ?? 0.3;
+  const waterline = scene.getObjectByName('lelievlet')!.userData.tuig?.waterlijn_m ?? 0.3;
   const holder = new THREE.Group(); holder.name = 'les-lichten'; holder.visible = false; scene.add(holder);
   // Seen from low on the water, the water has to hide what of her is under it: the viewer's own water round the boat
   // is clear and reaches 14 m (rig.js makeWater), she lies further out. So there an opaque sea, and the clear water
   // away (the boat is behind the eye then); on the sectors, seen from above, the viewer's water as it was.
   const zee = makeZee(modes, 900); holder.add(zee);
   const laag = () => holder.visible && !lk.les?.sectoren;
-  const water = (op) => { zee.visible = op; if (modes?.water) modes.water.visible = !op; };
+  const water = (op: boolean) => { zee.visible = op; if (modes?.water) modes.water.visible = !op; };
   // in the card: the map from above (the sectors) or her as seen from the water, and under it the words
-  const kaart = createKaart(lk.host); const kaartSvg = lk.host.lastElementChild;
+  const kaart = createKaart(lk.host); const kaartSvg = lk.host.lastElementChild as SVGSVGElement;   // the map's, just put there
   const zicht = document.createElement('div'); zicht.className = 'les-vol les-zicht'; lk.host.append(zicht);
   const plaatje = document.createElement('div'); plaatje.className = 'les-sein les-vol'; lk.host.append(plaatje);
-  const built = new Map();
-  let schip = null; let kant = 'voor'; let nacht = true; let model = null; let t = 0;
-  let waaiers = [];
+  const built = new Map<string, Schip>();
+  let schip: string | null = null; let kant: Kant = 'voor'; let nacht = true; let model: Schip | null = null; let t = 0;
+  let waaiers: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>[] = [];
 
-  const bouw = (id) => { if (!built.has(id)) built.set(id, makeShip(cfg(id))); return built.get(id); };
+  const bouw = (id: string) => { if (!built.has(id)) built.set(id, makeShip(cfg(id)!) as Schip); return built.get(id)!; };
   // her size as built, measured once: length along her, and her height over the water
-  const maat = new Map();
-  const meet = (m) => {
+  const maat = new Map<THREE.Object3D, { lang: number; hoog: number }>();
+  const meet = (m: THREE.Object3D) => {
     if (!maat.has(m)) { m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(m); maat.set(m, { lang: b.max.x - b.min.x, hoog: Math.max(b.max.y, 2) }); }
-    return maat.get(m);
+    return maat.get(m)!;
   };
   const lengte = () => (model ? meet(model).lang : 10);
   // how far out ahead of the boat she lies: on the sectors as near as fits; seen from the water so far that the camera,
@@ -210,15 +237,15 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
       const geo = new THREE.CircleGeometry(r * (l.soort === 'heklicht' ? 0.8 : l.soort === 'toplicht' ? 1 : 0.9), 48, THREE.MathUtils.degToRad(from), THREE.MathUtils.degToRad(to - from));
       geo.rotateX(Math.PI / 2);
       const w = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: kleur, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
-      w.position.set(l.rest?.x ?? l.lamp.position.x, 0.04 + i * 0.01, model.userData.axis ?? 0); w.renderOrder = 3;
-      model.add(w); waaiers.push(w);
+      w.position.set(l.rest?.x ?? l.lamp.position.x, 0.04 + i * 0.01, model!.userData.axis ?? 0); w.renderOrder = 3;
+      model!.add(w); waaiers.push(w);
     });
   };
   // The camera sees 200 m (main.js); a long ship's fans, looked at from further off, reach beyond that and were cut
   // off by a straight line across the view, and seen from low on the water a long ship lies far out. While she is
   // out it sees as far as she and her fans go - as Zoeken does for a ship far out (bpr/zoeken.js shipView) - and
   // after that as far as it did again.
-  let lens = null;
+  let lens: number | null = null;
   const verZien = () => {
     if (!model || !holder.visible) {
       if (lens !== null) { camera.far = lens; camera.userData.minNear = 0; camera.updateProjectionMatrix(); lens = null; }
@@ -234,18 +261,19 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
   // ---------------------------------------------------------------- the map from above: her and her sectors
   // Her outline from above (the hull of all her parts but the lamps), and each light's sector as a fan in its colour,
   // as on the water. In her own frame: x to the bow, z to stuurboord.
-  const lampDelen = (m) => { const set = new Set(); for (const l of m.userData.lights) l.lamp.traverse((o) => set.add(o)); for (const w of waaiers) set.add(w); return set; };
+  const lampDelen = (m: Schip) => { const set = new Set<THREE.Object3D>(); for (const l of m.userData.lights) l.lamp.traverse((o) => set.add(o)); for (const w of waaiers) set.add(w); return set; };
   const naarHaar = new THREE.Matrix4(); const pt = new THREE.Vector3();
   // every vertex of her visible parts in her own frame, part by part: [[x, y, z], ...] per mesh, with its colour
-  const delen = (m, zien) => {
+  const delen = (m: Schip, zien: (o: THREE.Object3D) => boolean): Deel[] => {
     m.updateMatrixWorld(true); naarHaar.copy(m.matrixWorld).invert();
-    const lamp = lampDelen(m); const uit = [];
-    const zichtbaar = (o) => { for (let p = o; p && p !== m; p = p.parent) if (!p.visible) return false; return true; };
-    m.traverse((o) => {
+    const lamp = lampDelen(m); const uit: Deel[] = [];
+    const zichtbaar = (o: THREE.Object3D) => { for (let p: THREE.Object3D | null = o; p && p !== m; p = p.parent) if (!p.visible) return false; return true; };
+    m.traverse((obj) => {
+      const o = obj as Deel['o'];                                    // a mesh, once isMesh says so
       if (!o.isMesh || lamp.has(o) || !zien(o) || !zichtbaar(o)) return;
       const pos = o.geometry.attributes.position; if (!pos) return;
       const mat = new THREE.Matrix4().multiplyMatrices(naarHaar, o.matrixWorld);
-      const pts = []; const stap = Math.max(1, Math.floor(pos.count / 400));
+      const pts: P3[] = []; const stap = Math.max(1, Math.floor(pos.count / 400));
       for (let i = 0; i < pos.count; i += stap) { pt.fromBufferAttribute(pos, i).applyMatrix4(mat); pts.push([pt.x, pt.y, pt.z]); }
       // a hull (bpr/schepen.js hull(): an extruded plan, its deck the first material, its side the second)
       const romp = o.geometry.type === 'ExtrudeGeometry';
@@ -255,31 +283,31 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     return uit;
   };
   // the convex hull of points [u, v] (monotone chain)
-  const omhulsel = (ps) => {
+  const omhulsel = (ps: P2[]): P2[] => {
     const p = [...ps].sort((a, b) => a[0] - b[0] || a[1] - b[1]); if (p.length < 3) return p;
-    const x = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-    const lo = []; for (const q of p) { while (lo.length >= 2 && x(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
-    const hi = []; for (const q of [...p].reverse()) { while (hi.length >= 2 && x(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+    const x = (o: P2, a: P2, b: P2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo: P2[] = []; for (const q of p) { while (lo.length >= 2 && x(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    const hi: P2[] = []; for (const q of [...p].reverse()) { while (hi.length >= 2 && x(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
     return lo.slice(0, -1).concat(hi.slice(0, -1));
   };
-  const BEARING = { voor: 0, sb: 90, bb: -90, achter: 180 };       // where you are, from her bow (+ to stuurboord)
-  let bovenaf = null; let bovenafVan = null;
+  const BEARING: Record<Kant, number> = { voor: 0, sb: 90, bb: -90, achter: 180 };       // where you are, from her bow (+ to stuurboord)
+  let bovenaf: KaartItem[] | null = null; let bovenafVan: Schip | null = null;
   const kaartItems = () => {
     if (bovenafVan === model && bovenaf) return bovenaf;
-    const items = [];
-    const r = Math.max(lengte() * 0.75, 7); const axis = model.userData.axis ?? 0;
-    model.userData.lights.forEach((l) => {
+    const items: KaartItem[] = [];
+    const r = Math.max(lengte() * 0.75, 7); const axis = model!.userData.axis ?? 0;
+    model!.userData.lights.forEach((l) => {
       const kleur = SECTOR[l.soort]; if (!kleur) return;
       const [from, to] = l.arc ?? [0, 360]; const rr = r * (l.soort === 'heklicht' ? 0.8 : l.soort === 'toplicht' ? 1 : 0.9);
-      const x0 = l.rest.x; const pts = l.arc ? [[x0, axis]] : [];
+      const x0 = l.rest.x; const pts: P2[] = l.arc ? [[x0, axis]] : [];
       for (let a = from; a <= to + 1e-6; a += (to - from) / 32) pts.push([x0 + rr * Math.cos(THREE.MathUtils.degToRad(a)), axis + rr * Math.sin(THREE.MathUtils.degToRad(a))]);
       // a white light on the light map: a warm white with a darker edge, so that it is seen
       const wit = kleur === SECTOR.toplicht || kleur === SECTOR.heklicht;
       items.push({ type: 'vlak', pts, fill: wit ? '#fff3b066' : `${kleur}55`, stroke: wit ? '#b9a85c' : kleur });
       const mid = THREE.MathUtils.degToRad(l.arc ? (from + to) / 2 : 135);
-      items.push({ type: 'tekst', at: [x0 + rr * 0.72 * Math.cos(mid), axis + rr * 0.72 * Math.sin(mid)], label: NAAM[l.soort], kleur: '#36454f', klein: true });
+      items.push({ type: 'tekst', at: [x0 + rr * 0.72 * Math.cos(mid), axis + rr * 0.72 * Math.sin(mid)], label: NAAM[l.soort]!, kleur: '#36454f', klein: true });
     });
-    const romp = omhulsel(delen(model, () => true).flatMap((d) => d.pts.map(([x, , z]) => [x, z])));
+    const romp = omhulsel(delen(model!, () => true).flatMap((d) => d.pts.map(([x, , z]): P2 => [x, z])));
     items.push({ type: 'vlak', pts: romp, fill: '#3a4656', stroke: '#11161d' });
     bovenaf = items; bovenafVan = model;
     return items;
@@ -296,17 +324,17 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
   // one with a transom and a stem, a big one long and low with its bow up - on its own measures; what is on her
   // (a wheelhouse, a mast, sails, the posts of her lights, her dagtekens) is her own parts seen flat. The scale is
   // the same for all: at least 16 m across, so a roeiboot is small and a binnenvaartschip fills it.
-  const ZIJ = { voor: 'van voren', sb: 'van stuurboord', bb: 'van bakboord', achter: 'van achteren' };
-  const plat = { voor: ([, y, z]) => [-z, y], achter: ([, y, z]) => [z, y], sb: ([x, y]) => [x, y], bb: ([x, y]) => [-x, y] };
+  const ZIJ: Record<Kant, string> = { voor: 'van voren', sb: 'van stuurboord', bb: 'van bakboord', achter: 'van achteren' };
+  const plat: Record<Kant, (q: P3) => P2> = { voor: ([, y, z]) => [-z, y], achter: ([, y, z]) => [z, y], sb: ([x, y]) => [x, y], bb: ([x, y]) => [-x, y] };
   // a hull's outline in her own frame [x, y, z]: from aside (z 0) or end on (x 0), over its box b
-  const rompVorm = (b, soort, opzij) => {
+  const rompVorm = (b: THREE.Box3, soort: string | undefined, opzij: boolean): P3[] => {
     const L = b.max.x - b.min.x; const top = b.max.y; const h = Math.max(top, 0.3); const onder = Math.max(b.min.y, -0.4);
     const klein = L < 15; const spits = soort === 'roei';
-    const pts = [];
+    const pts: P3[] = [];
     if (opzij) {
       // the sheer: up to the stem, and to the stern of a small one
       const achter = klein ? (spits ? 0.4 : 0.18) * h : 0; const voor = klein ? 0.5 * h : 0.35 * h;
-      const zeeg = (t) => top + (t < 0.45 ? achter * ((0.45 - t) / 0.45) ** 2 : 0) + (klein ? (t > 0.45 ? voor * ((t - 0.45) / 0.55) ** 2 : 0) : (t > 0.85 ? voor * ((t - 0.85) / 0.15) ** 2 : 0));
+      const zeeg = (t: number) => top + (t < 0.45 ? achter * ((0.45 - t) / 0.45) ** 2 : 0) + (klein ? (t > 0.45 ? voor * ((t - 0.45) / 0.55) ** 2 : 0) : (t > 0.85 ? voor * ((t - 0.85) / 0.15) ** 2 : 0));
       const steven = klein ? 0.14 : 0.05;                                  // how far the stem rakes back to the water
       pts.push([b.min.x + (spits ? 0.12 * L : 0.015 * L), onder, 0]);
       for (let i = 0; i <= 24; i++) { const t = i / 24; pts.push([b.min.x + t * L, zeeg(t), 0]); }
@@ -318,11 +346,11 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     return pts;
   };
   // someone at the oars of a roeiboot: a body and a head over the middle of the hull
-  const roeier = (b, opzij) => {
+  const roeier = (b: THREE.Box3, opzij: boolean): P3[][] => {
     const top = b.max.y; const xm = (b.min.x + b.max.x) / 2; const zm = (b.min.z + b.max.z) / 2;
-    const at = (d, y) => (opzij ? [xm + d, y, 0] : [0, y, zm + d]);
+    const at = (d: number, y: number): P3 => (opzij ? [xm + d, y, 0] : [0, y, zm + d]);
     const lijf = [at(-0.22, top - 0.1), at(0.22, top - 0.1), at(0.16, top + 0.62), at(-0.16, top + 0.62)];
-    const hoofd = []; for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; hoofd.push(at(0.14 * Math.cos(a), top + 0.82 + 0.14 * Math.sin(a))); }
+    const hoofd: P3[] = []; for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; hoofd.push(at(0.14 * Math.cos(a), top + 0.82 + 0.14 * Math.sin(a))); }
     return [lijf, hoofd];
   };
   let zichtVan = '';
@@ -330,20 +358,20 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     const key = `${schip} ${kant} ${nacht} ${lk.host.clientWidth}`;
     if (key === zichtVan) return;
     zichtVan = key;
-    const P = plat[kant]; const opzij = kant === 'sb' || kant === 'bb'; const soort = model.userData.config?.schip;
-    const dag = new Set(model.userData.dagmerken.filter((d) => !nacht || d.nacht).flatMap((d) => { const set = []; d.shape.traverse((o) => set.push(o)); return set; }));
-    const alleMerken = new Set(model.userData.dagmerken.flatMap((d) => { const set = []; d.shape.traverse((o) => set.push(o)); return set; }));
-    const stukken = delen(model, (o) => !alleMerken.has(o) || dag.has(o));
+    const P = plat[kant]; const opzij = kant === 'sb' || kant === 'bb'; const soort = model!.userData.config?.schip;
+    const dag = new Set(model!.userData.dagmerken.filter((d) => !nacht || d.nacht).flatMap((d) => { const set: THREE.Object3D[] = []; d.shape.traverse((o) => set.push(o)); return set; }));
+    const alleMerken = new Set(model!.userData.dagmerken.flatMap((d) => { const set: THREE.Object3D[] = []; d.shape.traverse((o) => set.push(o)); return set; }));
+    const stukken = delen(model!, (o) => !alleMerken.has(o) || dag.has(o));
     // each hull as its kind; the raised stem bpr/schepen.js puts on it (a box on its bow) is in that outline already
     const rompen = stukken.filter((d) => d.romp).map((d) => {
       const b = new THREE.Box3().setFromArray(d.pts.flat()); return { d, b, klein: b.max.x - b.min.x < 15 };
     });
-    const steven = (d) => !d.romp && d.o.geometry.type === 'BoxGeometry' && rompen.some(({ b, d: r }) => r.o.parent === d.o.parent
+    const steven = (d: Deel) => !d.romp && d.o.geometry.type === 'BoxGeometry' && rompen.some(({ b, d: r }) => r.o.parent === d.o.parent
       && d.pts.every(([x]) => x > b.min.x + 0.8 * (b.max.x - b.min.x)) && d.pts.every(([, y]) => y > b.max.y - 0.4));
     // far parts first, the near ones over them
     const naar = { voor: [1, 0, 0], achter: [-1, 0, 0], sb: [0, 0, 1], bb: [0, 0, -1] }[kant];
-    const diep = (pts) => Math.max(...pts.map((q) => q[0] * naar[0] + q[2] * naar[2]));
-    const vormen = [];
+    const diep = (pts: P3[]) => Math.max(...pts.map((q) => q[0] * naar[0] + q[2] * naar[2]));
+    const vormen: { pts: P2[]; kleur: string; diep: number; merk?: boolean }[] = [];
     for (const d of stukken) {
       if (steven(d)) continue;
       const r = d.romp && rompen.find((x) => x.d === d);
@@ -355,7 +383,7 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     vormen.sort((a, b) => a.diep - b.diep);
     // the lights seen from there: lit by night (a flikkerlicht by day too), and inside their arc
     const b = BEARING[kant];
-    const lichten = model.userData.lights.filter((l) => {
+    const lichten = model!.userData.lights.filter((l) => {
       if (!nacht && !l.byDay) return false;
       if (!l.arc) return true;
       const [from, to] = l.arc; const bb = to > 180 ? (b + 360) % 360 : b;
@@ -379,19 +407,19 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
       const groot = Math.max(Math.max(...vu) - Math.min(...vu), Math.max(...vv) - Math.min(...vv)) * k;
       if (groot >= MERK || groot <= 0) continue;
       const f = MERK / groot; const mu = (Math.max(...vu) + Math.min(...vu)) / 2; const mv = (Math.max(...vv) + Math.min(...vv)) / 2;
-      v.pts = v.pts.map(([u, w]) => [mu + (u - mu) * f, mv + (w - mv) * f]);
+      v.pts = v.pts.map(([u, w]): P2 => [mu + (u - mu) * f, mv + (w - mv) * f]);
     }
     // two lights that land on one spot (one behind the other, as a red and a green rondom of a werkend schip from
     // aside): the one behind a little aside, so both are seen and the near one is over it
-    const gezet = [];
+    const gezet: P2[] = [];
     for (const l of [...lichten].reverse()) {                            // the near one stays, the one behind moves
       let [u, w] = l.at;
       for (let i = 0; i < 4 && gezet.some(([a, b]) => Math.hypot((a - u) * k, (b - w) * k) < 6); i++) u += 7 / k;
       gezet.push([u, w]); l.at = [u, w];
     }
-    const X = (u) => (W / 2 + (u - cu) * k).toFixed(1); const Y = (v) => (H - 20 - v * k).toFixed(1);
+    const X = (u: number) => (W / 2 + (u - cu) * k).toFixed(1); const Y = (v: number) => (H - 20 - v * k).toFixed(1);
     const lucht = nacht ? '#0b1220' : '#e3eef5'; const water = nacht ? '#132338' : '#9fbcd0';
-    const kleur = (c) => (nacht ? '#202b3b' : c);
+    const kleur = (c: string) => (nacht ? '#202b3b' : c);
     zicht.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Het schip ${ZIJ[kant]}">
       <rect width="${W}" height="${H}" fill="${lucht}"/>
       ${vormen.map((v) => `<polygon points="${v.pts.map(([u, w]) => `${X(u)},${Y(w)}`).join(' ')}" fill="${kleur(v.kleur)}" stroke="${kleur(v.kleur)}" stroke-width="1" stroke-linejoin="round"/>`).join('')}
@@ -407,23 +435,23 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     if (sectoren) tekenKaart(); else tekenZicht();
   };
 
-  const zet = (id) => {
+  const zet = (id: string) => {
     schip = id; zichtVan = '';
     if (model) model.removeFromParent();
     model = bouw(id); holder.add(model);
     toonWaaiers(); toonPlaatje(); lk.renderControls(); lk.frame();
   };
   const toonPlaatje = () => {
-    const u = LICHT_UITLEG[schip];
+    const u = (LICHT_UITLEG as Uitlegs)[schip!];
     if (lk.les.sectoren) {
       plaatje.innerHTML = `<table class="les-tabel"><thead><tr><th>Licht</th><th>Kleur</th><th>Te zien over</th></tr></thead><tbody>
         <tr><td>Toplicht</td><td>wit</td><td>225°, naar voren</td></tr><tr><td>Boordlichten</td><td>groen (sb), rood (bb)</td><td>elk 112,5°</td></tr>
         <tr><td>Heklicht</td><td>wit</td><td>135°, naar achteren</td></tr><tr><td>Rondom schijnend</td><td>wit, of een kleur</td><td>360°</td></tr></tbody></table>`;
       return;
     }
-    plaatje.innerHTML = `<p><b>${u?.naam ?? cfg(schip).naam}</b></p><p class="hint">${nacht ? u?.lichten ?? '' : u?.dagmerk ?? 'Overdag voert dit schip geen dagteken.'}</p>`;
+    plaatje.innerHTML = `<p><b>${u?.naam ?? cfg(schip!)!.naam}</b></p><p class="hint">${nacht ? u?.lichten ?? '' : u?.dagmerk ?? 'Overdag voert dit schip geen dagteken.'}</p>`;
   };
-  const kijk = () => {
+  const kijk = (): EigenAanzicht => {
     const d = afstand(); const h = model ? meet(model).hoog : 6;
     if (lk.les.sectoren) return { hoogte: lengte() * 1.4 + 8, breedte: lengte() * 2.2 + 10, doel: [C + d, 0, 0], richting: [-0.45, 1, 0.55] };
     // from ahead or astern straight along her line, so both boordlichten (or the heklicht) show; from aside a little
@@ -436,10 +464,10 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     begin(l) {
       holder.visible = true;
       kant = l.kant ?? 'voor'; nacht = l.nacht ?? true; setDark?.(nacht ? 1 : 0);
-      zet(l.schepen ? l.schepen[0][0] : l.verken[0][1][0][0]);
-      const rows = [];
-      if (l.verken) rows.push(keuze('Schip', l.verken, () => schip, zet));
-      else if (l.schepen.length > 1) rows.push(kies('Schip', l.schepen, () => schip, zet));
+      zet(l.schepen ? l.schepen[0][0] : l.verken![0][1][0][0]);
+      const rows: Rij[] = [];
+      if (l.verken) rows.push(keuze('Schip', l.verken, () => schip!, zet));
+      else if (l.schepen!.length > 1) rows.push(kies('Schip', l.schepen!, () => schip!, zet));
       // where you look from: not on the sectors, which lie round her whatever side you are on
       if (!l.sectoren) rows.push(segmented('Je ziet het van', KANTEN, () => kant, (v) => { kant = v; lk.renderControls(); lk.frame(); }));
       // day or night: not on the sectors either, which are of the lights, by night
@@ -454,7 +482,7 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     aanzicht: kijk,
   });
 
-  function update(dt, width) {
+  function update(dt: number, width: number) {
     if (!lk.tick(width)) return;
     t += dt;
     if (model) {
@@ -470,7 +498,7 @@ export function initLichten({ sleutel, wrap, scene, camera, modes, fly, setCover
     verZien();
     water(laag());
     toonBeeld();
-    const u = LICHT_UITLEG[schip];
+    const u = (LICHT_UITLEG as Uitlegs)[schip!];
     // on the sectors what her lights are, with nothing to warn of: the page is about the four kinds of light
     if (lk.les.sectoren) lk.status(u?.lichten ?? '');
     else lk.status(u ? `${u.betekenis}${lk.les.verken && u.lelievlet ? ` ${u.lelievlet}` : ''}` : '', schip?.startsWith('lelievlet') ? '' : ernst(u?.betekenis));   // her own lights: nothing to warn of

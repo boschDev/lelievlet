@@ -1,8 +1,22 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { createLesKaart, schuif, knoppen } from './kaart.ts';
 import { gevolg } from '../logboek.ts';
 import { makeHoorn } from '../bpr/hoorn.ts';
+import type { Onderwerp, Rij } from './kaart.ts';
+import type { EigenAanzicht, Les, LesContext } from './typen.ts';
+
+/** What an answer shows: that windkracht, or the wind from that richting. */
+export interface WeerLaat { bft?: number; richting?: number }
+/** An onderwerp of Het weer: its windkracht, and which picture it has. */
+export interface WeerOnderwerp extends Onderwerp<WeerLaat> {
+  bft: number;
+  /** The windschaal, and the waves from the side. */
+  schaal?: boolean;
+  /** The weersomslag. */
+  omslag?: boolean;
+  /** Ruimen en krimpen, on a compass. */
+  kompas?: boolean;
+}
 
 // Het weer: a lesson after Sint Maarten Kielboot II and III § 2.5, Weersinvloeden - de windkracht in Beaufort,
 // tot hoeveel je mag varen, een weersomslag, en ruimen en krimpen. What a windkracht looks like is drawn round the
@@ -21,7 +35,7 @@ import { makeHoorn } from '../bpr/hoorn.ts';
 
 const C = 2.8;
 // the windschaal, as the lesboek has it (after the KNMI): Beaufort, name, km/u, what you see
-export const BEAUFORT = [
+export const BEAUFORT: [string, string, string][] = [
   ['Stil', 'minder dan 1', 'Rook stijgt recht of bijna recht omhoog'],
   ['Zwak', '1–5', 'De windrichting is goed te zien aan rookpluimen'],
   ['Zwak', '6–11', 'Wind merkbaar in je gezicht'],
@@ -41,17 +55,17 @@ const MS = [0.3, 1.5, 3.3, 5.5, 8, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7, 36]
 const MS_RANGE = ['0–0,2', '0,3–1,5', '1,6–3,3', '3,4–5,4', '5,5–7,9', '8,0–10,7', '10,8–13,8', '13,9–17,1', '17,2–20,7', '20,8–24,4', '24,5–28,4', '28,5–32,6', '32,7 of meer'];
 // the waves on an inland water such as a big lake: height (m, crest to trough) and length (m)
 const GOLF = [0, 0.03, 0.08, 0.18, 0.35, 0.55, 0.8, 1.1, 1.5, 2, 2.5, 3, 3.5];
-const golfLengte = (b) => 1.5 + b * 2.2;
+const golfLengte = (b: number) => 1.5 + b * 2.2;
 const HELLING = [0, 1, 2, 4, 7, 11];                                    // degrees she heels, halve wind, the crew aan loef
 const KB3 = 5;                                                          // tot en met: what a Kielboot III may sail in
 const KOERS = -120;                                                     // hers up to KB3: ruime wind, the wind over bakboord
 const MIDDEN = new THREE.Vector3(C, 0, 0); const OMHOOG = new THREE.Vector3(0, 1, 0);   // her middle, what the camera goes round
-const KIJK = { hoogte: 15, breedte: 42, doel: [C + 4, 2, 13], richting: [-0.55, 0.42, -1] };   // from her bakboord side, the wal beyond her
-const VER = { hoogte: 30, breedte: 70, doel: [C + 8, 8, 25], richting: [-0.5, 0.3, -1] };     // and further off: the clouds coming up
+const KIJK: EigenAanzicht = { hoogte: 15, breedte: 42, doel: [C + 4, 2, 13], richting: [-0.55, 0.42, -1] };   // from her bakboord side, the wal beyond her
+const VER: EigenAanzicht = { hoogte: 30, breedte: 70, doel: [C + 8, 8, 25], richting: [-0.5, 0.3, -1] };     // and further off: the clouds coming up
 const VERST = 350;                                                      // m: how far the camera draws while the lesson is open
 const SHEET = 900;                                                      // px: up to this wide the card is a sheet at the foot (kaart.js)
 
-export const WEER = [
+export const WEER: WeerOnderwerp[] = [
   {
     id: 'beaufort', titel: 'Windkracht', cwo: 'KB II · KB III',
     kort: [
@@ -113,12 +127,12 @@ export const WEER = [
   },
 ];
 
-const RICHTING = { 0: 'noord', 45: 'noordoost', 90: 'oost', 135: 'zuidoost', 180: 'zuid', 225: 'zuidwest', 270: 'west', 315: 'noordwest' };
+const RICHTING: Record<number, string> = { 0: 'noord', 45: 'noordoost', 90: 'oost', 135: 'zuidoost', 180: 'zuid', 225: 'zuidwest', 270: 'west', 315: 'noordwest' };
 const KOMPAS_KOERS = 0;                                                // where her bow points, in the compass of Ruimen en krimpen
 
-export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, setCoveredRight, opslaan, onOpen, dismissProcedure, setDark }) {
+export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, setCoveredRight, opslaan, onOpen, dismissProcedure, setDark }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-weer', sleutel, titel: 'Het weer', lessen: WEER, store: 'lelievlet.les.weer.v1', opslaan, fly, setCoveredRight, onOpen });
-  const waterline = scene.getObjectByName('lelievlet').userData.tuig?.waterlijn_m ?? 0.3;
+  const waterline = scene.getObjectByName('lelievlet')!.userData.tuig?.waterlijn_m ?? 0.3;
   const holder = new THREE.Group(); holder.name = 'les-weer'; holder.visible = false; scene.add(holder);
   const plaatje = document.createElement('div'); plaatje.className = 'les-plaatje'; lk.host.append(plaatje);
   // Windkracht: the waves as a line, from the side, with the lelievlet on them for their size (to scale, both ways:
@@ -132,7 +146,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
       <path d="M-34,-7 L34,-9 L29,4 L-28,4 Z" fill="#f2c200" stroke="#36454f" stroke-width="1.2"/></g>
     <text x="8" y="${DH - 8}" font-size="10" fill="#5b6770">Van opzij</text></svg>`;
   lk.host.append(doorsnede);
-  const golfLijn = doorsnede.querySelector('.water'); const golfBoot = doorsnede.querySelector('.boot'); const golfSchuim = doorsnede.querySelector('.schuim');
+  const golfLijn = doorsnede.querySelector('.water')!; const golfBoot = doorsnede.querySelector('.boot')!; const golfSchuim = doorsnede.querySelector('.schuim')!;
 
   // ------------------------------------------------------------------ the waves
   // from far out on her bakboord side up to the kade on her stuurboord side
@@ -140,10 +154,10 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   // and ever coarser out to its edges, as far as 150 m along her and 160 m out from the wal
   const WIDE = 300; const KADE = 18; const UIT = 160;
   const golfGeo = (() => {
-    const uit = (t, ver) => ver * (0.2 * t + 0.8 * t ** 3);           // 0..1 to metres: fine at first, coarse at the end
-    const xs = []; for (let i = -80; i <= 80; i++) xs.push(Math.sign(i) * uit(Math.abs(i) / 80, WIDE / 2));
-    const zs = []; for (let i = 70; i >= 1; i--) zs.push(-uit(i / 70, UIT)); for (let i = 0; i <= 25; i++) zs.push((KADE * i) / 25);
-    const pos = []; const index = [];
+    const uit = (t: number, ver: number) => ver * (0.2 * t + 0.8 * t ** 3);           // 0..1 to metres: fine at first, coarse at the end
+    const xs: number[] = []; for (let i = -80; i <= 80; i++) xs.push(Math.sign(i) * uit(Math.abs(i) / 80, WIDE / 2));
+    const zs: number[] = []; for (let i = 70; i >= 1; i--) zs.push(-uit(i / 70, UIT)); for (let i = 0; i <= 25; i++) zs.push((KADE * i) / 25);
+    const pos: number[] = []; const index: number[] = [];
     for (const z of zs) for (const x of xs) pos.push(x, 0, z);
     const n = xs.length;
     for (let j = 0; j < zs.length - 1; j++) for (let i = 0; i < n - 1; i++) { const a = j * n + i; index.push(a, a + n, a + 1, a + 1, a + n, a + n + 1); }
@@ -156,12 +170,12 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   const golfMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.82, roughness: 0.35, metalness: 0.05, depthWrite: false });
   // no water inside her: a mask of her waterline, as the viewer's own water has its hole (rig.js makeWater). Close
   // round her the waves lie in her plane, so in plan her waterline stays where it was
-  const gat = modes.water.geometry.parameters?.shapes?.holes?.[0]?.getPoints() ?? [];
+  const gat = (modes.water.geometry.parameters?.shapes as THREE.Shape | undefined)?.holes?.[0]?.getPoints() ?? [];   // makeWater: one Shape
   const gatKop = { value: 0 };                                          // how far she is turned (plek): the hole turns with her
   if (gat.length > 6) {
     const GAT = { x: -0.6, z: -1.6, w: 7.4, h: 3.2 }; const MW = 512; const MH = 224;
     const canvas = document.createElement('canvas'); canvas.width = MW; canvas.height = MH;
-    const g = canvas.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, MW, MH); g.fillStyle = '#fff'; g.beginPath();
+    const g = canvas.getContext('2d')!; g.fillStyle = '#000'; g.fillRect(0, 0, MW, MH); g.fillStyle = '#fff'; g.beginPath();
     gat.forEach((p, i) => { const px = ((p.x - GAT.x) / GAT.w) * MW; const py = (1 - (-p.y - GAT.z) / GAT.h) * MH; if (i) g.lineTo(px, py); else g.moveTo(px, py); });
     g.closePath(); g.fill();
     const masker = new THREE.CanvasTexture(canvas);
@@ -184,11 +198,11 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   golven.position.set(C, waterline + 0.012, 0); golven.renderOrder = 1; golven.frustumCulled = false; holder.add(golven);
   const DIEP = new THREE.Color('#2f5d7c'); const LICHT = new THREE.Color('#7fa9c4'); const SCHUIM = new THREE.Color('#f4f8fa');
   const tint = new THREE.Color();
-  const hash = (x, z) => { const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return s - Math.floor(s); };
+  const hash = (x: number, z: number) => { const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return s - Math.floor(s); };
 
   // ------------------------------------------------------------------ the wal: a house with a chimney, a tree, a flagpole
-  const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, ...extra });
-  const box = (w, h, d, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b; };
+  const mat = (color: THREE.ColorRepresentation, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, ...extra });
+  const box = (w: number, h: number, d: number, m: THREE.MeshStandardMaterial, x: number, y: number, z: number) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b; };
   const wal = new THREE.Group(); holder.add(wal);
   wal.add(box(110, 1.2, 30, mat(0x7f9a5c), C, waterline + 0.2, 33));           // the land, a strip along her stuurboord side
   wal.add(box(110, 1.0, 0.6, mat(0x9a9d9f), C, waterline + 0.1, 17.85));        // its kade, out in front of the land (no face shared)
@@ -203,20 +217,20 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   const boom = new THREE.Group(); boom.position.set(C - 6, waterline + 0.8, 22); wal.add(boom);
   const buig = new THREE.Group(); boom.add(buig);
   const stam = box(0.45, 4.5, 0.45, mat(0x5b4330), 0, 2.25, 0); buig.add(stam);
-  const blad = mat(0x4f7a3a); const kruin = [];
+  const blad = mat(0x4f7a3a); const kruin: THREE.Mesh[] = [];
   for (const [x, y, z, r] of [[0, 5.6, 0, 2.1], [0.9, 4.8, 0.6, 1.5], [-1, 4.9, -0.4, 1.5], [0.2, 6.8, -0.3, 1.4]]) {
     const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), blad); s.position.set(x, y, z); buig.add(s); kruin.push(s);
   }
   // struck by lightning in the weersomslag: the leaves gone, the trunk black - until the lesson starts it again
   const STAM = stam.material.color.getHex();
-  const verkool = (ja) => { for (const s of kruin) s.visible = !ja; stam.material.color.setHex(ja ? 0x1d1a17 : STAM); };
+  const verkool = (ja: boolean) => { for (const s of kruin) s.visible = !ja; stam.material.color.setHex(ja ? 0x1d1a17 : STAM); };
   // the flagpole, on the kade, and its flag: limp in no wind, stiff in a lot
   const POOL = 8; const FW = 1.5; const FH = 1.0; const NU = 20;
   const paal = new THREE.Group(); paal.position.set(C + 22, waterline + 0.8, 20); wal.add(paal);
   paal.add(box(0.12, POOL, 0.12, mat(0xe6e6e6), 0, POOL / 2, 0));
   const vlagGeo = new THREE.PlaneGeometry(FW, FH, NU, 2); vlagGeo.translate(FW / 2, -FH / 2, 0);
   const canvas = document.createElement('canvas'); canvas.width = 4; canvas.height = 3;
-  const paint = canvas.getContext('2d');
+  const paint = canvas.getContext('2d')!;
   ['#ae1c28', '#ffffff', '#21468b'].forEach((c, i) => { paint.fillStyle = c; paint.fillRect(0, i, 4, 1); });
   const vlagTex = new THREE.CanvasTexture(canvas); vlagTex.magFilter = THREE.NearestFilter; vlagTex.colorSpace = THREE.SRGBColorSpace;
   const vlag = new THREE.Mesh(vlagGeo, new THREE.MeshStandardMaterial({ map: vlagTex, side: THREE.DoubleSide, roughness: 0.85 }));
@@ -226,7 +240,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
 
   // ------------------------------------------------------------------ smoke from the chimney
   const rookTex = (() => {
-    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d')!;
     const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30); grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
     return new THREE.CanvasTexture(c);
@@ -240,7 +254,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   // ------------------------------------------------------------------ clouds, for the weersomslag
   const wolken = new THREE.Group(); holder.add(wolken);
   const wolkMat = mat(0xf2f3f5, { roughness: 1 }); const wolkDonker = mat(0x6e767e, { roughness: 1 });
-  for (const [x, y, z, r, donker] of [[0, 0, 0, 9, true], [9, 1, 2, 8, true], [-9, 0.5, -1, 8, true], [2, 9, 0, 8, false], [-4, 15, 1, 7, false], [4, 20, -1, 6.5, false], [0, 25, 0, 6, false], [-1, 30, 1, 7.5, false], [7, 29, 0, 5, false]]) {
+  for (const [x, y, z, r, donker] of [[0, 0, 0, 9, true], [9, 1, 2, 8, true], [-9, 0.5, -1, 8, true], [2, 9, 0, 8, false], [-4, 15, 1, 7, false], [4, 20, -1, 6.5, false], [0, 25, 0, 6, false], [-1, 30, 1, 7.5, false], [7, 29, 0, 5, false]] as [number, number, number, number, boolean][]) {
     const s = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 12), donker ? wolkDonker : wolkMat); s.position.set(x, y, z); s.scale.y = donker ? 0.55 : 1; wolken.add(s);
   }
 
@@ -252,7 +266,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   const gloed = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xb8c8ff, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
   schicht.add(gloed);
   const flitsLicht = new THREE.AmbientLight(0xdfe6ff, 0); holder.add(flitsLicht);
-  const slaInslag = (boven, onder = null) => {
+  const slaInslag = (boven: THREE.Vector3, onder: THREE.Vector3 | null = null) => {
     const pts = [boven.clone()]; const p = boven.clone(); const stap = (boven.y - (onder?.y ?? waterline)) / 9;
     for (let i = 0; i < 9; i++) {
       p.x += (Math.random() - 0.5) * 3.5; p.z += (Math.random() - 0.5) * 3.5; p.y -= stap;
@@ -264,16 +278,16 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
     schicht.geometry.dispose(); gloed.geometry.dispose();
     schicht.geometry = new THREE.TubeGeometry(pad, 48, 0.6, 5, false); gloed.geometry = new THREE.TubeGeometry(pad, 48, 2.2, 6, false);
   };
-  let onweer = null;                                                   // { volgende, flits, n, boom, gezien }: under way in the gust
+  let onweer: { volgende: number; flits: number; n: number; boom: boolean; gezien: boolean } | null = null;                                                   // { volgende, flits, n, boom, gezien }: under way in the gust
   const kijk = new THREE.Vector3(); const wolkDoel = new THREE.Vector3(); const tmpV = new THREE.Vector3();
-  let wolkGezet = false; let farWas = null;                                               // the clouds stand where the view looks: from then on eased
+  let wolkGezet = false; let farWas: number | null = null;                                               // the clouds stand where the view looks: from then on eased
   // thunder from Web Audio: a low noise that cracks and then rolls away. Its context is made and started from a click
   // (ontgrendel: Laat het weer omslaan, the windkracht to 0) - Safari keeps one started from a frame silent - and all
   // of it goes through one bus, so what is still to come can be silenced at once (stilte)
-  let geluid = null; let donderBus = null;
+  let geluid: AudioContext | null = null; let donderBus: GainNode | null = null;
   const ontgrendel = () => {
     try {
-      const Ctx = window.AudioContext ?? window.webkitAudioContext;
+      const Ctx = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;   // older Safari
       if (Ctx && !geluid) { geluid = new Ctx(); donderBus = geluid.createGain(); donderBus.connect(geluid.destination); }
       geluid?.resume?.();
     } catch { /* no sound: the flash is enough */ }
@@ -281,9 +295,9 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   };
   const stilte = () => {
     if (!geluid) return;
-    donderBus.disconnect(); donderBus = geluid.createGain(); donderBus.connect(geluid.destination);
+    donderBus!.disconnect(); donderBus = geluid.createGain(); donderBus.connect(geluid.destination);
   };
-  const donder = (over) => {
+  const donder = (over: number) => {
     if (!geluid) return;
     try {
       const at = geluid.currentTime + over; const duur = 3.2;
@@ -292,7 +306,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
       const bron = geluid.createBufferSource(); bron.buffer = buf;
       const filter = geluid.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.setValueAtTime(900, at); filter.frequency.exponentialRampToValueAtTime(120, at + duur);
       const g = geluid.createGain(); g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(0.7, at + 0.06); g.gain.exponentialRampToValueAtTime(0.001, at + duur);
-      bron.connect(filter); filter.connect(g); g.connect(donderBus); bron.start(at); bron.stop(at + duur);
+      bron.connect(filter); filter.connect(g); g.connect(donderBus!); bron.start(at); bron.stop(at + duur);
     } catch { /* no sound: the flash is enough */ }
   };
 
@@ -302,7 +316,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   const mistFog = new THREE.Fog(MIST, 1000, 2000);
   const koepel = new THREE.Mesh(new THREE.SphereGeometry(150, 24, 12), new THREE.MeshBasicMaterial({ color: MIST, side: THREE.BackSide, transparent: true, opacity: 0, depthWrite: false, fog: false }));
   koepel.renderOrder = -1; koepel.frustumCulled = false; koepel.visible = false; holder.add(koepel);
-  let mist = 0; let mistGemeld = false; let fogWas = null; let mistSein = 0;
+  let mist = 0; let mistGemeld = false; let fogWas: THREE.Fog | THREE.FogExp2 | false | null = null; let mistSein = 0;
   const misthoorn = makeHoorn({ gain: 0.35 });                         // a ship far off in it: softer than one close by
   const MIST_OP = 14; const MIST_WEG = 3;                              // s: coming up slowly in the calm, lifting quickly in a wind
   const MIST_SEIN = 22;                                                // s between the blasts of the ship in the mist
@@ -316,15 +330,15 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   // blows off the house (and with less wind they stand again: it is a lesson)
   const schade = { boom: 0, paal: 0, dak: 0 };
   const SCHADE_BIJ = { boom: 10, paal: 11, dak: 12 };
-  let bft = 3; let shownBft = 3; let heel = 0; let tuigWas = null;
+  let bft = 3; let shownBft = 3; let heel = 0; let tuigWas: string | null = null;
   let richting = 270;                                                  // Ruimen en krimpen: where the wind comes from, compass degrees
-  let omslag = null;                                                   // the weersomslag under way: { t }
+  let omslag: { t: number; wind?: number } | null = null;                                                   // the weersomslag under way: { t }
   let W = 0; let wDoel = 0;                                            // the wind over the wal (radians, 0: from +x), and where it goes
-  let koersWas = null;
+  let koersWas: number | null = null;
   const les = () => lk.les;
-  const tuig = (rig) => { if (modes.current().tuig !== rig) { modes.apply({ tuig: rig }, { direct: true }); dismissProcedure?.(); } };
+  const tuig = (rig: string) => { if (modes.current().tuig !== rig) { modes.apply({ tuig: rig }, { direct: true }); dismissProcedure?.(); } };
   // past KB3 the sails come off and she lies head to wind; up to it they go up, and she is back on her course
-  const zetBft = (b) => {
+  const zetBft = (b: number) => {
     bft = Math.max(0, Math.min(12, b));
     if (bft === 0) ontgrendel();                                       // from the slider or the table: the misthoorn may sound
     const op = modes.current().tuig === 'op';
@@ -334,7 +348,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
     lk.renderControls();
   };
   // Ruimen en krimpen: the wind from `richting` with her bow to the north, as the course of the viewer
-  const zetRichting = (r) => {
+  const zetRichting = (r: number) => {
     richting = r; const rel = ((r - KOMPAS_KOERS + 540) % 360) - 180;   // off her bow, + over stuurboord
     modes.apply({ koers: rel }); toonKompas(); lk.renderControls();
   };
@@ -342,8 +356,8 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   // a row of the table clicked: that windkracht; on a phone only the rows round this one, and a button for all
   let heleTabel = false;
   plaatje.addEventListener('click', (e) => {
-    if (e.target.closest('.les-hele-tabel')) { heleTabel = !heleTabel; toonSchaal(); return; }
-    const tr = e.target.closest('tr[data-bft]'); if (tr && !omslag) zetBft(Number(tr.dataset.bft));
+    if ((e.target as Element).closest('.les-hele-tabel')) { heleTabel = !heleTabel; toonSchaal(); return; }
+    const tr = (e.target as Element).closest<HTMLElement>('tr[data-bft]'); if (tr && !omslag) zetBft(Number(tr.dataset.bft));
   });
   const SMAL = 900;                                                    // px: the card is a sheet over the boat (lessen/kaart.js)
   const toonSchaal = () => {
@@ -355,9 +369,9 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   };
   const toonKompas = () => {
     const R = 90; const cx = 120; const cy = 115;
-    const pt = (deg, r) => [cx + r * Math.sin((deg * Math.PI) / 180), cy - r * Math.cos((deg * Math.PI) / 180)];
+    const pt = (deg: number, r: number) => [cx + r * Math.sin((deg * Math.PI) / 180), cy - r * Math.cos((deg * Math.PI) / 180)];
     const [ax, ay] = pt(richting, R - 6); const [bx, by] = pt(richting, 34);
-    const boog = (from, to, r, kleur, label) => {
+    const boog = (from: number, to: number, r: number, kleur: string, label: string) => {
       const [x0, y0] = pt(from, r); const [x1, y1] = pt(to, r); const sweep = to > from ? 1 : 0;
       const [lx, ly] = pt((from + to) / 2, r + 14);
       return `<path d="M${x0},${y0} A${r},${r} 0 0 ${sweep} ${x1},${y1}" fill="none" stroke="${kleur}" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#pijl-${kleur.slice(1)})"/><text x="${lx}" y="${ly}" fill="${kleur}">${label}</text>`;
@@ -391,7 +405,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
       mist = 0; koepel.visible = false; mistFog.near = 1e5; mistFog.far = 2e5; misthoorn.stop();
       // the waves are the water here: the flat disc of the viewer would stay put while she rides them, and show in her
       holder.visible = true; modes.water.visible = false; wolken.visible = Boolean(l.omslag); wolken.scale.setScalar(0.15);
-      const rows = [];
+      const rows: Rij[] = [];
       W = 0; wDoel = 0;
       if (l.kompas) { modes.apply({ koers: -90 }); zetRichting(270); bft = l.bft; tuig('op'); }
       else { modes.apply({ koers: KOERS }); zetBft(l.bft); }
@@ -428,7 +442,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
   });
 
   // ------------------------------------------------------------------ every frame
-  function update(dt, width) {
+  function update(dt: number, width: number) {
     if (!lk.tick(width)) return;
     const l = les();
     // the weersomslag: the clouds pile up, then the calm, then the gust and the wind going round
@@ -515,8 +529,8 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
     if (!doorsnede.hidden) {
       // the higher the wind, the sharper the crests and the flatter the troughs between them
       const scherp = 1 + 1.2 * kop + 0.8 * breken;
-      const vorm = (th) => 2 * ((1 + Math.sin(th)) / 2) ** scherp - 1;
-      const hoogte = (x) => DY - (H / 2) * DS * vorm(k * (x / DS) - golfFase);
+      const vorm = (th: number) => 2 * ((1 + Math.sin(th)) / 2) ** scherp - 1;
+      const hoogte = (x: number) => DY - (H / 2) * DS * vorm(k * (x / DS) - golfFase);
       let d = `M0,${DH}`;
       for (let x = 0; x <= DW; x += 3) d += ` L${x},${hoogte(x).toFixed(1)}`;
       golfLijn.setAttribute('d', `${d} L${DW},${DH} Z`);
@@ -546,7 +560,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
     const donker = Math.min(b / 9, 1);
     // she rides them: up and down with the water under her middle, her bow and her side along its slope. Close
     // round her the water lies in that plane, so no wave runs through her
-    const golf = (x, z) => { let y = 0; for (const [ux, uz, f, p] of trains) y += Math.sin(k * (x * ux + z * uz) * (1 + p * 0.05) - golfFase + p) * f; return (y * H) / 2; };
+    const golf = (x: number, z: number) => { let y = 0; for (const [ux, uz, f, p] of trains) y += Math.sin(k * (x * ux + z * uz) * (1 + p * 0.05) - golfFase + p) * f; return (y * H) / 2; };
     // (along her and across her as she is turned now: hx her bow, hz her stuurboord side)
     const hx = [Math.cos(gier), Math.sin(gier)]; const hz = [-Math.sin(gier), Math.cos(gier)];
     const h0 = golf(0, 0);
@@ -600,8 +614,8 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
     // the tree bends away from the wind, and shakes the harder the more it blows
     boomFase += dt * (1.2 + b * 0.35);
     const krom = Math.min(b, 10) / 10 * 0.32 + Math.sin(boomFase) * 0.012 * b;
-    for (const k of Object.keys(schade)) schade[k] = Math.max(0, Math.min(1, schade[k] + (b > SCHADE_BIJ[k] - 0.5 ? dt : -dt) * 0.7));
-    const val = (v) => v * v;                                           // slow at first, then faster, as a fall goes
+    for (const k of Object.keys(schade) as (keyof typeof schade)[]) schade[k] = Math.max(0, Math.min(1, schade[k] + (b > SCHADE_BIJ[k] - 0.5 ? dt : -dt) * 0.7));
+    const val = (v: number) => v * v;                                           // slow at first, then faster, as a fall goes
     const omver = new THREE.Vector3(dz, 0, -dx).normalize();             // turning about it leans a thing downwind
     buig.quaternion.setFromAxisAngle(omver, krom * (1 - schade.boom) + val(schade.boom) * 1.45);
     if (schade.boom >= 0.99) gevolg('omgewaaid');
@@ -663,7 +677,7 @@ export function initWeer({ sleutel, wrap, scene, camera, controls, modes, fly, s
     if (!fase && mist > 0.15) status = dicht ? 'Dichte mist: je ziet bijna niets meer. Hoor je een lange stoot? Dat is een schip dat je niet ziet. Vaar langzaam, dicht langs de kant, en luister goed.'
       : bft === 0 ? 'Windstil: de zeilen hangen slap en het water is spiegelglad. Er komt mist op.' : 'Er komt wind: de mist trekt op.';
     // over your limit (then you do not sail), the gust of the weersomslag: rood; its signs coming up: watch out
-    const niveau = l.kompas ? '' : fase ? (omslag?.t >= 9 ? 'rood' : 'geel') : bft > KB3 ? 'rood' : dicht ? 'geel' : '';
+    const niveau = l.kompas ? '' : fase ? (omslag?.t! >= 9 ? 'rood' : 'geel') : bft > KB3 ? 'rood' : dicht ? 'geel' : '';
     lk.status(status, niveau);
   }
 

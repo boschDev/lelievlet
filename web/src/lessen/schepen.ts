@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { CONFIGS, makeShip } from '../bpr/schepen.ts';
 import { MARKS, makeMark } from '../bpr/betonning.ts';
@@ -7,6 +6,18 @@ import { createKaart } from '../zeiltermen/kaart.ts';
 import { createLesKaart, segmented } from './kaart.ts';
 import { deckOutline, makeZee } from './boot.ts';
 import { gevolg } from '../logboek.ts';
+import type { Onderwerp } from './kaart.ts';
+import type { Item } from '../krachten/pijlen.ts';
+import type { Vec3 } from '../krachten/model.ts';
+import type { KaartItem } from '../zeiltermen/kaart.ts';
+import type { Punt } from '../zeiltermen/zeilen.ts';
+import type { EigenAanzicht, Les, LesContext } from './typen.ts';
+
+/** An onderwerp of Grote schepen: where you sail ([key, label]), or the water in section (doorsnede). */
+export interface SchepenOnderwerp extends Onderwerp<{ waar?: string }> {
+  waar?: [string, string][];
+  doorsnede?: boolean;
+}
 
 // Grote schepen: a lesson after Sint Maarten Kielboot II and III § 2.6, Vaarproblematiek andersoortige schepen -
 // de dode hoek, zuiging, diepgang en verlijeren. A binnenvaartschip of Zoeken › Lichten (bpr/schepen.js, a
@@ -25,7 +36,7 @@ const L = 55; const B = 6.6; const OOG = [4.2, 3.6]; const LUIK = [L * 0.81, 2.4
 const DODE = (LUIK[0] - OOG[0]) * OOG[1] / (OOG[1] - LUIK[1]) - (L - OOG[0]);   // m before the bow the water comes into sight
 const NAAST = 2;                    // m beside her forward half where the gangboard hides the water
 
-export const SCHEPEN = [
+export const SCHEPEN: SchepenOnderwerp[] = [
   {
     id: 'dodehoek', titel: 'De dode hoek', cwo: 'KB II · KB III',
     kort: [
@@ -88,22 +99,22 @@ export const SCHEPEN = [
   },
 ];
 
-export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen }) {
+export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-schepen', sleutel, titel: 'Grote schepen', lessen: SCHEPEN, store: 'lelievlet.les.schepen.v1', opslaan, fly, setCoveredRight, onOpen });
-  const lelievlet = scene.getObjectByName('lelievlet');
+  const lelievlet = scene.getObjectByName('lelievlet')!;
   const waterline = lelievlet.userData.tuig?.waterlijn_m ?? 0.3;
   const deck = deckOutline(parts, scene);
   const pijlen = createPijlen({ scene, camera, controls, layer: lk.layer });
   const kaart = createKaart(lk.host);
   const doorsnede = document.createElement('div'); doorsnede.className = 'les-plaatje'; doorsnede.hidden = true; lk.host.append(doorsnede);
-  const kaartSvg = lk.host.querySelector('svg');
+  const kaartSvg = lk.host.querySelector('svg')!;
 
   // the ship, with the dode hoek on the water as a child of it: it goes where she goes
   const holder = new THREE.Group(); holder.name = 'les-schepen'; holder.visible = false; scene.add(holder);
   // the water further out than the viewer's own disc (14 m round her, rig.js makeWater), for a ship of 55 m: an
   // opaque sea in its place while the lesson is open, as Lichten has it
   const zee = makeZee(modes, 600); holder.add(zee);
-  const ship = makeShip(CONFIGS.find((c) => c.id === 'groot_motorschip'));
+  const ship = makeShip(CONFIGS.find((c) => c.id === 'groot_motorschip')!);
   holder.add(ship);
   const zone = (() => {
     const shape = new THREE.Shape();
@@ -122,27 +133,27 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
   const STROOK = 70;                                                      // m of it either side of her
   // the vaargeul: rode tonnen on her side of it, groene on the far side
   const geul = new THREE.Group(); scene.add(geul); geul.visible = false;
-  const ton = (id) => MARKS.find((m) => m.id === id);
+  const ton = (id: string) => MARKS.find((m) => m.id === id)!;
   const GEUL = { rood: -6, groen: -26 };                                  // z of the two rows
   for (let x = -60; x <= 60; x += 30) {
-    for (const [z, id] of [[GEUL.rood, 'lateraal-rechts-stompe-ton'], [GEUL.groen, 'lateraal-links-spitse-ton']]) {
+    for (const [z, id] of [[GEUL.rood, 'lateraal-rechts-stompe-ton'], [GEUL.groen, 'lateraal-links-spitse-ton']] as const) {
       const m = makeMark(ton(id)); m.position.set(C + x, waterline, z); geul.add(m);
     }
   }
 
-  let waar = null; let t = 0;
+  let waar: string | null = null; let t = 0;
   let zuigt = false;                                                      // the zuiging has her: the boat's plek and deining are ours
   let gehad = false;                                                      // she has been against him this time by: the card says what that was
   const les = () => lk.les;
   // where the ship lies for each onderwerp and choice: [x of her stern, z of her middle, heading]
-  const plek = () => {
+  const plek = (): [number, number, number] => {
     const l = les();
-    if (l.id === 'dodehoek') return { voor: [C - 30 - L, 0, 0], naast: [C + 8 - L, B / 2 + 1.6, 0], ver: [C + 10 - L, 30, 0] }[waar];
+    if (l.id === 'dodehoek') return ({ voor: [C - 30 - L, 0, 0], naast: [C + 8 - L, B / 2 + 1.6, 0], ver: [C + 10 - L, 30, 0] } as Record<string, [number, number, number]>)[waar!];
     if (l.id === 'zuiging') return [C - L + ((t * 2.5) % 140) - 40, waar === 'ruim' ? 24 : B / 2 + 4, 0];   // she comes by, again and again
     if (l.id === 'diepgang') return [C - 20 - L / 2 + ((t * 2) % 120) - 30, (GEUL.rood + GEUL.groen) / 2, 0];
     return [C - L / 2 - 10 + ((t * 2) % 120) - 60, 26, THREE.MathUtils.degToRad(-9)];   // verlijeren: her head a little to the wind (from -z), going by
   };
-  const kijk = () => {
+  const kijk = (): EigenAanzicht => {
     const l = les();
     // the dode hoek: all of the ship and the water ahead of it; beside it from her other side, so it does not hide her
     if (l.id === 'dodehoek') {
@@ -166,7 +177,7 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
       holder.visible = true; modes.water.visible = false; zone.visible = l.id === 'dodehoek'; geul.visible = l.id === 'diepgang'; strook.visible = l.id === 'verlijeren';
       kaartSvg.style.display = l.doorsnede ? 'none' : ''; doorsnede.hidden = !l.doorsnede;
       if (l.doorsnede) doorsnede.innerHTML = sectie();
-      return l.waar ? [segmented('Waar jij vaart', l.waar, () => waar, (v) => { waar = v; gehad = false; kaart.opnieuw(); lk.renderControls(); lk.frame(); })] : [];
+      return l.waar ? [segmented<string | null>('Waar jij vaart', l.waar, () => waar, (v) => { waar = v; gehad = false; kaart.opnieuw(); lk.renderControls(); lk.frame(); })] : [];
     },
     antwoord(laat) { if (laat.waar) { waar = laat.waar; lk.renderControls(); } },
     release() { holder.visible = false; modes.water.visible = true; geul.visible = false; pijlen.visible = false; modes.kracht.opzij = 0; laatLos(); },
@@ -202,9 +213,9 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
   }
 
   // the outline of the ship from above, in her own frame [x, z]
-  const romp = [[0, -B / 2 + 0.4], [0.6, -B / 2], [L - 6, -B / 2], [L - 1, -B / 2 + 1.4], [L, 0], [L - 1, B / 2 - 1.4], [L - 6, B / 2], [0.6, B / 2], [0, B / 2 - 0.4]];
+  const romp: Punt[] = [[0, -B / 2 + 0.4], [0.6, -B / 2], [L - 6, -B / 2], [L - 1, -B / 2 + 1.4], [L, 0], [L - 1, B / 2 - 1.4], [L - 6, B / 2], [0.6, B / 2], [0, B / 2 - 0.4]];
 
-  function update(dt, width, height) {
+  function update(dt: number, width: number, height: number) {
     if (!lk.tick(width)) return;
     t += dt;
     const l = les();
@@ -237,9 +248,9 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
     zee.userData.volg();                                                 // with the hole where she lies, wherever the zuiging has her
     ship.userData.update?.(t, 0, camera);
     // a point of the ship, in the boat's frame [x, z]
-    const op = ([x, z]) => [sx + x * Math.cos(kop) - z * Math.sin(kop), sz + x * Math.sin(kop) + z * Math.cos(kop)];
-    const items = []; const m = [];
-    const at = ([x, z], y = 1.5) => [x, y, z];
+    const op = ([x, z]: Punt): Punt => [sx + x * Math.cos(kop) - z * Math.sin(kop), sz + x * Math.sin(kop) + z * Math.cos(kop)];
+    const items: Item[] = []; const m: KaartItem[] = [];
+    const at = ([x, z]: Punt, y = 1.5): Vec3 => [x, y, z];
     const bij = () => {                                                     // is she in the dode hoek now?
       if (l.id !== 'dodehoek') return false;
       return waar !== 'ver';
@@ -255,9 +266,9 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
       const voor = op([L + 3, 0]);
       // on both his sides: pushed away at the bow, drawn in along his side and in behind his stern; the words on her side
       // (its words only while they are in sight: he comes from far and goes far)
-      const inBeeld = (p) => Math.abs(p[0] - C) < 36;
+      const inBeeld = (p: Punt) => Math.abs(p[0] - C) < 36;
       for (const k of [1, -1]) {
-        const woord = (w, p) => (k === -1 && inBeeld(p) ? { label: w } : {});
+        const woord = (w: string, p: Punt) => (k === -1 && inBeeld(p) ? { label: w } : {});
         const boeg = op([L, k * (B / 2 + 1)]); const zij = op([L * 0.4, k * (B / 2 + 8)]);
         items.push({ type: 'pijl', from: at(boeg, 0.6), vec: [6, 0, k * 5], kleur: KLEUR.water, ...woord('weggeduwd', boeg) });
         items.push({ type: 'pijl', from: at(zij, 0.6), vec: [0, 0, -k * 6], kleur: KLEUR.water, ...woord('aangezogen', zij) });
@@ -268,7 +279,7 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
       if (inBeeld(hek)) items.push({ type: 'pijl', from: at(hek, 0.6), vec: [-9, 0, 0], kleur: KLEUR.water, label: 'schroefwater' });
     }
     // the strip it takes: between the outermost points of its hull, across its werkelijke koers
-    let strookZ = null;
+    let strookZ: [number, number] | null = null;
     if (l.id === 'verlijeren') {
       const zs = romp.map((p) => op(p)[1]); strookZ = [Math.min(...zs), Math.max(...zs)];
       strook.position.set(C, waterline + 0.03, (strookZ[0] + strookZ[1]) / 2); strook.scale.set(2 * STROOK, 1, strookZ[1] - strookZ[0]);
@@ -286,20 +297,20 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
     const opK = op;
     if (lk.bladOpen && !l.doorsnede) {
       if (l.id === 'dodehoek') {
-        m.push({ type: 'vlak', pts: [[L / 2, B / 2 + NAAST], [L, B / 2 + NAAST], [L, B / 2], [L + DODE, B / 2 + 4], [L + DODE, -B / 2 - 4], [L, -B / 2], [L, -B / 2 - NAAST], [L / 2, -B / 2 - NAAST]].map(op), fill: 'rgba(192, 38, 45, 0.22)' });
+        m.push({ type: 'vlak', pts: ([[L / 2, B / 2 + NAAST], [L, B / 2 + NAAST], [L, B / 2], [L + DODE, B / 2 + 4], [L + DODE, -B / 2 - 4], [L, -B / 2], [L, -B / 2 - NAAST], [L / 2, -B / 2 - NAAST]] satisfies Punt[]).map(op), fill: 'rgba(192, 38, 45, 0.22)' });
         m.push({ type: 'tekst', at: opK([L + DODE * 0.3, 0]), label: 'dode hoek', kleur: KLEUR.zone });
       }
       if (l.id === 'zuiging') {
         for (const k of [1, -1]) {
-          const woord = (w) => (k === -1 ? { label: w } : {});
+          const woord = (w: string) => (k === -1 ? { label: w } : {});
           m.push({ type: 'pijl', from: opK([L, k * (B / 2 + 1)]), vec: [6, k * 5], kleur: KLEUR.water, dun: true, ...woord('weg') });
           m.push({ type: 'pijl', from: opK([L * 0.4, k * (B / 2 + 8)]), vec: [0, -k * 6], kleur: KLEUR.water, dun: true, ...woord('aangezogen') });
           m.push({ type: 'pijl', from: opK([-6, k * (B / 2 + 5)]), vec: [4, -k * 4], kleur: KLEUR.water, dun: true });
         }
       }
       if (l.id === 'verlijeren') {
-        m.push({ type: 'vlak', pts: [[C - STROOK, strookZ[0]], [C + STROOK, strookZ[0]], [C + STROOK, strookZ[1]], [C - STROOK, strookZ[1]]], fill: 'rgba(192, 38, 45, 0.18)', fit: false });
-        m.push({ type: 'tekst', at: [C - 8, strookZ[1] + 4], label: 'gevarenzone', kleur: KLEUR.zone });
+        m.push({ type: 'vlak', pts: [[C - STROOK, strookZ![0]], [C + STROOK, strookZ![0]], [C + STROOK, strookZ![1]], [C - STROOK, strookZ![1]]], fill: 'rgba(192, 38, 45, 0.18)', fit: false });
+        m.push({ type: 'tekst', at: [C - 8, strookZ![1] + 4], label: 'gevarenzone', kleur: KLEUR.zone });
         m.push({ type: 'pijl', from: opK([L, 0]), vec: [16 * Math.cos(kop), 16 * Math.sin(kop)], kleur: KLEUR.koers, label: 'kompaskoers' });
         m.push({ type: 'pijl', from: opK([L / 2, 0]), vec: [30, 0], kleur: KLEUR.echt, label: 'werkelijke koers' });
         const mid = opK([L / 2, 0]);
@@ -307,22 +318,22 @@ export function initSchepen({ sleutel, wrap, scene, camera, controls, parts, mod
       }
       m.push({ type: 'vlak', pts: romp.map(op), fill: '#9aa5ae', stroke: KLEUR.schip });
       // she turns about her middle, and is where the zuiging has put her
-      const draai = ([x, z]) => [C + (x - C) * Math.cos(gier) - z * Math.sin(gier), (x - C) * Math.sin(gier) + z * Math.cos(gier) + opzij];
+      const draai = ([x, z]: Punt): Punt => [C + (x - C) * Math.cos(gier) - z * Math.sin(gier), (x - C) * Math.sin(gier) + z * Math.cos(gier) + opzij];
       m.push({ type: 'vlak', pts: deck.map(draai), fill: '#f7f4ec', stroke: '#36454f' });
       m.push({ type: 'punt', at: [C, opzij], kleur: KLEUR.jij, r: 4.5 });           // she is small beside the ship: a dot marks her
       m.push({ type: 'tekst', at: [C, opzij - 7], label: 'jij', kleur: KLEUR.jij });
       // one scale all the way: where a ship goes by, the map stays as it is and he moves across it
-      const vast = { zuiging: [34, 90], verlijeren: [60, 110] }[l.id];
+      const vast = ({ zuiging: [34, 90], verlijeren: [60, 110] } as Partial<Record<string, Punt>>)[l.id];
       if (vast) for (const it of m) it.fit = false;
       kaart.draw({ frame: 'boot', wind: 0, centre: [C, 0], min: vast ?? [30, 30], items: m, titel: l.titel });
     }
 
     const status = l.id === 'dodehoek' ? (bij() ? 'Hier ziet de schipper je niet: je zit in zijn dode hoek.' : 'Hier kan de schipper je zien.')
       : l.id === 'zuiging' ? (waar !== 'dicht' ? 'Ruim opzij merk je weinig van de zuiging: alleen zijn golven laten je wat schommelen.'
-        : { weg: 'De boeg duwt het water weg: je wordt eerst van het schip af geduwd.', trek: 'Langs de zijkant word je naar het schip toe gezogen.',
+        : ({ weg: 'De boeg duwt het water weg: je wordt eerst van het schip af geduwd.', trek: 'Langs de zijkant word je naar het schip toe gezogen.',
           tegen: 'Je wordt tegen het schip aan gezogen: hier kun je eronder raken.',
           slinger: 'Achter het schip kom je in het schroefwater en de hekgolf: je boot slingert en draait alle kanten op.',
-          los: 'Eerst weggeduwd, dan tegen het schip gezogen, en daarachter alle kanten op gegooid. Houd ruim afstand, en ga pas achter een schip langs als het een eind voorbij is.' }[zuig]
+          los: 'Eerst weggeduwd, dan tegen het schip gezogen, en daarachter alle kanten op gegooid. Houd ruim afstand, en ga pas achter een schip langs als het een eind voorbij is.' } as Partial<Record<string, string>>)[zuig]
           ?? (gehad ? 'Eerst weggeduwd, dan tegen het schip gezogen, en daarachter alle kanten op gegooid. Houd ruim afstand, en ga pas achter een schip langs als het een eind voorbij is.'
             : 'Vlak naast het schip merk je de zuiging: je wordt naar het schip toe getrokken.'))
         : l.id === 'diepgang' ? 'Het beladen schip vaart in de vaargeul, tussen de tonnen. Jij blijft erbuiten.'

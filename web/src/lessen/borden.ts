@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { TEKENS } from '../bpr/tekens.ts';
 import { bord } from '../bpr/borden/index.ts';
@@ -6,6 +5,18 @@ import { BORD_UITLEG } from '../bpr/uitleg.ts';
 import { makeTeken, plaatsVan, staatVoor, makeVerWater } from '../bpr/seinen.ts';
 import { cwoTeken } from '../bpr/cwo.ts';
 import { createLesKaart, keuze, kies, ernst } from './kaart.ts';
+import type { Onderwerp } from './kaart.ts';
+import type { EigenAanzicht, Les, LesContext } from './typen.ts';
+
+/** An onderwerp of Verkeerstekens: its borden ([code, naam]), or for Zelf verkennen all of them in groups. */
+export interface BordenOnderwerp extends Onderwerp<string> {
+  borden?: [string, string][];
+  /** The veerpont's kades. */
+  pont?: boolean;
+  verken?: [string, [string, string][]][];
+}
+/** What the BPR says a bord means, and what it is for a lelievlet (bpr/uitleg.ts). */
+type Uitleg = { betekenis?: string; lelievlet?: string };
 
 // Verkeerstekens: a lesson after Sint Maarten Kielboot III § 4.4 - with only the borden the CWO handboek Kielboot
 // (2022, Gevorderd, 402, bijlage 7) asks (bpr/cwo.js): A.1, A.9, A.12, A.13, A.15, A.16, A.17, B.5, B.6, E.1, E.4,
@@ -18,18 +29,18 @@ import { createLesKaart, keuze, kies, ernst } from './kaart.ts';
 
 const C = 2.8;
 const NAMEN = new Map(TEKENS.flatMap(([, , list]) => list));
-const borden = (codes) => codes.map((c) => [c, NAMEN.get(c) ?? c]);
+const borden = (codes: string[]) => codes.map((c): [string, string] => [c, NAMEN.get(c) ?? c]);
 // what the buttons say: short, for under the onderwerp's title says the rest ('Verboden' › 'Zeilschepen')
-const KNOP = {
+const KNOP: Record<string, string> = {
   'A.1': 'Doorvaren', 'A.9': 'Hinderlijke golven', 'A.12': 'Motorschepen', 'A.13': 'Kleine schepen', 'A.15': 'Zeilschepen', 'A.16': 'Spierkracht', 'A.17': 'Zeilplanken',
   'B.5': 'Stilhouden', 'B.6': 'Snelheid beperken', 'E.1': 'Doorvaren toegestaan',
   'E.15': 'Motorschepen', 'E.16': 'Kleine schepen', 'E.18': 'Zeilschepen', 'E.19': 'Spierkracht', 'E.20': 'Zeilplanken', 'E.11': 'Einde verbod of gebod',
   'E.9a': 'Hoofd: kruising', 'E.9b': 'Hoofd: zijwater van rechts', 'E.9c': 'Hoofd: zijwater van links', 'E.10a': 'Neven: kruising', 'E.10b': 'Neven: mondt uit',
   'E.4a': 'Niet-vrijvarend', 'E.4b': 'Vrijvarend',
 };
-const onderwerp = (o) => ({ cwo: 'KB III', meer: [], ...o });
+const onderwerp = (o: BordenOnderwerp): BordenOnderwerp => ({ cwo: 'KB III', meer: [], ...o });
 
-export const BORDEN_LES = [
+export const BORDEN_LES: BordenOnderwerp[] = [
   onderwerp({
     id: 'verboden', titel: 'Verboden',
     kort: [
@@ -107,24 +118,24 @@ export const BORDEN_LES = [
       'Hier staan alle borden van het BPR, ook die de CWO niet vraagt. In Zoeken › Borden vind je ze ook, en in Zoeken › Markeringen de tonnen en bakens.',
     ],
     meer: [], zoeken: ['borden', 'Borden'], quiz: ['verkeerstekens', 'Verkeerstekens'],
-    verken: TEKENS.map(([g, sub, list]) => [`${g}${sub ? ` · ${sub}` : ''}`, list.map(([c, n]) => [c, `${c} ${n}${cwoTeken(c) ? '' : ' (geen CWO)'}`])]).filter(([, l]) => l.length),
+    verken: TEKENS.map(([g, sub, list]): [string, [string, string][]] => [`${g}${sub ? ` · ${sub}` : ''}`, list.map(([c, n]): [string, string] => [c, `${c} ${n}${cwoTeken(c) ? '' : ' (geen CWO)'}`])]).filter(([, l]) => l.length),
   },
 ];
 
-export function initBorden({ sleutel, wrap, scene, modes, fly, setCoveredRight, opslaan, onOpen, naarZoeken, naarQuiz }) {
+export function initBorden({ sleutel, wrap, scene, modes, fly, setCoveredRight, opslaan, onOpen, naarZoeken, naarQuiz }: LesContext): Les {
   const lk = createLesKaart({ wrap, id: 'les-borden', sleutel, titel: 'Verkeerstekens', lessen: BORDEN_LES, store: 'lelievlet.les.borden.v1', opslaan, fly, setCoveredRight, onOpen, naarZoeken, naarQuiz });
-  const waterline = scene.getObjectByName('lelievlet').userData.tuig?.waterlijn_m ?? 0.3;
+  const waterline = scene.getObjectByName('lelievlet')!.userData.tuig?.waterlijn_m ?? 0.3;
   const holder = new THREE.Group(); holder.name = 'les-borden'; holder.visible = false; scene.add(holder);
   // the water out to a bridge or the veerpont ahead, so that it stands in it (bpr/seinen.js)
   const verWater = modes?.water ? makeVerWater(modes.water) : null;
   const plaatje = document.createElement('div'); plaatje.className = 'les-sein'; lk.host.append(plaatje);
-  const built = new Map(); let code = null; let model = null; let t = 0;
+  const built = new Map<string, THREE.Group>(); let code: string | null = null; let model: THREE.Group | null = null; let t = 0;
 
-  const zet = (c) => {
+  const zet = (c: string) => {
     code = c;
     if (model) model.removeFromParent();
     if (!built.has(c)) built.set(c, makeTeken(c));
-    model = built.get(c);
+    model = built.get(c)!;
     // a sign on its post ahead of her on her stuurboord side, turned to her (its face is its +z); a bridge, lock,
     // spuisluis or the veerpont's kades straight ahead, across her way, as in Bruggen and Sluizen
     if (plaatsVan(c) !== 'paal') { model.position.set(C + 18, waterline, 0); model.rotation.y = -Math.PI / 2; }
@@ -134,35 +145,35 @@ export function initBorden({ sleutel, wrap, scene, modes, fly, setCoveredRight, 
     plaatje.innerHTML = `<div class="les-bord">${bord(c).svg}</div><p><b>${NAMEN.get(c) ?? c}</b></p>`;
     lk.renderControls(); lk.frame();
   };
-  const kijk = () => (plaatsVan(code) === 'pont'
+  const kijk = (): EigenAanzicht => (plaatsVan(code!) === 'pont'
     ? { hoogte: 14, breedte: 34, doel: [C + 12, 1.5, 0], richting: [-1, 0.55, 0.45] }
-    : plaatsVan(code) === 'brug' ? { hoogte: 10, breedte: 24, doel: [C + 10, 2, 0], richting: [-1, 0.5, 0.4] }   // as Bruggen looks at it
+    : plaatsVan(code!) === 'brug' ? { hoogte: 10, breedte: 24, doel: [C + 10, 2, 0], richting: [-1, 0.5, 0.4] }   // as Bruggen looks at it
       : { hoogte: 6.5, breedte: 16, doel: [C + 8, 1.8, 3], richting: [-1, 0.32, -0.12] });
 
   lk.koppel({
     begin(l) {
       holder.visible = true;
-      zet(l.borden ? l.borden[0][0] : l.verken[0][1][0][0]);
-      if (l.verken) return [keuze('Bord', l.verken, () => code, zet)];
-      return [kies('Bord', l.borden.map(([c, naam]) => [c, KNOP[c] ?? naam]), () => code, zet)];
+      zet(l.borden ? l.borden[0][0] : l.verken![0][1][0][0]);
+      if (l.verken) return [keuze('Bord', l.verken, () => code!, zet)];
+      return [kies('Bord', l.borden!.map(([c, naam]): [string, string] => [c, KNOP[c] ?? naam]), () => code!, zet)];
     },
     antwoord(laat) { zet(laat); },
     release() { holder.visible = false; verWater?.removeFromParent(); },
     aanzicht: kijk,
   });
 
-  function update(dt, width) {
+  function update(dt: number, width: number) {
     if (!lk.tick(width)) return;
     t += dt;
     model?.userData.update?.(t, 0);                                       // a flashing light flashes
     // the words of the state of the bridge, lock or spuisluis it is shown as, as Bruggen and Sluizen have them (and in
     // their colour, by what it means), or else of the bord
-    const staat = staatVoor(code);
-    const u = staat ?? BORD_UITLEG[code];
+    const staat = staatVoor(code!);
+    const u: Uitleg | null | undefined = staat ?? (BORD_UITLEG as Record<string, Uitleg>)[code!];
     // a verbod red (A.1a not for a lelievlet without a motor), a gebod orange, a veerpont that has voorrang yellow
-    const niveau = staat ? ernst(staat.betekenis ?? '') : code === 'A.1a' ? 'geel' : code.startsWith('A.') ? 'rood' : code.startsWith('B.') ? 'oranje'
+    const niveau = staat ? ernst(staat.betekenis ?? '') : code === 'A.1a' ? 'geel' : code!.startsWith('A.') ? 'rood' : code!.startsWith('B.') ? 'oranje'
       : ernst(`${u?.betekenis ?? ''} ${u?.lelievlet ?? ''}`);
-    lk.status(u ? `${u.betekenis}${u.lelievlet ? ` ${u.lelievlet}` : ''}` : NAMEN.get(code) ?? '', niveau);
+    lk.status(u ? `${u.betekenis}${u.lelievlet ? ` ${u.lelievlet}` : ''}` : NAMEN.get(code!) ?? '', niveau);
   }
 
   return { update, open: lk.open, close: lk.close, onderwerpen: BORDEN_LES,

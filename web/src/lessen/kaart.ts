@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The card of a lesson of Leren › Lessen: a row of onderwerpen to step through, each with its words, a
 // picture, controls, one line on what the boat does now, a question to predict first, and at its foot Meer uitleg
 // and Volgende - as Krachten en koppels has it (krachten/index.js, whose styling it shares: style.css). Beside the
@@ -21,6 +20,62 @@
 // its Volgende gives another question (doe) once this one is answered (kan), and the lesson calls verder() then.
 
 import { voortgang } from './voortgang.ts';
+import type { Aanzicht, Fly } from './typen.ts';
+
+/** A row of the card's controls (segmented, schuif, ...): sync() shows what is set now. */
+export type Rij = HTMLElement & { sync?: () => void };
+/** A text of Meer uitleg. */
+export interface Meer { kop: string; tekst: string }
+/** The question of an onderwerp; laat: what the lesson shows on the boat once it is answered. */
+export interface Vraag<L = unknown> {
+  tekst: string;
+  plaatje?: string;
+  opties: [string, boolean][];
+  uitleg: string;
+  laat?: L;
+}
+/** An onderwerp of a lesson; a lesson adds what it needs itself. */
+export interface Onderwerp<L = unknown> {
+  id: string;
+  titel: string;
+  cwo?: string;
+  kort: string[];
+  meer?: Meer[];
+  vraag?: Vraag<L>;
+  /** [tab, naam]: on to that page of Zoeken. */
+  zoeken?: [string, string];
+  /** [soort, naam]: on to that quiz of Leren › Quiz. */
+  quiz?: [string, string];
+  /** The ids of its delen (lessen/voortgang.ts). */
+  delen?: string[];
+}
+/** The `laat` of an onderwerp's vraag. */
+export type Laat<O extends Onderwerp> = Exclude<NonNullable<O['vraag']>['laat'], undefined>;
+/** The lesson's part of the card (koppel). */
+export interface Koppeling<O extends Onderwerp> {
+  begin(les: O): Rij[];
+  antwoord(laat: Laat<O>): void;
+  release(): void;
+  aanzicht(): Aanzicht | null;
+}
+export interface LesKaartOpties<O extends Onderwerp> {
+  wrap: HTMLElement;
+  id: string;
+  sleutel: string;
+  titel: string;
+  lessen: readonly O[];
+  /** (not used by the card itself) */
+  store?: string;
+  opslaan: boolean;
+  fly: Fly;
+  setCoveredRight(px: number): void;
+  onOpen?(): void;
+  naarZoeken?(cat: string): void;
+  naarQuiz?(soort: string): void;
+  nogEen?: { kan(): boolean; doe(): void };
+}
+/** The card itself, as createLesKaart gives it. */
+export type LesKaart<O extends Onderwerp> = ReturnType<typeof createLesKaart<O>>;
 
 const SHEET = 900;                  // px: up to this wide the card is a sheet at the foot (style.css @container)
 
@@ -28,14 +83,14 @@ const QUIZ_ICOON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" 
 const ZOEK_ICOON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>';
 
 // the cards there are, for the address of the page (adres.js): which one is open, on which onderwerp
-const lesKaarten = new Set();
+const lesKaarten = new Set<{ wrap: HTMLElement; sleutel: string; open(): boolean; onderwerp(): string | null }>();
 /** The card open now in the viewer of `wrap`: { sleutel, onderwerp } (the id of the onderwerp it is on), or null. */
-export const openKaart = (wrap) => {
+export const openKaart = (wrap: HTMLElement): { sleutel: string; onderwerp: string | null } | null => {
   for (const k of lesKaarten) if (k.wrap === wrap && k.open()) return { sleutel: k.sleutel, onderwerp: k.onderwerp() };
   return null;
 };
 
-export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly, setCoveredRight, onOpen, naarZoeken, naarQuiz, nogEen }) {
+export function createLesKaart<O extends Onderwerp>({ wrap, id, sleutel, titel, lessen, opslaan, fly, setCoveredRight, onOpen, naarZoeken, naarQuiz, nogEen }: LesKaartOpties<O>) {
   const card = document.createElement('aside');
   card.id = id; card.className = `les-kaart${lessen.length === 1 ? ' les-enkel' : ''}`; card.hidden = true;
   card.innerHTML = `
@@ -66,13 +121,14 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
   back.innerHTML = TERUG;
   wrap.append(back);
   const layer = document.createElement('div'); layer.className = 'kr-labels'; wrap.append(layer);
-  const q = (sel) => card.querySelector(sel);
+  // (the card's own elements: always there)
+  const q = <E extends HTMLElement = HTMLElement>(sel: string): E => card.querySelector<E>(sel)!;
 
-  let deel = { begin: () => [], antwoord: () => {}, release: () => {}, aanzicht: () => null };
+  let deel: Koppeling<O> = { begin: () => [], antwoord: () => {}, release: () => {}, aanzicht: () => null };
   let index = 0;                                     // a lesson opens at its first onderwerp, or the one asked for (open)
   // wide, on a big screen: the picture big on the left, the words and the controls beside it (as Krachten en koppels)
   breedKnop(card, opslaan, () => requestAnimationFrame(frame));
-  let open = false; let answered = false; let rows = []; let lastStatus = ''; let lastNiveau = '';
+  let open = false; let answered = false; let rows: Rij[] = []; let lastStatus = ''; let lastNiveau = '';
   let fresh = false;                                  // just opened: the camera goes once more on the first frame, after what the viewer did itself
   const les = () => lessen[index];
   // the row of onderwerpen, each ticked once it is gevolgd (lessen/voortgang.js)
@@ -85,22 +141,22 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
   const renderControls = () => { for (const r of rows) r.sync?.(); plaatje(); };
 
   // ------------------------------------------------------------------ an onderwerp
-  const show = (i) => {
+  const show = (i: number) => {
     index = Math.min(Math.max(i, 0), lessen.length - 1);
     const l = les();
-    q('.kr-lessen').value = String(index);
-    q('.kr-vorige').disabled = index === 0;
+    q<HTMLSelectElement>('.kr-lessen').value = String(index);
+    q<HTMLButtonElement>('.kr-vorige').disabled = index === 0;
     q('.kr-tekst').innerHTML = `${l.cwo ? `<p class="kr-chips"><span>CWO ${l.cwo}</span></p>` : ''}${l.kort.map((p) => `<p>${p}</p>`).join('')}`;
     if (l.zoeken && naarZoeken) {
       const naar = document.createElement('button'); naar.type = 'button'; naar.className = 'les-zoeken';
       naar.innerHTML = `${ZOEK_ICOON}<span>Alles in Zoeken › ${l.zoeken[1]}</span>`;
-      naar.addEventListener('click', () => { setOpen(false); naarZoeken(l.zoeken[0]); });
+      naar.addEventListener('click', () => { setOpen(false); naarZoeken(l.zoeken![0]); });
       q('.kr-tekst').append(naar);
     }
     if (l.quiz && naarQuiz) {
       const naar = document.createElement('button'); naar.type = 'button'; naar.className = 'les-zoeken';
       naar.innerHTML = `${QUIZ_ICOON}<span>Oefenen in Leren › Quiz › ${l.quiz[1]}</span>`;
-      naar.addEventListener('click', () => { setOpen(false); naarQuiz(l.quiz[0]); });
+      naar.addEventListener('click', () => { setOpen(false); naarQuiz(l.quiz![0]); });
       q('.kr-tekst').append(naar);
     }
     voet.toon(l.meer ?? []);
@@ -115,19 +171,19 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
     const v = les().vraag; const host = q('.kr-rechts > .kr-vraag');   // its own, not a question among the controls
     if (!v) { host.replaceChildren(); return; }
     host.innerHTML = `<h3>Vraag</h3><p>${v.tekst}</p>${v.plaatje ?? ''}<div class="kr-opties">${v.opties.map(([t], i) => `<button type="button" data-i="${i}">${t}</button>`).join('')}</div><p class="kr-uitleg" hidden></p>`;
-    host.querySelectorAll('.kr-opties button').forEach((b) => b.addEventListener('click', () => {
+    host.querySelectorAll<HTMLButtonElement>('.kr-opties button').forEach((b) => b.addEventListener('click', () => {
       if (answered) return;
       answered = true;
       const i = Number(b.dataset.i);
-      host.querySelectorAll('.kr-opties button').forEach((o, j) => { o.classList.toggle('goed', v.opties[j][1]); o.classList.toggle('fout', j === i && !v.opties[j][1]); o.disabled = true; });
-      const p = host.querySelector('.kr-uitleg'); p.hidden = false;
+      host.querySelectorAll<HTMLButtonElement>('.kr-opties button').forEach((o, j) => { o.classList.toggle('goed', v.opties[j][1]); o.classList.toggle('fout', j === i && !v.opties[j][1]); o.disabled = true; });
+      const p = host.querySelector<HTMLElement>('.kr-uitleg')!; p.hidden = false;
       p.innerHTML = `<b>${v.opties[i][1] ? 'Goed!' : 'Niet helemaal.'}</b> ${v.uitleg}${v.laat ? ' <i>Kijk maar op de boot.</i>' : ''}`;
       voortgang.antwoord(sleutel, les().id, v.opties[i][1]);
-      if (v.laat) deel.antwoord(v.laat);
+      if (v.laat) deel.antwoord(v.laat as Laat<O>);
       renderControls(); verder();
     }));
   };
-  q('.kr-lessen').addEventListener('change', (e) => show(Number(e.target.value)));
+  q('.kr-lessen').addEventListener('change', (e) => show(Number((e.target as HTMLSelectElement).value)));
   q('.kr-vorige').addEventListener('click', () => show(index - 1));
   q('.kr-volgende').addEventListener('click', () => show(index + 1));
   // on only once its question is answered (now, or on an earlier visit); after the last one: done
@@ -145,14 +201,14 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
   const frame = () => { if (!open) return; const a = deel.aanzicht(); if (a) fly(a, covers()); };
   let centreKey = '';
   // (only while it is open: a slide still under way when it was shut does not bring the bar back)
-  const showBoat = (on) => {
+  const showBoat = (on: boolean) => {
     if (!open) return;
     card.hidden = on; back.hidden = !on; requestAnimationFrame(frame);
-    (on ? back : card).querySelector('.les-greep')?.focus({ preventScroll: true });   // the focus goes along, not lost
+    (on ? back : card).querySelector<HTMLElement>('.les-greep')?.focus({ preventScroll: true });   // the focus goes along, not lost
   };
   veeg(card, back, showBoat);
 
-  const setOpen = (on) => {
+  const setOpen = (on: boolean) => {
     if (on === open) return;
     open = on; card.hidden = !on; back.hidden = true;
     card.style.transition = ''; card.style.transform = ''; back.style.transform = '';   // a slide or drag that was going on
@@ -168,13 +224,13 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
   lesKaarten.add(hier);
   return {
     card, back, layer, q, host: q('.kr-schema-host'), onderwerpen: lessen,
-    koppel(d) { deel = { ...deel, ...d }; },
+    koppel(d: Partial<Koppeling<O>>) { deel = { ...deel, ...d }; },
     /** Whether it is open (lk.open itself opens it). */
     get geopend() { return open; },
     get les() { return les(); },
     get bladOpen() { return !card.hidden; },
     /** Open it at its first onderwerp - or at the one with that id, when one is given (Zoeken › Begrippen). */
-    open: (id) => {
+    open: (id?: string) => {
       const i = Math.max(lessen.findIndex((l) => l.id === id), 0);
       if (open) { show(i); return; }
       index = i; setOpen(true);
@@ -182,7 +238,7 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
     close: () => setOpen(false),
     renderControls, frame, verder, again: () => show(index),
     /** Every frame, before the lesson's own: false when the card is shut (or has just been, by Leren). */
-    tick(width) {
+    tick(width: number) {
       if (!open) return false;
       // a manoeuvre or a quiz round from Leren takes the whole screen: the lesson is done with
       if (wrap.classList.contains('ops-on') || wrap.classList.contains('quiz-on')) { setOpen(false); return false; }
@@ -193,8 +249,8 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
       return true;
     },
     /** The line on what the boat does now; `niveau` how bad that is: '' (all well), 'geel', 'oranje' or 'rood' (danger), as Krachten has it. */
-    status(text, niveau = '') {
-      if (text !== lastStatus) { q('.kr-status').textContent = text; back.querySelector('p').textContent = text; lastStatus = text; }
+    status(text: string, niveau = '') {
+      if (text !== lastStatus) { q('.kr-status').textContent = text; back.querySelector('p')!.textContent = text; lastStatus = text; }
       if (niveau === lastNiveau) return;
       for (const el of [q('.kr-status'), back]) { el.classList.remove(`kr-${lastNiveau}`); if (niveau) el.classList.add(`kr-${niveau}`); }
       lastNiveau = niveau;
@@ -211,7 +267,7 @@ export function createLesKaart({ wrap, id, sleutel, titel, lessen, opslaan, fly,
  */
 const ERNST = ['', 'geel', 'oranje', 'rood'];
 const VERBOD = /verboden|mag(?:en)? (?:je |hier )?niet|niet (?:in|uit|door)varen/i;
-const zin = (t) => {
+const zin = (t: string) => {
   if (/nog verboden|nog niet|zo meteen (toegestaan|wel|gespuid)/i.test(t)) return 'geel';
   if (/^Je mag alleen tussen/.test(t)) return 'geel';                   // only that way through: a verbod beside it
   // what each of the lights of a bridge or lock means, one by one: no verbod of the moment
@@ -226,7 +282,7 @@ const zin = (t) => {
   return '';
 };
 // sentence by sentence - not at a colon, which belongs to its sentence ('…: dat is verboden')
-export function ernst(tekst = '') {
+export function ernst(tekst = ''): string {
   return ERNST[Math.max(0, ...tekst.split(/(?<=[.!?])\s+/).map((t) => ERNST.indexOf(zin(t))))];
 }
 
@@ -234,15 +290,15 @@ export function ernst(tekst = '') {
 // One choice for all the lessons, Krachten en koppels too: opened wide, every lesson opens wide.
 
 const BREED = 'lelievlet.lessen.breed';
-const kaarten = new Set();
-let breed = null;
+const kaarten = new Set<() => void>();
+let breed: boolean | null = null;
 
 /** The Breed / Smal button in the card's header (.kr-breed-knop); na() after a change, for the camera. */
-export function breedKnop(card, opslaan, na) {
+export function breedKnop(card: HTMLElement, opslaan: boolean, na: () => void): () => boolean | null {
   if (breed === null) { breed = false; if (opslaan) try { breed = localStorage.getItem(BREED) === '1'; } catch { /* private mode */ } }
-  const knop = card.querySelector('.kr-breed-knop');
+  const knop = card.querySelector<HTMLElement>('.kr-breed-knop')!;
   // one label, Breed, pressed while it is wide (a label that changed as well would say 'Smal, pressed' while wide)
-  const zet = () => { card.classList.toggle('kr-breed', breed); knop.setAttribute('aria-pressed', String(breed)); knop.textContent = 'Breed'; };
+  const zet = () => { card.classList.toggle('kr-breed', breed!); knop.setAttribute('aria-pressed', String(breed)); knop.textContent = 'Breed'; };
   kaarten.add(zet); zet();
   knop.addEventListener('click', () => {
     breed = !breed;
@@ -262,32 +318,32 @@ export const VOET = '<div class="les-voet"><button type="button" class="les-meer
 export const TERUG = '<button type="button" class="les-greep" aria-label="Terug naar de les"><i></i><span>Terug naar de les</span></button><p></p>';
 
 /** The foot of the card: Meer uitleg opens its text above the foot, Volgende (Klaar on the last) calls verder. */
-export function lesVoet(card, verder) {
-  const q = (sel) => card.querySelector(sel);
-  const knop = q('.les-meer-knop'); const meer = q('.kr-meer'); const door = q('.les-verder');
-  const zetMeer = (on) => {
+export function lesVoet(card: HTMLElement, verder: () => void) {
+  const q = <E extends HTMLElement = HTMLElement>(sel: string): E => card.querySelector<E>(sel)!;
+  const knop = q('.les-meer-knop'); const meer = q('.kr-meer'); const door = q<HTMLButtonElement>('.les-verder');
+  const zetMeer = (on: boolean) => {
     meer.hidden = !on; knop.setAttribute('aria-expanded', String(on)); knop.textContent = on ? 'Minder uitleg' : 'Meer uitleg';
     if (on) meer.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   };
-  knop.addEventListener('click', () => zetMeer(meer.hidden));
+  knop.addEventListener('click', () => zetMeer(meer.hidden as boolean));   // (never 'until-found' here)
   door.addEventListener('click', verder);
   return {
     /** A new onderwerp, with its [{ kop, tekst }]: no button without them. */
-    toon(list) {
+    toon(list: readonly Meer[]) {
       q('.kr-meer-body').innerHTML = list.map((m) => `<h4>${m.kop}</h4><p>${m.tekst}</p>`).join('');
       knop.hidden = !list.length; zetMeer(false);
     },
     /** Whether it is the last onderwerp, and whether one may go on; the › at the top always goes, answered or not. */
-    stand({ laatste, kan }) {
+    stand({ laatste, kan }: { laatste: boolean; kan: boolean }) {
       door.textContent = laatste ? 'Klaar' : 'Volgende ›'; door.disabled = !kan;
-      q('.kr-volgende').disabled = laatste;
+      q<HTMLButtonElement>('.kr-volgende').disabled = laatste;
     },
   };
 }
 
 /** On a phone: the greep at the top of the card, dragged down or tapped, shows the boat (showBoat(true)); the bar at
  *  the foot, dragged up or tapped, brings the card back. The card follows the finger down, and slides. */
-export function veeg(card, back, showBoat) {
+export function veeg(card: HTMLElement, back: HTMLElement, showBoat: (on: boolean) => void) {
   const SLIDE = 'transform 0.22s ease-out';
   const naarBoot = () => {
     card.style.transition = SLIDE; card.style.transform = 'translateY(100%)';
@@ -302,8 +358,8 @@ export function veeg(card, back, showBoat) {
   };
   // a drag of more than DRAG px goes; less than TIK px is a tap, and the click that follows does it
   const DRAG = 60; const TIK = 8;
-  const sleep = (el, omlaag, beweeg, klaar) => {
-    let y0 = null; let dy = 0; let gesleept = false;
+  const sleep = (el: HTMLElement, omlaag: boolean, beweeg: (dy: number, terug?: boolean) => void, klaar: () => void) => {
+    let y0: number | null = null; let dy = 0; let gesleept = false;
     el.addEventListener('pointerdown', (e) => { y0 = e.clientY; dy = 0; gesleept = false; el.setPointerCapture(e.pointerId); });
     el.addEventListener('pointermove', (e) => {
       if (y0 === null) return;
@@ -320,7 +376,7 @@ export function veeg(card, back, showBoat) {
     el.addEventListener('pointerup', los); el.addEventListener('pointercancel', los);
     el.addEventListener('click', () => { if (gesleept) { gesleept = false; return; } klaar(); });
   };
-  sleep(card.querySelector('.les-greep'), true, (dy, terug) => {
+  sleep(card.querySelector<HTMLElement>('.les-greep')!, true, (dy, terug) => {
     card.style.transition = terug ? SLIDE : 'none'; card.style.transform = dy ? `translateY(${dy}px)` : '';
   }, naarBoot);
   sleep(back, false, (dy, terug) => {
@@ -332,8 +388,8 @@ export function veeg(card, back, showBoat) {
 // Each a row of the card, with sync() to show what is set now: get() reads it, set(v) changes it.
 
 /** One of a few, as a segmented control; klaar(value): whether that one is done (shown green). */
-export function segmented(label, options, get, set, klaar = null) {
-  const row = document.createElement('div'); row.className = 'kr-rij';
+export function segmented<V>(label: string, options: readonly (readonly [V, string])[], get: () => V, set: (v: V) => void, klaar: ((v: V) => boolean) | null = null): Rij {
+  const row: Rij = document.createElement('div'); row.className = 'kr-rij';
   row.innerHTML = `<span>${label}</span><div class="segmented" role="radiogroup" aria-label="${label}">${options.map(([v, t]) => `<button type="button" role="radio" data-v="${v}">${t}</button>`).join('')}</div>`;
   const buttons = [...row.querySelectorAll('button')];
   buttons.forEach((b, i) => b.addEventListener('click', () => set(options[i][0])));
@@ -342,20 +398,22 @@ export function segmented(label, options, get, set, klaar = null) {
 }
 
 /** A slider; zegt(v): the word for where it is, ends: the words at its two ends. */
-export function schuif(label, { min, max, step }, get, set, zegt, ends) {
-  const row = document.createElement('label'); row.className = 'kr-rij kr-schuif';
+export function schuif(label: string, { min, max, step }: { min: number; max: number; step: number }, get: () => number, set: (v: number) => void,
+  zegt: (v: number) => string, ends?: readonly [string, string] | null): Rij {
+  const row: Rij = document.createElement('label'); row.className = 'kr-rij kr-schuif';
   row.innerHTML = `<span>${label} <b></b></span><input type="range" min="${min}" max="${max}" step="${step}">${ends ? `<small><i>${ends[0]}</i><i>${ends[1]}</i></small>` : ''}`;
-  const input = row.querySelector('input'); const value = row.querySelector('b');
+  const input = row.querySelector('input')!; const value = row.querySelector('b')!;
   input.addEventListener('input', () => set(Number(input.value)));
   row.sync = () => { if (!input.matches(':active') && Number(input.value) !== get()) input.value = String(get()); value.textContent = zegt(get()); };
   return row;
 }
 
 /** One of many, in groups, as a list to choose from: groepen [[groep, [[value, text]]]]; klaar(value): a ✓ after it. */
-export function keuze(label, groepen, get, set, klaar = null) {
-  const row = document.createElement('label'); row.className = 'kr-rij les-keuze';
+export function keuze(label: string, groepen: readonly (readonly [string, readonly (readonly [string, string])[]])[], get: () => string, set: (v: string) => void,
+  klaar: ((v: string) => boolean) | null = null): Rij {
+  const row: Rij = document.createElement('label'); row.className = 'kr-rij les-keuze';
   row.innerHTML = `<span>${label}</span><select>${groepen.map(([g, list]) => `<optgroup label="${g}">${list.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</optgroup>`).join('')}</select>`;
-  const select = row.querySelector('select');
+  const select = row.querySelector('select')!;
   select.addEventListener('change', () => set(select.value));
   const teksten = new Map([...select.options].map((o) => [o.value, o.textContent]));
   row.sync = () => {
@@ -369,18 +427,19 @@ export function keuze(label, groepen, get, set, klaar = null) {
  * One of several, as a segmented control - running over more lines when there are many or long ones. (A list to
  * choose from, keuze, only where the list is too long for that: Zelf verkennen, all situaties at once.)
  */
-export function kies(label, options, get, set, klaar = null) {
+export function kies<V>(label: string, options: readonly (readonly [V, string])[], get: () => V, set: (v: V) => void, klaar: ((v: V) => boolean) | null = null): Rij {
   const row = segmented(label, options, get, set, klaar);
   if (options.length > 3 || options.reduce((n, [, t]) => n + String(t).length, 0) > 30) row.classList.add('les-veel');
   return row;
 }
 
 /** A row of buttons: [[key, text, primary?]]; klik(key); kan(key): whether it can be pressed now; aan(key): whether it is the one chosen. */
-export function knoppen(buttons, klik, kan = () => true, aan = () => false) {
-  const row = document.createElement('div'); row.className = 'kr-rij zt-knoppen';
+export function knoppen(buttons: readonly (readonly [string, string, boolean?])[], klik: (k: string) => void,
+  kan: (k: string) => boolean = () => true, aan: (k: string) => boolean = () => false): Rij {
+  const row: Rij = document.createElement('div'); row.className = 'kr-rij zt-knoppen';
   row.innerHTML = buttons.map(([k, t, primary]) => `<button type="button" data-k="${k}"${primary ? ' class="primary"' : ''}>${t}</button>`).join('');
   const list = [...row.querySelectorAll('button')];
-  list.forEach((b) => b.addEventListener('click', () => klik(b.dataset.k)));
-  row.sync = () => list.forEach((b) => { b.disabled = !kan(b.dataset.k); b.setAttribute('aria-pressed', String(aan(b.dataset.k))); });
+  list.forEach((b) => b.addEventListener('click', () => klik(b.dataset.k!)));
+  row.sync = () => list.forEach((b) => { b.disabled = !kan(b.dataset.k!); b.setAttribute('aria-pressed', String(aan(b.dataset.k!))); });
   return row;
 }

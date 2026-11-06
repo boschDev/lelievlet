@@ -1,14 +1,15 @@
-// @ts-nocheck
 import * as THREE from 'three';
+import type { ModelDeel } from '../bootonderdelen/onderdeel.ts';
+import type { LesModes } from './typen.ts';
 
 // The lelievlet as a lesson's map draws her: the edge of her deck from above, in her own frame - [x, z] in metres,
 // x to the bow, z to stuurboord - taken once from the model (the boeisel, berghout and spiegel).
 
 /** parts: the viewer's parts; scene: to find the boat in. */
-export function deckOutline(parts, scene) {
-  let boat = scene.getObjectByName('lelievlet');
+export function deckOutline(parts: ModelDeel[], scene: THREE.Object3D): [number, number][] {
+  let boat = scene.getObjectByName('lelievlet')!;
   while (boat.parent && boat.parent !== scene) boat = boat.parent;
-  const tmp = new THREE.Vector3(); const top = new Map();
+  const tmp = new THREE.Vector3(); const top = new Map<number, number>();
   for (const part of parts.filter((p) => /^(boeisel|berghout|spiegel)/.test(p.extras.id))) {
     for (const mesh of part.meshes) {
       mesh.updateWorldMatrix(true, false);
@@ -20,7 +21,7 @@ export function deckOutline(parts, scene) {
     }
   }
   const xs = [...top.keys()].sort((a, b) => a - b);
-  return [...xs.map((x) => [x / 10, top.get(x)]), ...xs.slice().reverse().map((x) => [x / 10, -top.get(x)])];
+  return [...xs.map((x): [number, number] => [x / 10, top.get(x)!]), ...xs.slice().reverse().map((x): [number, number] => [x / 10, -top.get(x)!])];
 }
 
 /**
@@ -28,9 +29,9 @@ export function deckOutline(parts, scene) {
  * 14 m, and clear): with the same hole where she lies, so it does not stand inside her, and laid where the viewer's
  * water is - call userData.volg() each frame where a lesson moves or turns her (modes.kracht.opzij, plek).
  */
-export function makeZee(modes, straal) {
+export function makeZee(modes: Pick<LesModes, 'water'>, straal: number) {
   const vorm = new THREE.Shape(); vorm.absarc(2.8, 0, straal, 0, Math.PI * 2, false);
-  const gat = modes.water.geometry.parameters?.shapes?.holes?.[0];
+  const gat = (modes.water.geometry.parameters?.shapes as THREE.Shape | undefined)?.holes?.[0];   // makeWater: one Shape
   if (gat) vorm.holes.push(gat);
   const zee = new THREE.Mesh(new THREE.ShapeGeometry(vorm, 64), new THREE.MeshStandardMaterial({ color: 0x5f8eae, roughness: 0.35, metalness: 0 }));
   zee.rotation.x = -Math.PI / 2;
