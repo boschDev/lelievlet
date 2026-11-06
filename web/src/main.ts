@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -46,6 +45,54 @@ import { UPDATES } from './updates.ts';
 import { lees as leesAdres, zet as zetAdres, SLEUTELS } from './adres.ts';
 import { openKaart } from './lessen/kaart.ts';
 import { initTekstgrootte } from './tekstgrootte.ts';
+import type { Config, RealTarget } from './config.ts';
+import type { Handle } from './lib.ts';
+import type { Snapshot } from './feedback.ts';
+import type { Aanpassen } from './customize.ts';
+import type { Quiz } from './quiz.ts';
+import type { Handelingen } from './handelingen.ts';
+import type { Night } from './rig.ts';
+import type { Gebied } from './regions.ts';
+import type { ModelDeel } from './bootonderdelen/onderdeel.ts';
+import type { Les, LesContext, Aanzicht } from './lessen/typen.ts';
+import type { Naar } from './bpr/zoeken.ts';
+import type { Camera as StapCamera } from './procedure.ts';
+
+// the build this is, as vite.lib.config.js defines it; the dev server has none
+declare const __LV_BUILD__: { commit: string; datum: string | null } | undefined;
+
+/** The modes of the boat (modes.ts), once the model is in. */
+type Modes = ReturnType<typeof initModes>;
+/** The procedure last set going (modes.procedure()), as the bar shows it. */
+type Procedure = NonNullable<ReturnType<Modes['procedure']>>;
+/**
+ * A part as the viewer holds it: one of the model, or a gebied (regions.ts) that lies on others.
+ * xray: drawn through the boat while selected (flyTo); handles: the CAD bodies it was merged from.
+ */
+type Deel = (ModelDeel & { extras: { gebied?: undefined; handles?: string[] }; sources?: undefined; box?: undefined } | Gebied) & { xray?: boolean };
+/** A group of the model (groep in its extras): its title, its node, and its parts. */
+interface Groep { title: string; node: THREE.Object3D; parts: Deel[] }
+/** A row of the parts list: the parts it stands for, the twins of a bakboord/stuurboord pair, its key to search on. */
+interface Rij { parts: Deel[]; twins: Deel[][] | null; button: HTMLButtonElement; li: HTMLLIElement; section: Sectie; key: string }
+/** A group of the parts list, folded open or shut. */
+interface Sectie {
+  head: HTMLButtonElement; ul: HTMLUListElement; count: HTMLSpanElement; section: HTMLElement; rows: Rij[];
+  total: number; open: boolean; show: ((on: boolean) => void) | null;
+}
+/**
+ * A toestand (config.ts): where the viewer is, or is to go. Only what main.ts reads itself is named here; the
+ * rest is the boat's, for modes.apply.
+ */
+interface Toestand {
+  aanzicht?: string;
+  selectie?: string | string[] | null;
+  camera?: { positie?: unknown; doel?: unknown } | null;
+  [key: string]: unknown;
+}
+/** The camera on its way: from where to where, since when, for how long. */
+interface Flight { from: THREE.Vector3; fromTarget: THREE.Vector3; to: THREE.Vector3; toTarget: THREE.Vector3; start: number; ms: number }
+/** A lesson as main.ts holds it: what Les has, and of Krachten en koppels where its card stands now. */
+type Lesson = Les & { nu?(): { sleutel: string; onderwerp: string | null } | null };
 
 // One viewer, from end to end. Nothing here runs at import time: `mount` is called once per
 // embedded viewer with the shadow root it owns, so two of them on one page share no state at all.
@@ -60,24 +107,25 @@ import { initTekstgrootte } from './tekstgrootte.ts';
  * Returns { ready, destroy, debug, fullscreen, get, set }.
  */
 /** Whether this page runs as an installed app (standalone, not in a browser tab). */
-let hoveredHost = null;      // the viewer the pointer is over, of all on the page: it has the keys
+let hoveredHost: Element | null = null;      // the viewer the pointer is over, of all on the page: it has the keys
 
-const runsAsApp = () => ['standalone', 'minimal-ui', 'window-controls-overlay'].some((m) => matchMedia(`(display-mode: ${m})`).matches)
-  || navigator.standalone === true;                                   // iOS
+const runsAsApp = (): boolean => ['standalone', 'minimal-ui', 'window-controls-overlay'].some((m) => matchMedia(`(display-mode: ${m})`).matches)
+  || (navigator as Navigator & { standalone?: boolean }).standalone === true;                                   // iOS
 
-export function mount(ui, host, config) {
-  const wrap = ui.querySelector('.lv');
-  const $ = (id) => ui.getElementById(id);
+export function mount(ui: ShadowRoot, host: Element, config: Config): Pick<Handle, 'ready' | 'destroy' | 'fullscreen' | 'get' | 'set'> & { debug: Record<string, unknown> } {
+  const wrap = ui.querySelector<HTMLElement>('.lv')!;
+  // every id asked for is in the viewer's template, the element of the kind its use says
+  const $ = <T extends HTMLElement = HTMLElement>(id: string): T => ui.getElementById(id) as T;
   const asset = makeAsset(config.assets);
   // aanpassen.opslaan false: nothing of this viewer is read from or written to localStorage, in any module
   const opslaan = config.aanpassen?.opslaan !== false;
 
   const controller = new AbortController();
   const { signal } = controller;
-  const disposers = [];
-  const onDestroy = (fn) => disposers.push(fn);
-  const onResizeFns = [];
-  const onResize = (fn) => onResizeFns.push(fn);
+  const disposers: (() => void)[] = [];
+  const onDestroy = (fn: () => void) => disposers.push(fn);
+  const onResizeFns: (() => void)[] = [];
+  const onResize = (fn: () => void) => onResizeFns.push(fn);
   let destroyed = false;
 
   // Keys only reach this viewer while the pointer is over it or the focus is inside it: an embed
@@ -85,39 +133,42 @@ export function mount(ui, host, config) {
   // (a button hidden while it had the focus fires no focusout in every browser), and with two viewers
   // on a page the one under the pointer has the keys, even where the focus was left in the other.
   let pointerIn = false;
-  const focusIn = () => { const el = ui.activeElement; return Boolean(el) && (el.checkVisibility?.() ?? true); };
+  const focusIn = () => { const el = ui.activeElement; return Boolean(el) && (el!.checkVisibility?.() ?? true); };
   const engaged = () => pointerIn || (focusIn() && (hoveredHost === null || hoveredHost === host));
   host.addEventListener('pointerenter', () => { pointerIn = true; hoveredHost = host; }, { signal });
   host.addEventListener('pointerleave', () => { pointerIn = false; if (hoveredHost === host) hoveredHost = null; }, { signal });
   onDestroy(() => { if (hoveredHost === host) hoveredHost = null; });
 
   /** What the event really started on: a listener outside the shadow root sees the host instead. */
-  const realTarget = (e) => e.composedPath()[0] ?? e.target;
+  const realTarget: RealTarget = (e) => e.composedPath()[0] ?? e.target!;
 
   initCustomizePanel(ui, { signal, engaged });
   initTekstgrootte(ui, wrap, { opslaan });
   const logboek = initLogboek(ui, { opslaan });
   // Volledig scherm works from the first frame: it needs nothing of the model
-  const fullscreen = initFullscreen({ ui, host, config, signal, engaged, realTarget, onDestroy, asApp: runsAsApp() });
+  // (cast: a shadow root only goes on an HTML element, so the host is one)
+  const fullscreen = initFullscreen({ ui, host: host as HTMLElement, config, signal, engaged, realTarget, onDestroy, asApp: runsAsApp() });
   // Melden: from the first frame too - a model that will not load is worth a report as well
   const feedback = initFeedback({ ui, config, signal, engaged, snapshot: () => snapshot(),
-    about: () => openPanel.get('about')(), updates: () => openPanel.get('updates')(),
+    about: () => openPanel.get('about')!(), updates: () => openPanel.get('updates')!(),
     // a group's colours: reported as Aanpassen has the boat, and set there under Eigen first if they are not right yet
-    aanpassen: () => (boat ? Object.fromEntries(['zeilnummer', 'naam', 'naamKleur', 'plaats', 'plaatsKleur', 'bakskleur', 'zeilkleur', 'rompnummer', 'naamBordje', 'plechtKleur', 'roerKleur', 'roerbeslagKleur', 'beslagKleur', 'lummelKleur', 'boeiselBanen', 'boeiselVoor', 'spiegelKleur', 'spiegelTekst', 'spiegelTekstKleur', 'spiegelBand', 'spiegelPunt', 'onderdelen', 'kleuren'].map((k) => [k, structuredClone(boat[k])])) : null),
-    naarEigen: () => { if ($('customize').hidden) $('customize-toggle').click(); $('cfg-modus').querySelector('[data-modus="eigen"]').click(); },
+    // (cast: every key of Aanpassen, each with its own value)
+    aanpassen: () => (boat ? Object.fromEntries((['zeilnummer', 'naam', 'naamKleur', 'plaats', 'plaatsKleur', 'bakskleur', 'zeilkleur', 'rompnummer', 'naamBordje', 'plechtKleur', 'roerKleur', 'roerbeslagKleur', 'beslagKleur', 'lummelKleur', 'boeiselBanen', 'boeiselVoor', 'spiegelKleur', 'spiegelTekst', 'spiegelTekstKleur', 'spiegelBand', 'spiegelPunt', 'onderdelen', 'kleuren'] as const).map((k) => [k, structuredClone(boat![k])])) as unknown as Aanpassen : null),
+    naarEigen: () => { if ($('customize').hidden) $('customize-toggle').click(); $('cfg-modus').querySelector<HTMLElement>('[data-modus="eigen"]')!.click(); },
     closeOthers: () => { if (!$('customize').hidden) $('customize-close').click(); closePanel.get('about')?.(); closePanel.get('updates')?.(); closePanel.get('parts')?.(); } });
 
   // panels behind a button: the parts list (the search in the part card), and Over dit model and
   // Updates, which have no button of their own but are in the menu under the "i". Leren is a
   // popover of the column.
-  const closePanel = new Map();                  // panel id -> close it
-  const openPanel = new Map();                   // panel id -> open it
-  for (const [button, panel, onToggle] of [['parts-toggle', 'parts', partsPanelToggled],
+  const closePanel = new Map<string, () => void>();   // panel id -> close it
+  const openPanel = new Map<string, () => void>();    // panel id -> open it
+  const panels: ['parts-toggle' | 'toestand-toggle' | 'log-toggle' | null, string, ((open: boolean) => void)?][] = [['parts-toggle', 'parts', partsPanelToggled],
                                            [null, 'about'], [null, 'updates', (open) => open && showUpdates()], ['toestand-toggle', 'toestand', (open) => toestandToggled(open)],
-                                           ['log-toggle', 'logboek', (open) => open && logboek.refresh()]]) {
+                                           ['log-toggle', 'logboek', (open) => open && logboek.refresh()]];
+  for (const [button, panel, onToggle] of panels) {
     const toggle = button && $(button);
     const aside = $(panel);
-    const setOpen = (open) => {
+    const setOpen = (open: boolean) => {
       if (aside.hidden === !open) return;          // already so: Escape or another panel must not reset what is not open
       aside.hidden = !open;
       toggle?.setAttribute('aria-expanded', String(open));
@@ -125,27 +176,27 @@ export function mount(ui, host, config) {
     };
     closePanel.set(panel, () => setOpen(false));
     openPanel.set(panel, () => setOpen(true));
-    toggle?.addEventListener('click', () => setOpen(aside.hidden));
+    toggle?.addEventListener('click', () => setOpen(aside.hidden as boolean));   // (never 'until-found' here)
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && engaged()) setOpen(false); }, { signal });
   }
   // Aanpassen, Melden and the parts list share the right-hand side: one open at a time (registered
   // after the toggles themselves, so each sees the state the click left)
   // - and a lesson, whose card stands there too, is shut (lessen/kaart.js)
   const closeLessons = () => { for (const l of Object.values(lessons)) l.close(); };
-  $('customize-toggle').addEventListener('click', () => { if (!$('customize').hidden) { feedback.close(); closePanel.get('parts')(); closeLessons(); } });
+  $('customize-toggle').addEventListener('click', () => { if (!$('customize').hidden) { feedback.close(); closePanel.get('parts')!(); closeLessons(); } });
   $('parts-toggle').addEventListener('click', () => { if (!$('parts').hidden) { feedback.close(); if (!$('customize').hidden) $('customize-close').click(); closeLessons(); } });
   // Escape shuts a lesson too, as it does a panel - not from a field being typed in
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && engaged() && !e.composedPath().some((el) => el.matches?.('input, select, textarea'))) closeLessons();
+    if (e.key === 'Escape' && engaged() && !e.composedPath().some((el) => (el as Partial<Element>).matches?.('input, select, textarea'))) closeLessons();
   }, { signal });
-  $('about-close').addEventListener('click', () => closePanel.get('about')());
-  $('updates-close').addEventListener('click', () => closePanel.get('updates')());
+  $('about-close').addEventListener('click', () => closePanel.get('about')!());
+  $('updates-close').addEventListener('click', () => closePanel.get('updates')!());
   // Updates: per date, the newest first. The browser keeps the newest date this user has seen; what came
   // after it is marked Nieuw, and once the panel is open all of it counts as seen. A second update on one day
   // has nr 2: '2026-10-10.2' comes after '2026-10-10', and before '2026-10-11'
   const UPDATES_KEY = 'lelievlet.updates.v1';
-  const updateKey = ({ datum, nr }) => (nr ? `${datum}.${nr}` : datum);
-  const seenUpdates = () => {
+  const updateKey = ({ datum, nr }: { datum: string; nr?: number }) => (nr ? `${datum}.${nr}` : datum);
+  const seenUpdates = (): string | null => {
     if (!opslaan) return null;
     try { return JSON.parse(localStorage.getItem(UPDATES_KEY) ?? 'null')?.gezien ?? null; } catch { return null; }
   };
@@ -157,7 +208,7 @@ export function mount(ui, host, config) {
   function showUpdates() {
     const seen = seenUpdates();
     // never seen any: only the newest is news to them
-    const isNew = (update, i) => opslaan && (seen ? updateKey(update) > seen : i === 0);
+    const isNew = (update: { datum: string; nr?: number }, i: number) => opslaan && (seen ? updateKey(update) > seen : i === 0);
     $('updates-list').replaceChildren(...UPDATES.flatMap((update, i) => {
       const { datum, nr, punten } = update;
       const list = document.createElement('ul');
@@ -179,19 +230,19 @@ export function mount(ui, host, config) {
     if (seen && seen >= updateKey(UPDATES[0])) return;
     let own = false;
     try { own = Object.keys(JSON.parse(localStorage.getItem(AANPASSEN_KEY) ?? '{}') ?? {}).length > 0; } catch { /* nothing saved */ }
-    if (runsAsApp() || own) openPanel.get('updates')();
+    if (runsAsApp() || own) openPanel.get('updates')!();
     else if (!seen) markUpdatesSeen();
   };
-  $('toestand-close').addEventListener('click', () => closePanel.get('toestand')());
+  $('toestand-close').addEventListener('click', () => closePanel.get('toestand')!());
   // Every panel closes on a tap beside it, as the popovers of the column do - a tap, not a drag, so the
   // boat can still be turned to look at it with Aanpassen open. Not a report being written (its text
   // would go), nor the cards of the roeicommando's, a run or a quiz, which stay open on purpose.
-  const besides = [['customize', 'customize-toggle', () => $('customize-close').click()],
+  const besides: [string, string | null, () => void][] = [['customize', 'customize-toggle', () => $('customize-close').click()],
     ['feedback', 'feedback-toggle', () => { if (!feedback.busy()) feedback.close(); }],
-    ['parts', 'parts-toggle', () => closePanel.get('parts')()], ['about', null, () => closePanel.get('about')()],
-    ['updates', null, () => closePanel.get('updates')()], ['logboek', 'log-toggle', () => closePanel.get('logboek')()],
-    ['toestand', 'toestand-toggle', () => closePanel.get('toestand')()]];
-  let tapFrom = null;
+    ['parts', 'parts-toggle', () => closePanel.get('parts')!()], ['about', null, () => closePanel.get('about')!()],
+    ['updates', null, () => closePanel.get('updates')!()], ['logboek', 'log-toggle', () => closePanel.get('logboek')!()],
+    ['toestand', 'toestand-toggle', () => closePanel.get('toestand')!()]];
+  let tapFrom: { x: number; y: number; path: EventTarget[] } | null = null;
   document.addEventListener('pointerdown', (e) => { tapFrom = e.isPrimary ? { x: e.clientX, y: e.clientY, path: e.composedPath() } : null; }, { capture: true, signal });
   document.addEventListener('pointerup', (e) => {
     const from = tapFrom; tapFrom = null;
@@ -203,10 +254,10 @@ export function mount(ui, host, config) {
       close();
     }
   }, { capture: true, signal });
-  $('parts-close').addEventListener('click', () => closePanel.get('parts')());
-  $('log-close').addEventListener('click', () => closePanel.get('logboek')());
+  $('parts-close').addEventListener('click', () => closePanel.get('parts')!());
+  $('log-close').addEventListener('click', () => closePanel.get('logboek')!());
 
-  const canvas = $('scene');
+  const canvas = $<HTMLCanvasElement>('scene');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -246,8 +297,8 @@ export function mount(ui, host, config) {
     modes?.island?.set(sailNumber === MARKED[0]);
   };
   // Model space: x = transom -> bow, y = up, z = starboard, metres.
-  const parts = [];            // { node, extras, meshes[] }
-  const groups = new Map();    // groep id -> { title, node, parts[] }
+  const parts: Deel[] = [];            // { node, extras, meshes[] }
+  const groups = new Map<string, Groep>();    // groep id -> { title, node, parts[] }
   let modelBox = new THREE.Box3();
   let hullBox = new THREE.Box3();          // the hull alone, without the rig: the camera never stands inside it
 
@@ -260,21 +311,22 @@ export function mount(ui, host, config) {
     fly: (position, target) => startFlight(position, target, 900), setDark: (k) => { zoekDark = k; },
     // Begrippen: what a button on to a lesson, a handeling or a part is called, and opening it (null, or why not)
     begrip: {
-      label: (n) => {
+      label: (n: Naar) => {
         if (n.les) {
           const les = ui.querySelector(`#lessen-list [data-les="${n.les}"] b`)?.textContent;
-          const o = lessons[n.les]?.onderwerpen?.find((x) => x.id === n.onderwerp);
+          // (cast: the onderwerpen of a lesson have a titel, which Les does not name)
+          const o = (lessons[n.les]?.onderwerpen as readonly { id: string; titel?: string }[] | undefined)?.find((x) => x.id === n.onderwerp);
           return les && `Les: ${les}${o ? ` › ${o.titel}` : ''}`;
         }
         if (n.handeling) { const naam = handelingen?.naam(n.handeling); return naam && `Manoeuvre: ${naam}${n.stap ? ` › ${n.stap}` : ''}`; }
-        if (n.onderdeel) { const row = partRow(n.onderdeel); return row && `Onderdeel: ${row.button.querySelector('.naam').textContent}`; }
+        if (n.onderdeel) { const row = partRow(n.onderdeel); return row && `Onderdeel: ${row.button.querySelector('.naam')!.textContent}`; }
         return null;
       },
-      open: (n) => {
-        if (n.les) { closePanel.get('parts')(); lessons[n.les]?.open(n.onderwerp); return null; }
+      open: (n: Naar) => {
+        if (n.les) { closePanel.get('parts')!(); lessons[n.les]?.open(n.onderwerp); return null; }
         if (n.handeling) {
           if (!handelingen) return 'De boot is nog niet geladen';
-          const waarom = handelingen.bekijk(n.handeling, n.stap, () => closePanel.get('parts')());
+          const waarom = handelingen.bekijk(n.handeling, n.stap, () => closePanel.get('parts')!());
           if (waarom) openLearn('manoeuvres');
           return waarom;
         }
@@ -293,10 +345,11 @@ export function mount(ui, host, config) {
     flags: (group) => modes?.hoistFlags?.(group) ?? null,
     // all of her, the top of the mast to the keel: what is fitted in the view when she is shown
     box: () => (modelBox.isEmpty() ? null : modelBox.clone()) } });
-  let zoekDark = null;
+  let zoekDark: number | null = null;
   // Leren, Verkeerstekens: the signs, marks and signals of Zoeken as a quiz; for a round every panel is
   // shut, and the boat is out on open water under sail, not left at a steiger laid by a manoeuvre
-  const tekenQuiz = initTekenQuiz({ ui, wrap, zoeken, openLearn: (kind) => openLearn(kind), opslaan, engaged, realTarget, signal, veranderd: () => logboek.refresh(),
+  // (cast: tekenquiz.ts asks an Element of realTarget, where what it gets may be any EventTarget - it only calls closest?.())
+  const tekenQuiz = initTekenQuiz({ ui, wrap, zoeken, openLearn: (kind) => openLearn(kind), opslaan, engaged, realTarget: realTarget as (e: Event) => Element, signal, veranderd: () => logboek.refresh(),
     closePanels: () => {
       for (const [panel, close] of closePanel) if (panel !== 'toestand') close();
       if (!$('customize').hidden) $('customize-close').click();
@@ -304,21 +357,21 @@ export function mount(ui, host, config) {
     } });
   onDestroy(() => tekenQuiz.stop());
   onDestroy(() => zoeken.destroy());
-  let selected = [];           // several at once: one row of the parts list can stand for four dollen
-  let modes = null;
-  let paintScheme = null;      // the older paint scheme; see initPaint in customize.js
-  let boat = null;             // what the user made of the boat (initCustomize), for a report
-  let regions = null;
-  let quiz = null;
-  let handelingen = null;     // a run of an operation, in its own focus mode
-  const lessons = {};         // the lessons of Leren › Lessen, by the key of their row in the list (template.js)
-  let hovered = null;
-  const override = new Map();  // part -> colour: the quiz lights four parts at once, each its own
+  let selected: Deel[] = [];           // several at once: one row of the parts list can stand for four dollen
+  let modes: Modes | null = null;
+  let paintScheme: ReturnType<typeof initPaint> | null = null;      // the older paint scheme; see initPaint in customize.js
+  let boat: Aanpassen | null = null;             // what the user made of the boat (initCustomize), for a report
+  let regions: Gebied[] | null = null;
+  let quiz: Quiz | null = null;
+  let handelingen: Handelingen | null = null;     // a run of an operation, in its own focus mode
+  const lessons: Record<string, Lesson> = {};         // the lessons of Leren › Lessen, by the key of their row in the list (template.js)
+  let hovered: Deel | null = null;
+  const override = new Map<Deel, THREE.Color>();  // part -> colour: the quiz lights four parts at once, each its own
 
   const HOVER = new THREE.Color(0x2d8cff);
   const SELECT = new THREE.Color(0xff8a00);
 
-  let settle = null; let stumble = null;
+  let settle: ((value?: unknown) => void) | null = null; let stumble: ((reason?: unknown) => void) | null = null;
   const ready = new Promise((resolve, reject) => { settle = resolve; stumble = reject; });
 
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);      // the model is meshopt-packed
@@ -327,11 +380,11 @@ export function mount(ui, host, config) {
   const emblemLoad = loadImage(asset('textures/zeilteken.png')).catch(() => null);
   // The model failed to come in, or building the viewer on it threw: say so where it was loading,
   // and let `ready` know - a viewer that waits for ever helps nobody, and Melden is still there.
-  const failed = (error) => {
+  const failed = (error: unknown) => {
     if (destroyed) return;
     console.error('[lelievlet] model laden mislukt:', error);
     $('loading').textContent = 'Het model kon niet worden geladen. Herlaad de pagina, of meld het.';
-    stumble(error);
+    stumble!(error);
   };
   loader.load(asset('models/lelievlet.glb'), async (gltf) => {
     try {
@@ -340,11 +393,11 @@ export function mount(ui, host, config) {
       // the normals come packed in 8 bits (pipeline/build_glb.py); back to floats once, here: the
       // sails, the chains and the blocks work them out again, and a sum does not fit in 8 bits
       root.traverse((m) => {
-        const n = m.geometry?.attributes.normal;
+        const n = (m as Partial<THREE.Mesh>).geometry?.attributes.normal;
         if (!n?.normalized) return;
         const out = new THREE.Float32BufferAttribute(n.count * 3, 3);
         for (let i = 0; i < n.count; i++) out.setXYZ(i, n.getX(i), n.getY(i), n.getZ(i));
-        m.geometry.setAttribute('normal', out);
+        (m as THREE.Mesh).geometry.setAttribute('normal', out);
       });
       scene.add(root);
       // the trees first: what is laid on the hull while loading already probes through them
@@ -354,15 +407,15 @@ export function mount(ui, host, config) {
         const ex = node.userData;
         if (ex?.titel) groups.set(ex.groep, { title: ex.titel, node, parts: [] });
         if (ex?.id && ex?.naam) {
-          const meshes = [];
+          const meshes: ModelDeel['meshes'] = [];
           node.traverse((m) => {
-            if (m.isMesh) {
+            if (isMesh(m)) {
               m.material = m.material.clone();      // per-part material so highlighting stays local
               m.userData.part = node;
               meshes.push(m);
             }
           });
-          parts.push({ node, extras: ex, meshes });
+          parts.push({ node, extras: ex as ModelDeel['extras'], meshes });   // (cast: what the pipeline wrote on the node)
         }
       });
 
@@ -370,24 +423,26 @@ export function mount(ui, host, config) {
       root.traverse((node) => { if (node.userData?.groep === 'romp' && node.userData?.id) hullBox.expandByObject(node); });
 
       // Aanpassen: zeilnummer, naam en plaats op het boeisel, kleuren per verfzone
-      const sails = await dressSails(parts, renderer, asset, '000', emblemLoad);
+      // (the casts to ModelDeel[] here: before initModes and initRegions add theirs, every part is one of the model)
+      const sails = await dressSails(parts as ModelDeel[], renderer, asset, '000', emblemLoad);
       if (destroyed) return;
-      const outerSkin = (id) => parts.find((p) => p.extras.id === id).meshes.find((m) => m.material.name === 'boeisel');
+      const outerSkin = (id: string) => (parts as ModelDeel[]).find((p) => p.extras.id === id)!.meshes.find((m) => m.material.name === 'boeisel')!;
       const hullText = new HullText({ sb: outerSkin('boeisel_sb'), bb: outerSkin('boeisel_bb') }, renderer, root);
       const LETTERING = { naam: { x: 4.6, height: 0.10 }, plaats: { x: 0.78, height: 0.075 }, nummer: { x: 2.8, height: 0.13 } };   // voordek / achterdek / midscheeps
-      const zoneMaterials = collectZoneMaterials(parts); const sailMaterials = collectSailMaterials(parts);
-      const spiegelTekst = makeSpiegelTekst(parts);
+      const zoneMaterials = collectZoneMaterials(parts as ModelDeel[]); const sailMaterials = collectSailMaterials(parts as ModelDeel[]);
+      const spiegelTekst = makeSpiegelTekst(parts as ModelDeel[]);
       const boeiselBanen = makeBoeiselBanen([outerSkin('boeisel_sb'), outerSkin('boeisel_bb')]);
-      const spiegelBand = makeSpiegelBand(parts);
-      const bootonderdelen = makeBootonderdelen(parts);
+      const spiegelBand = makeSpiegelBand(parts as ModelDeel[]);
+      const bootonderdelen = makeBootonderdelen(parts as ModelDeel[]);
       const aanpassen = initCustomize(ui, config, {
         zoneMaterials, sailMaterials,
         setSailNumber: (text) => { sails.setNumber(text); sailNumber = text; followNumber(); paintScheme?.setNumber(text); },
-        setHullText: (key, text, color, opts) => hullText.set(key, text, LETTERING[key].x, LETTERING[key].height, color, opts),
+        // (cast: what Aanpassen letters on her is the naam, the plaats and the nummer)
+        setHullText: (key, text, color, opts) => hullText.set(key, text, LETTERING[key as keyof typeof LETTERING].x, LETTERING[key as keyof typeof LETTERING].height, color, opts),
         setSailInk: (white) => sails.setInk(white),
         setSpiegelTekst: (text, color) => spiegelTekst.set(text, color),
         // the fore half in the bakskleur follows that paint as it changes, also when the early colours fade in
-        setBoeiselBanen: (colours, voor) => boeiselBanen.set(colours, voor ? zoneMaterials.get('bakskleur')[0].color : null),
+        setBoeiselBanen: (colours, voor) => boeiselBanen.set(colours, voor ? zoneMaterials.get('bakskleur')![0].color : null),
         setSpiegelBand: (colour, punt) => spiegelBand.set(colour, punt),
         setOnderdelen: (keuze) => bootonderdelen.set(keuze),
         melden: feedback.groep,
@@ -396,7 +451,7 @@ export function mount(ui, host, config) {
       // it, where the page shows how to install it: an icon in the bottom right-hand corner. Not
       // offered inside the installed app itself.
       const installApp = async () => {
-        const own = Object.fromEntries(['zeilnummer', 'naam', 'naamKleur', 'plaats', 'plaatsKleur', 'bakskleur', 'zeilkleur', 'rompnummer', 'naamBordje', 'plechtKleur', 'roerKleur', 'roerbeslagKleur', 'beslagKleur', 'lummelKleur', 'boeiselBanen', 'boeiselVoor', 'spiegelKleur', 'spiegelTekst', 'spiegelTekstKleur', 'spiegelBand', 'spiegelPunt', 'onderdelen', 'kleuren'].map((k) => [k, aanpassen[k]]));
+        const own = Object.fromEntries((['zeilnummer', 'naam', 'naamKleur', 'plaats', 'plaatsKleur', 'bakskleur', 'zeilkleur', 'rompnummer', 'naamBordje', 'plechtKleur', 'roerKleur', 'roerbeslagKleur', 'beslagKleur', 'lummelKleur', 'boeiselBanen', 'boeiselVoor', 'spiegelKleur', 'spiegelTekst', 'spiegelTekstKleur', 'spiegelBand', 'spiegelPunt', 'onderdelen', 'kleuren'] as const).map((k) => [k, aanpassen[k]]));
         // the app page sits beside the script, wherever the page has its models (`assets`) from
         const page = makeAsset(null)('app.html');
         // in its own tab, not in this page's place, unless this page is the viewer's own and not framed.
@@ -405,8 +460,8 @@ export function mount(ui, host, config) {
         const here = window.top === window.self && new URL(page, location.href).origin === location.origin;
         const tab = here ? null : window.open('about:blank', '_blank');
         // what the boat looks like now, and the rest of what this viewer was given: its quiz, where it is
-        const keep = { aanpassen: own };
-        for (const key of ['quiz', 'toestand']) if (Object.values(config[key] ?? {}).some((v) => (typeof v === 'object' ? Object.keys(v ?? {}).length : v !== undefined))) keep[key] = config[key];
+        const keep: Record<string, unknown> = { aanpassen: own };
+        for (const key of ['quiz', 'toestand'] as const) if (Object.values(config[key] ?? {}).some((v) => (typeof v === 'object' ? Object.keys(v ?? {}).length : v !== undefined))) keep[key] = config[key];
         const url = `${page}?installeer#${await packConfig(keep)}`;
         if (here) location.href = url;
         else if (tab) tab.location.href = url;
@@ -420,44 +475,47 @@ export function mount(ui, host, config) {
       paintScheme = initPaint({ zoneMaterials, sailMaterials, config: aanpassen, note: logboek.note, setSailInk: sails.setInk });
       paintScheme.setNumber(aanpassen.zeilnummer);
 
-      modes = initModes({ parts, tuig: root.getObjectByName('lelievlet').userData.tuig, scene,
+      modes = initModes({ parts: parts as ModelDeel[], tuig: root.getObjectByName('lelievlet')!.userData.tuig, scene,
                           ui, wrap, config, signal, onResize, engaged, realTarget, note: logboek.note, say });
       regions = initRegions({ parts, groups, highlight: SELECT });        // Boeg, Kleed: areas, not parts
 
       for (const p of parts) groups.get(p.extras.groep)?.parts.push(p);   // after initModes: it adds the windvaan
       buildPartList();
-      addEdges(parts, { signal });                             // every part there is by now, the viewer's own too; drawn in after the first picture
+      // (cast: what it reads of a gebied, its meshes, a gebied has too)
+      addEdges(parts as ModelDeel[], { signal });                             // every part there is by now, the viewer's own too; drawn in after the first picture
       quiz = initQuiz({ parts, scene, select, flyTo, setCovered, openLearn: (kind) => openLearn(kind), veranderd: () => logboek.refresh(),
                         setHighlights, partVisible, closePanel, opslaan,
                         ui, wrap, config, signal, engaged, realTarget, onDestroy,
-                        rowing: () => ['roeien', 'wrikken'].includes(modes?.state.mode) });   // Leren
+                        rowing: () => (['roeien', 'wrikken'] as (string | undefined)[]).includes(modes?.state.mode) });   // Leren
       handelingen = initHandelingen({ ui, wrap, modes, stepProcedure, lookAtProcedure, dismissProcedure,
         runView: { get: () => runViewChosen, set: chooseRunView }, setCovered, opslaan, signal, engaged, realTarget, onDestroy });
-      modes.onModeChange(() => handelingen.callOff());
-      closePanel.set('learn', () => modes.closePopover());    // a round or a run takes the whole screen
+      modes.onModeChange(() => handelingen!.callOff());
+      closePanel.set('learn', () => modes!.closePopover());    // a round or a run takes the whole screen
       initLearn();
       loaded = true;
       setView('iso', false);
-      applyState(merge(config.toestand, early), true);      // what the page asked for, before anyone sees the boat
+      // (cast: two toestanden merged are one)
+      applyState(merge(config.toestand, early) as Toestand, true);      // what the page asked for, before anyone sees the boat
       early = {};
       $('loading').hidden = true;
       resize();
       controls.update();
       renderer.render(scene, camera);
-      settle();
+      settle!();
       // the lessons, opened from Leren › Lessen - one at a time - or at once by their key in the address (?bruggen)
       voortgang.opslaan = opslaan;
-      const lesson = (key) => ({ sleutel: key, fly: krachtView, wrap, scene, camera, controls, parts, modes, setCoveredRight, opslaan, dismissProcedure,
-        setDark: (k) => { zoekDark = k; },                          // how dark the sky is, as Zoeken holds it (null lets go)
+      // (cast: the lessons look at the parts of the model; a gebied among them they pass over)
+      const lesson = (key: string) => ({ sleutel: key, fly: krachtView, wrap, scene, camera, controls, parts: parts as ModelDeel[], modes: modes!, setCoveredRight, opslaan, dismissProcedure,
+        setDark: (k: number | null) => { zoekDark = k; },                          // how dark the sky is, as Zoeken holds it (null lets go)
         // Zelf verkennen: on to all of it in Zoeken, on the page of its tile (bpr/zoeken.js)
-        naarZoeken: (cat) => { if ($('parts').hidden) $('parts-toggle').click(); ui.querySelector(`.zoek-tegel[data-cat="${cat}"]`)?.click(); },
+        naarZoeken: (cat: string) => { if ($('parts').hidden) $('parts-toggle').click(); ui.querySelector<HTMLElement>(`.zoek-tegel[data-cat="${cat}"]`)?.click(); },
         // the last page of a lesson: on to its quiz in Leren › Quiz ('verkeerstekens', 'voorrang')
-        naarQuiz: (soort) => openLearn(soort),
+        naarQuiz: (soort: string) => openLearn(soort),
         // one lesson at a time, and not under Zoeken or Aanpassen, which stand where its card does
         onOpen: () => {
           for (const [k, l] of Object.entries(lessons)) if (k !== key) l.close();
-          closePanel.get('parts')(); if (!$('customize').hidden) $('customize-close').click();
-        } });
+          closePanel.get('parts')!(); if (!$('customize').hidden) $('customize-close').click();
+        } }) satisfies LesContext;
       lessons.zeiltermen = initZeiltermen(lesson('zeiltermen'));
       lessons.weer = initWeer(lesson('weer'));
       lessons.schepen = initSchepen(lesson('schepen'));
@@ -474,12 +532,12 @@ export function mount(ui, host, config) {
       lessons.zeiltermenquiz = initZeiltermenQuiz(lesson('zeiltermenquiz'));
       onDestroy(() => { for (const l of Object.values(lessons)) l.dispose(); });
       // the logboek: how far each lesson of Leren › Lessen is gevolgd, and how each quiz went
-      const stand = (s) => (s && s.goed + s.fout ? `${Math.round((100 * s.goed) / (s.goed + s.fout))}% goed` : '');
+      const stand = (s: { goed: number; fout: number } | null | undefined) => (s && s.goed + s.fout ? `${Math.round((100 * s.goed) / (s.goed + s.fout))}% goed` : '');
       logboek.voortgang = () => ({
-        lessen: [...ui.querySelectorAll('#lessen-list button')].filter((b) => lessons[b.dataset.les]?.onderwerpen)
-          .map((b) => ({ naam: b.querySelector('b').textContent, ...voortgang.telling(b.dataset.les, lessons[b.dataset.les].onderwerpen) })),
-        quizzen: [['Onderdelen', quiz?.score()], ['Verkeerstekens', tekenQuiz.score()], ['Voorrang', voortgang.quizScore('voorrang')],
-          ['Zeiltermen', voortgang.quizScore('zeiltermen')]].map(([naam, s]) => ({ naam, stand: stand(s) })),
+        lessen: [...ui.querySelectorAll<HTMLButtonElement>('#lessen-list button')].filter((b) => lessons[b.dataset.les!]?.onderwerpen)
+          .map((b) => ({ naam: b.querySelector('b')!.textContent, ...voortgang.telling(b.dataset.les!, lessons[b.dataset.les!].onderwerpen!) })),
+        quizzen: ([['Onderdelen', quiz?.score()], ['Verkeerstekens', tekenQuiz.score()], ['Voorrang', voortgang.quizScore('voorrang')],
+          ['Zeiltermen', voortgang.quizScore('zeiltermen')]] as const).map(([naam, s]) => ({ naam, stand: stand(s) })),
       });
       onDestroy(voortgang.bijWijziging(() => logboek.refresh()));
       onDestroy(() => logboek.dispose());
@@ -493,24 +551,24 @@ export function mount(ui, host, config) {
   // One row per distinct name within a group: the boat has four dollen and two zwaardlopers, and
   // picking "Dol" selects all four of them at once. Parts that come as a bakboord and a stuurboord
   // twin share one row as well, under the name without the side; picking it takes one of the two.
-  const sections = [];         // { head, ul, count, section, rows[], total, open }
-  const rows = [];             // { parts[], twins, button, li, section, key }
-  const partRow = (id) => rows.find((row) => row.parts.some((p) => p.extras.id === id));   // Zoeken › Begrippen
-  let currentRow = null;
-  let partsPoll = null;
-  onDestroy(() => clearInterval(partsPoll));
+  const sections: Sectie[] = [];         // { head, ul, count, section, rows[], total, open }
+  const rows: Rij[] = [];             // { parts[], twins, button, li, section, key }
+  const partRow = (id: string) => rows.find((row) => row.parts.some((p) => p.extras.id === id));   // Zoeken › Begrippen
+  let currentRow: Rij | null | undefined = null;
+  let partsPoll: number | null = null;
+  onDestroy(() => clearInterval(partsPoll!));       // (null too: it clears nothing)
 
-  const setFolded = (entry, open) => { entry.ul.hidden = !open; entry.head.setAttribute('aria-expanded', String(open)); };
+  const setFolded = (entry: Sectie, open: boolean) => { entry.ul.hidden = !open; entry.head.setAttribute('aria-expanded', String(open)); };
 
   function buildPartList() {
     const list = $('parts-list');
     for (const [id, g] of groups) {
-      const byName = new Map();          // row key -> { label, parts[], sides: side -> parts[] }
+      const byName = new Map<string, { label: string; parts: Deel[]; sides: Map<string, Deel[]> }>();          // row key -> { label, parts[], sides: side -> parts[] }
       for (const p of g.parts) {
         const { base, side } = sideOf(p.extras.naam);
         const key = side ? `side:${base}` : `name:${p.extras.naam}`;   // a twin shares no row with a part of its own
         if (!byName.has(key)) byName.set(key, { label: side ? base : p.extras.naam, parts: [], sides: new Map() });
-        const bucket = byName.get(key);
+        const bucket = byName.get(key)!;
         bucket.parts.push(p);
         if (side) bucket.sides.set(side, [...(bucket.sides.get(side) ?? []), p]);
       }
@@ -522,13 +580,13 @@ export function mount(ui, host, config) {
       head.append(Object.assign(document.createElement('span'), { className: 'title', textContent: g.title }), count);
       head.setAttribute('aria-controls', `parts-${id}`);
       const ul = Object.assign(document.createElement('ul'), { id: `parts-${id}` });
-      const entry = { head, ul, count, section, rows: [], total: g.parts.length, open: true, show: null };
+      const entry: Sectie = { head, ul, count, section, rows: [], total: g.parts.length, open: true, show: null };
       setFolded(entry, true);
       head.addEventListener('click', () => { entry.open = !entry.open; setFolded(entry, entry.open); });
       // beside it, an eye that shows or hides the whole group in the model
       const eye = Object.assign(document.createElement('button'), { type: 'button', className: 'group-eye' });
       eye.innerHTML = EYE;
-      const showGroup = (on) => {
+      const showGroup = (on: boolean) => {
         g.node.visible = on;
         eye.setAttribute('aria-pressed', String(!on));
         eye.title = on ? `${g.title} verbergen` : `${g.title} tonen`; eye.setAttribute('aria-label', eye.title);
@@ -557,7 +615,7 @@ export function mount(ui, host, config) {
         // searching on "bakboord" still finds a merged row: its own names are part of what is matched
         // found by its own name and by the other names the lesson material gives it (dirk, vaantje, …)
         const key = fold([bucket.label, ...bucket.parts.flatMap((p) => [p.extras.naam, ...zoeknamen(p.extras.id)])].join(' '));
-        const row = { parts: bucket.parts, twins, button, li, section: entry, key };
+        const row: Rij = { parts: bucket.parts, twins, button, li, section: entry, key };
         button.addEventListener('click', () => { const pick = twins ? pickTwin(row) : row.parts; select(pick); flyTo(pick); });
         entry.rows.push(row); rows.push(row);
       }
@@ -568,17 +626,17 @@ export function mount(ui, host, config) {
     }
     $('parts-search').addEventListener('input', filterPartList);
     // every group at once, shown or hidden, through the same eyes
-    $('parts-show-all').addEventListener('click', () => { for (const e of sections) e.show(true); });
-    $('parts-hide-all').addEventListener('click', () => { for (const e of sections) e.show(false); });
+    $('parts-show-all').addEventListener('click', () => { for (const e of sections) e.show!(true); });
+    $('parts-hide-all').addEventListener('click', () => { for (const e of sections) e.show!(false); });
     refreshPartList();
     // the parts for the field over everything on the start page of Zoeken: a hit opens their page and picks it
-    zoeken.parts(rows.map((row) => ({ key: row.key, naam: row.button.querySelector('.naam').textContent, open: () => row.button.click() })), $('parts-search'));
+    zoeken.parts(rows.map((row) => ({ key: row.key, naam: row.button.querySelector('.naam')!.textContent, open: () => row.button.click() })), $<HTMLInputElement>('parts-search'));
     if (!$('parts').hidden) { partsPanelToggled(true); filterPartList(); }   // opened while the model was loading
   }
 
   /** Filter by name, blind to case and to accents. */
   function filterPartList() {
-    const query = fold($('parts-search').value.trim());
+    const query = fold($<HTMLInputElement>('parts-search').value.trim());
     let found = 0;
     for (const entry of sections) {
       let shown = 0;
@@ -596,7 +654,7 @@ export function mount(ui, host, config) {
   }
 
   // a gebied lies on other parts: it is there when they are, its own overlay being hidden until it is picked
-  const partVisible = (p) => p.node.parent.visible && (p.sources ?? p.meshes).some((m) => m.visible);
+  const partVisible = (p: Deel) => p.node.parent!.visible && (p.sources ?? p.meshes).some((m: THREE.Object3D) => m.visible);
 
   const twinBox = new THREE.Box3();
 
@@ -606,9 +664,9 @@ export function mount(ui, host, config) {
    * this mode. Clicking while that twin is the selection hands over the other one, so reaching the far
    * side costs no orbit.
    */
-  function pickTwin(row) {
+  function pickTwin(row: Rij) {
     const centre = new THREE.Vector3();
-    const state = row.twins.map((list) => {
+    const state = row.twins!.map((list) => {
       const empty = worldBox(list, twinBox).isEmpty();        // as the parts stand right now, like the flight
       if (!empty) twinBox.getCenter(centre);
       return { parts: list, there: !empty && list.some(partVisible),
@@ -635,7 +693,7 @@ export function mount(ui, host, config) {
   }
 
   /** Mark the row of a part as the current one, and bring it into view if the list is open. */
-  function markRow(part) {
+  function markRow(part: Deel | null) {
     const row = part ? rows.find((r) => r.parts.includes(part)) : null;
     currentRow?.button.removeAttribute('aria-current');
     currentRow = row;
@@ -649,10 +707,10 @@ export function mount(ui, host, config) {
   }
 
   /** The list only follows the mode while it is open, so a cheap poll is enough. */
-  function partsPanelToggled(open) {
+  function partsPanelToggled(open: boolean) {
     // closed, it opens again as new: on its start page, no search, nothing picked
-    if (!open) { zoeken.reset(); $('parts-search').value = ''; if (rows.length) filterPartList(); }
-    clearInterval(partsPoll);
+    if (!open) { zoeken.reset(); $<HTMLInputElement>('parts-search').value = ''; if (rows.length) filterPartList(); }
+    clearInterval(partsPoll!);
     partsPoll = null;
     if (!open || !rows.length) return;
     refreshPartList();
@@ -661,7 +719,7 @@ export function mount(ui, host, config) {
   }
 
   // ---------------------------------------------------------------- camera views
-  function setView(name, animate = true) {
+  function setView(name: 'iso' | 'side' | 'top' | 'bow' | 'stern', animate = true) {
     lessonDistance = 0;                                           // back to the viewer's own views: its own range
     const center = modelBox.getCenter(new THREE.Vector3());
     const size = modelBox.getSize(new THREE.Vector3());
@@ -688,16 +746,17 @@ export function mount(ui, host, config) {
    *  wallen and the way of a manoeuvre in it, or a view of a lesson's own - each far enough off to take in what is drawn, and
    *  sized for what the card leaves free of the picture (`covered`: px it covers on the right; the
    *  krachten layer moves the picture itself into that part, with a view offset). */
-  function krachtView(name, covered = 0) {
+  function krachtView(name: Aanzicht, covered = 0) {
     // a lesson may give its own: { hoogte, breedte, doel, richting }, metres and model space as these - and oog: the
     // height the camera stands at (Lichten: the eye of someone in a small boat), as far off as it would be
-    const [height, width, target, dir] = typeof name === 'object' && name ? [name.hoogte, name.breedte, name.doel, name.richting] : {
+    // (cast: looked up by any name; one it does not know gives none)
+    const [height, width, target, dir] = typeof name === 'object' && name ? [name.hoogte, name.breedte, name.doel, name.richting] : ({
       boven: [9.2, 6.6, [3.0, 1.2, 0], [-0.002, 1, 0]],
       achter: [7.6, 7.2, [2.8, 2.4, 0], [-1, 0.06, 0]],
       achterboven: [9, 8, [2.8, 2.0, 0], [-0.74, 0.62, 0.26]],
       voor: [7.6, 7.2, [2.8, 2.4, 0], [1, 0.06, 0]],
       hoog: [26, 28, [2.8, 0.4, 0], [-0.32, 1, 0]],
-    }[name] ?? [];
+    } as Record<string, [number, number, [number, number, number], [number, number, number]]>)[name] ?? [];
     if (!height) { setView('iso'); return; }
     const rect = wrap.getBoundingClientRect();
     const freeW = Math.max(rect.width - covered, rect.width * 0.35) / rect.width;
@@ -713,25 +772,25 @@ export function mount(ui, host, config) {
   }
   // how fast what is being done goes - procedures, and what is moved by hand; wind, water and flag keep their own time
   let speed = 1;
-  $('speed').addEventListener('input', (e) => { speed = Number(e.target.value) || 1; });
+  $('speed').addEventListener('input', (e) => { speed = Number((e.target as HTMLInputElement).value) || 1; });
 
   // ---------------------------------------------------------------- picking
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const hoverTip = $('hover');
-  let lastHit = null;
+  let lastHit: THREE.Intersection | null = null;
 
-  function pick(event) {
+  function pick(event: { clientX: number; clientY: number }) {
     const rect = canvas.getBoundingClientRect();
     pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObjects(pickable(), false)[0];
     lastHit = hit ?? null;
-    return hit ? parts.find((p) => p.node === hit.object.userData.part) : null;
+    return hit ? parts.find((p) => p.node === hit.object.userData.part)! : null;   // (every mesh picked is one of a part's)
   }
   // the overlay of a gebied is no target: a click on the boeg has to keep picking Boeisel, Vlak, ...
-  const pickable = () => parts.filter((p) => !p.extras.gebied && p.node.parent.visible)
-    .flatMap((p) => p.meshes).filter((m) => m.visible);
+  const pickable = () => parts.filter((p) => !p.extras.gebied && p.node.parent!.visible)
+    .flatMap((p): THREE.Mesh[] => p.meshes).filter((m) => m.visible);
 
   // OrbitControls zooms and pans by the distance to its target, whatever lies under the pointer: with
   // the target left behind a close-up surface every step shrinks towards nothing at minDistance, and
@@ -739,7 +798,7 @@ export function mount(ui, host, config) {
   // of what is under the pointer (the camera does not turn): steps then scale with that distance.
   const sight = new THREE.Vector3();
   const aimProbe = new THREE.Raycaster();
-  function aimAt(x, y) {
+  function aimAt(x: number, y: number) {
     if (runView() === 'schipper') return;                           // from the helm the target is the way he looks
     aimProbe.setFromCamera(pointer.set(x, y), camera);
     const hit = aimProbe.intersectObjects(pickable(), false)[0];
@@ -748,7 +807,7 @@ export function mount(ui, host, config) {
     const depth = Math.max(hit.point.sub(camera.position).dot(sight), controls.minDistance * 1.001);
     controls.target.copy(camera.position).addScaledVector(sight, depth);
   }
-  const ndc = (e) => {
+  const ndc = (e: MouseEvent): [number, number] => {
     const rect = canvas.getBoundingClientRect();
     return [((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1];
   };
@@ -763,13 +822,13 @@ export function mount(ui, host, config) {
     if (e.target === canvas && e.pointerType === 'mouse' && (e.button === 2 || (e.button === 0 && (e.ctrlKey || e.metaKey || e.shiftKey)))) aimAt(...ndc(e));
   }, { capture: true, signal });
 
-  function paint(part, color) {
+  function paint(part: Deel, color: THREE.Color | null) {
     if (part.extras.gebied) {              // a gebied is not tinted: its overlay IS the highlight
       for (const m of part.meshes) m.visible = Boolean(color);
       return;
     }
     const through = Boolean(color) && part.xray === true && color === SELECT;
-    for (const m of part.meshes) {
+    for (const m of part.meshes as ModelDeel['meshes']) {    // (cast: a gebied went above)
       m.material.emissive.copy(color ?? new THREE.Color(0));
       m.material.emissiveIntensity = color ? 0.55 : 0;
       m.material.depthTest = !through; m.renderOrder = through ? 30 : 0;   // seen through the boat, see flyTo
@@ -779,7 +838,7 @@ export function mount(ui, host, config) {
   function refreshHighlight() {
     // Two passes: a few parts built in the viewer share a material (every live rope has the grootschoot's,
     // the knop of the vlaggenstok the roerkop's bakskleur), and clearing the one would put out the other.
-    const lit = (p) => override.get(p) ?? (selected.includes(p) ? SELECT : p === hovered ? HOVER : null);
+    const lit = (p: Deel) => override.get(p) ?? (selected.includes(p) ? SELECT : p === hovered ? HOVER : null);
     locator.release();                        // the pulse hands the materials back before they are painted
     for (const p of parts) if (!lit(p)) paint(p, null);
     for (const p of parts) if (lit(p)) paint(p, lit(p));
@@ -791,8 +850,8 @@ export function mount(ui, host, config) {
    * quiz lights parts in, one group per colour - never the hover, which stays calm and instant.
    */
   function pulsed() {
-    const groups = new Map();
-    const add = (key, part, color) => {
+    const groups = new Map<string, { parts: Deel[]; color: THREE.Color }>();
+    const add = (key: string, part: Deel, color: THREE.Color) => {
       const group = groups.get(key) ?? { parts: [], color };
       group.parts.push(part);
       group.color = color;                    // a chip of the quiz lets its colour glow: take the newest
@@ -809,7 +868,7 @@ export function mount(ui, host, config) {
                                 rings: () => quiz?.rings() ?? true, signal, onResize, onDestroy });
 
   /** A colour per part for the quiz, over the selection and the hover; an empty list gives them back. */
-  function setHighlights(list = []) {
+  function setHighlights(list: [Deel, THREE.Color][] = []) {
     override.clear();
     for (const [part, color] of list) override.set(part, color);
     refreshHighlight();
@@ -819,7 +878,7 @@ export function mount(ui, host, config) {
    * Select one part, or the parts a row of the list stands for; fills the info tile and marks the
    * row. `hit` is the raycast that did it, if there was one: it names the CAD body that was clicked.
    */
-  function select(list, hit = null) {
+  function select(list: Deel[], hit: THREE.Intersection | null = null) {
     for (const p of parts) p.xray = false;
     selected = list;
     modes?.reveal(list);                           // something in the bakskist: its lid opens
@@ -837,11 +896,11 @@ export function mount(ui, host, config) {
     // The CAD body that was clicked; a part merged from several bodies lists the rest in the tooltip.
     // It is a debugging aid and nothing a scout needs, so it only shows with debug.modelnummer on.
     // A part the pipeline or the viewer made itself (anker, ankerlijn, leuvers) has no CAD body: its id stands in.
-    const handle = config.debug.modelnummer ? (handleAt(hit) ?? (ex.handles?.length ? null : ex.id)) : null;
+    const handle = config.debug.modelnummer ? (handleAt(hit) ?? ((ex as { handles?: string[] }).handles?.length ? null : ex.id)) : null;
     const model = $('info-model');
     model.hidden = !handle;
     if (handle) {
-      const rest = (ex.handles ?? []).filter((other) => other !== handle);
+      const rest = ((ex as { handles?: string[] }).handles ?? []).filter((other) => other !== handle);
       const more = $('info-more');
       $('info-handle').textContent = handle;
       more.textContent = rest.length ? `+${rest.length}` : '';
@@ -852,7 +911,7 @@ export function mount(ui, host, config) {
   // Hover: a raycast through every part is the dear thing, and a mouse sends a move every frame -
   // so the move is only remembered here, and picked in the loop at most once per HOVER_MS; the parts
   // are only painted again when what is under the pointer changes.
-  let hoverAt = null; let hoverPicked = -Infinity;
+  let hoverAt: { clientX: number; clientY: number } | null = null; let hoverPicked = -Infinity;
   canvas.addEventListener('pointermove', (e) => {
     if (e.buttons) { hoverAt = null; return; }   // orbiting
     hoverAt = { clientX: e.clientX, clientY: e.clientY };
@@ -861,7 +920,7 @@ export function mount(ui, host, config) {
       hoverTip.style.left = `${e.clientX - box.left}px`; hoverTip.style.top = `${e.clientY - box.top}px`;
     }
   });
-  function stepHover(now) {
+  function stepHover(now: number) {
     if (!hoverAt || now - hoverPicked < HOVER_MS) return;
     const at = hoverAt; hoverAt = null; hoverPicked = now;
     const part = pick(at);
@@ -877,7 +936,7 @@ export function mount(ui, host, config) {
 
   // A tap or a click: the one primary pointer, the left button, let go near where it went down. A
   // second finger makes it a pinch, and a right or modified press is a pan: neither is a click.
-  let downAt = null;
+  let downAt: { x: number; y: number; id: number } | null = null;
   canvas.addEventListener('pointerdown', (e) => {
     downAt = e.isPrimary && e.button === 0 && !(e.ctrlKey || e.metaKey || e.shiftKey) ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
   });
@@ -901,12 +960,12 @@ export function mount(ui, host, config) {
   // Steering: a drag that starts on the helmstok moves the rudder instead of the camera. It listens in
   // the capture phase and keeps the event to itself, so OrbitControls never sees that press.
   const helmRay = new THREE.Raycaster();
-  let steering = false; let steerFrom = null;      // where the press was: let go there, it was a click
-  let steerId = null;                              // the pointer that holds the helmstok: a second finger is not it
-  const steer = (e) => {
+  let steering = false; let steerFrom: [number, number] | null = null;      // where the press was: let go there, it was a click
+  let steerId: number | null = null;                              // the pointer that holds the helmstok: a second finger is not it
+  const steer = (e: PointerEvent) => {
     const box = canvas.getBoundingClientRect();
     helmRay.setFromCamera(new THREE.Vector2(((e.clientX - box.left) / box.width) * 2 - 1, -((e.clientY - box.top) / box.height) * 2 + 1), camera);
-    modes.helm.steer(helmRay.ray);
+    modes!.helm.steer(helmRay.ray);
   };
   canvas.addEventListener('pointerdown', (e) => {
     // not in a focus mode: a run is looked at, and in a quiz round a click on the helmstok is an answer
@@ -917,14 +976,14 @@ export function mount(ui, host, config) {
     canvas.style.cursor = 'grabbing';
   }, { capture: true });
   canvas.addEventListener('pointermove', (e) => { if (steering && e.pointerId === steerId) { e.stopImmediatePropagation(); steer(e); } }, { capture: true });
-  for (const type of ['pointerup', 'pointercancel']) {
-    canvas.addEventListener(type, (e) => {
+  for (const type of ['pointerup', 'pointercancel'] as const) {
+    canvas.addEventListener(type, (e: PointerEvent) => {
       if (!steering || e.pointerId !== steerId) return;          // another finger: the controls deal with it
       e.stopImmediatePropagation();
-      steering = false; modes.helm.release();
+      steering = false; modes!.helm.release();
       canvas.releasePointerCapture(e.pointerId);
       canvas.style.cursor = 'grab';
-      if (type === 'pointerup' && Math.hypot(e.clientX - steerFrom[0], e.clientY - steerFrom[1]) <= 4) {
+      if (type === 'pointerup' && Math.hypot(e.clientX - steerFrom![0], e.clientY - steerFrom![1]) <= 4) {
         const part = pick(e);                      // not steered: the helmstok was clicked, like any other part
         if (!quiz?.click(part, lastHit)) select(part ? [part] : [], lastHit);
       }
@@ -937,7 +996,7 @@ export function mount(ui, host, config) {
   const probe = new THREE.Raycaster();
   const partBox = new THREE.Box3();
   const meshBox = new THREE.Box3();
-  let flight = null;
+  let flight: Flight | null = null;
 
   let handledAt = -Infinity;                                        // when the user last moved the view
   controls.addEventListener('start', () => { flight = null; handledAt = performance.now(); });   // the user takes the controls
@@ -947,7 +1006,7 @@ export function mount(ui, host, config) {
    * sails have their vertices rewritten per frame, so it is measured vertex by vertex: the cached
    * geometry box would be stale, and computing one would break picking of the same geometry.
    */
-  function worldBox(list, out) {
+  function worldBox(list: Deel[], out: THREE.Box3) {
     scene.updateMatrixWorld();
     out.makeEmpty();
     for (const p of list) {
@@ -958,8 +1017,8 @@ export function mount(ui, host, config) {
   }
 
   /** How many of the sample points of the part are free of other parts, seen from `origin`. */
-  const hits = [];
-  function countVisible(origin, points, occluders, upTo) {
+  const hits: THREE.Intersection[] = [];
+  function countVisible(origin: THREE.Vector3, points: THREE.Vector3[], occluders: THREE.Mesh[], upTo: number) {
     const to = new THREE.Vector3();
     let seen = 0;
     for (let i = 0; i < points.length; i++) {
@@ -986,7 +1045,7 @@ export function mount(ui, host, config) {
    * `near`: stay on the side of the boat the camera is on (the boat is near enough symmetric that
    * what is seen from one side is seen from the other); `ms`: how long the flight takes.
    */
-  function flyTo(list, { box = worldBox(list, partBox), low = false, near = false, ms = FLIGHT_MS } = {}) {
+  function flyTo(list: Deel[], { box = worldBox(list, partBox), low = false, near = false, ms = FLIGHT_MS }: { box?: THREE.Box3; low?: boolean; near?: boolean; ms?: number } = {}) {
     if (box.isEmpty()) return false;
     const centre = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
@@ -998,8 +1057,8 @@ export function mount(ui, host, config) {
 
     const points = SAMPLES.map(([x, y, z]) => new THREE.Vector3(centre.x + x * size.x * 0.35,
       centre.y + y * size.y * 0.35, centre.z + z * size.z * 0.35));
-    const occluders = parts.filter((p) => !list.includes(p) && p.node.parent.visible)
-      .flatMap((p) => p.meshes).filter((m) => m.visible);    // the water and the wind arrow are no parts
+    const occluders = parts.filter((p) => !list.includes(p) && p.node.parent!.visible)
+      .flatMap((p): THREE.Mesh[] => p.meshes).filter((m) => m.visible);    // the water and the wind arrow are no parts
     const candidates = [camera.position.clone().sub(controls.target).normalize()];   // ties keep the camera where it is
     for (const elevation of low ? LOW_ELEVATIONS : ELEVATIONS) {
       const e = THREE.MathUtils.degToRad(elevation);
@@ -1046,7 +1105,7 @@ export function mount(ui, host, config) {
   }
 
   /** Camera and target travel together; a new flight, a drag or a zoom replaces this one. */
-  function startFlight(position, target, ms = FLIGHT_MS) {
+  function startFlight(position: THREE.Vector3, target: THREE.Vector3, ms = FLIGHT_MS) {
     flight = { from: camera.position.clone(), fromTarget: controls.target.clone(),
                to: position, toTarget: target, start: performance.now(), ms };
   }
@@ -1067,7 +1126,7 @@ export function mount(ui, host, config) {
   // in keeps its own arrow keys. A held key is kept by its physical key (e.code), not by the character
   // it gives: Shift + = gives '+' but, with Shift let go first, a keyup for '='; what it does is
   // settled on the way down, by the character where it is known, so + and - work on any layout.
-  const held = new Map();                                       // e.code -> 'left' | 'right' | 'up' | 'down' | 'in' | 'out'
+  const held = new Map<string, string>();                                       // e.code -> 'left' | 'right' | 'up' | 'down' | 'in' | 'out'
   window.addEventListener('keydown', (e) => {
     // the search field and the rows of the parts list keep their arrow keys to themselves
     const action = NAV_KEYS.get(e.key) ?? NAV_CODES.get(e.code);
@@ -1089,7 +1148,7 @@ export function mount(ui, host, config) {
   window.addEventListener('keydown', (e) => { shiftDown = e.shiftKey; }, { signal });
   window.addEventListener('keyup', (e) => { shiftDown = e.shiftKey; }, { signal });
 
-  function keyboardNavigate(dt) {
+  function keyboardNavigate(dt: number) {
     if (!held.size) return;
     const on = new Set(held.values());
     const x = (on.has('right') ? 1 : 0) - (on.has('left') ? 1 : 0);
@@ -1119,17 +1178,17 @@ export function mount(ui, host, config) {
   // operation is watched it is in the card instead (handelingen.js), and while one is practised it is
   // not there at all: the questions are the steps.
   const procBar = $('procedure');
-  const procTime = $('procedure-time');
+  const procTime = $<HTMLInputElement>('procedure-time');
   const procStep = $('procedure-step');
   const procName = $('procedure-name');
   const procTicks = $('procedure-ticks');
   const procPlay = $('procedure-play');
-  const procIcons = procPlay.querySelectorAll('[data-icon]');
+  const procIcons = procPlay.querySelectorAll<SVGGElement>('[data-icon]');
   let procShape = '';                    // the procedure the ticks and the range of the slider were built for
   let procWoke = 0;                      // when it was last wanted; it fades REST_MS after that
   let procDragging = false;              // the user has the thumb: playback writes no value
-  let procPlaying = null;                // what the play/pause button is drawing
-  let procDismissed = null;              // the shape of the procedure whose card was closed: it stays away
+  let procPlaying: boolean | null = null;                // what the play/pause button is drawing
+  let procDismissed: string | null = null;              // the shape of the procedure whose card was closed: it stays away
   let procWasPlaying = false;            // ... until it, or another one, is started afresh
   // In the card of a run (Bekijken) it waits at its start, and play goes a step at a time: each step
   // played the way a single step is, the camera first, and then held long enough to read what the
@@ -1138,13 +1197,13 @@ export function mount(ui, host, config) {
   let holdUntil = 0;                     // when the step just done has been read
   const inRun = () => wrap.classList.contains('ops-on');
   /** How long the step just done stays: a moment to see it, and time to read its name, waarom and tip. */
-  const readTime = (p) => {
+  const readTime = (p: Procedure) => {
     const words = `${p.current?.label ?? ''} ${p.current?.waarom ?? ''} ${p.current?.tip ?? ''}`.split(/\s+/).filter(Boolean).length;
     return Math.min(READ_MS.base + words * READ_MS.word, READ_MS.max);
   };
   /** Whether a step is left to play, forwards. */
-  const moreSteps = (p) => p.steps.some((s) => !s.skipped && s.end > p.t + 1e-6);
-  const shapeOf = (p) => [p.name, ...p.steps.map((s) => `${s.end}${s.skipped ? 'x' : ''}`)].join(' ');
+  const moreSteps = (p: Procedure) => p.steps.some((s) => !s.skipped && s.end > p.t + 1e-6);
+  const shapeOf = (p: Procedure) => [p.name, ...p.steps.map((s) => `${s.end}${s.skipped ? 'x' : ''}`)].join(' ');
   /** The card of a run closed (handelingen.js): its bar goes at once, not after lingering. */
   function dismissProcedure() {
     const p = modes?.procedure();
@@ -1160,20 +1219,20 @@ export function mount(ui, host, config) {
     const p = modes?.procedure();
     if (!p) return;
     if (inRun()) {
-      if (autoplay || p.playing) { autoplay = false; modes.procedureControl.pause(); return; }
+      if (autoplay || p.playing) { autoplay = false; modes!.procedureControl.pause(); return; }
       if (!moreSteps(p)) return;
       autoplay = true; holdUntil = 0;
       stepProcedure(1);
       return;
     }
-    modes.procedureControl[p.playing ? 'pause' : 'play']();
+    modes!.procedureControl[p.playing ? 'pause' : 'play']();
   });
   // A step on its own is shown: the camera first goes to the parts it is about - all the room they
   // take up while it plays, from the side - and then it plays.
   // In Bovenaf and Schipper the camera stays where it is; Dichtbij goes to the parts even where the
   // step says where to look from.
   const stepBox = new THREE.Box3();
-  function stepProcedure(direction) {
+  function stepProcedure(direction: number) {
     const v = runView();
     const view = v === 'vogel' ? modes?.procedureControl.camera(direction) : null;
     let flying = false;
@@ -1187,14 +1246,14 @@ export function mount(ui, host, config) {
    * the side the fok is not on as the step ends, so it does not hang in the way; with kant 'vast'
    * it is taken as it is.
    */
-  function flyToView({ positie, doel, kant }, direction) {
+  function flyToView({ positie, doel, kant }: StapCamera, direction: number) {
     const position = new THREE.Vector3(...positie); const target = new THREE.Vector3(...doel);
-    const mirrored = (v) => v.clone().setZ(-v.z);
-    let flip = null;
+    const mirrored = (v: THREE.Vector3) => v.clone().setZ(-v.z);
+    let flip: boolean | null = null;
     const fok = kant === 'zonder fok' ? parts.find((p) => p.extras.id === 'fok') : null;
     if (fok) {
       const span = new THREE.Box3();
-      modes.procedureControl.across(direction, () => span.union(worldBox([fok], stepBox)));
+      modes!.procedureControl.across(direction, () => span.union(worldBox([fok], stepBox)));
       const z = span.isEmpty() ? 0 : span.getCenter(new THREE.Vector3()).z;
       if (Math.abs(z) > 0.02) flip = Math.sign(position.z) === Math.sign(z);
     }
@@ -1218,7 +1277,7 @@ export function mount(ui, host, config) {
   // A click the way a step is already going is one more step, taken when this one is done (the camera
   // goes first again); the other way it turns the step round, or calls it off if it has not moved yet.
   let stepsQueued = 0;
-  function clickStep(direction) {
+  function clickStep(direction: number) {
     const p = modes?.procedure();
     autoplay = false;                                    // stepped by hand: it no longer goes on by itself
     if (p?.stepping && p.heading === direction) { stepsQueued += direction; return; }
@@ -1318,7 +1377,7 @@ export function mount(ui, host, config) {
       // the icons are SVG groups, which have no hidden property: the attribute has to be set
       for (const icon of procIcons) icon.toggleAttribute('hidden', (icon.dataset.icon === 'pause') !== playing);
       procPlay.setAttribute('aria-label', playing ? 'Pauzeren' : 'Afspelen');
-      procPlay.title = procPlay.getAttribute('aria-label');
+      procPlay.title = procPlay.getAttribute('aria-label')!;
     }
 
     // it stays while it runs or stands still half way, while its own popover is open - so a finished
@@ -1344,10 +1403,10 @@ export function mount(ui, host, config) {
     else camera.clearViewOffset();
   }
   // (and the bar of a manoeuvre, played from a lesson, stands in the middle of what the card leaves free: style.css)
-  const setCoveredRight = (px) => { if (px !== coveredRight) { coveredRight = px; wrap.style.setProperty('--kr-gedekt', `${px}px`); frame(); } };
+  const setCoveredRight = (px: number) => { if (px !== coveredRight) { coveredRight = px; wrap.style.setProperty('--kr-gedekt', `${px}px`); frame(); } };
   // by who: the card of a quiz round or a run, and the roeicommando card; the picture clears the most
-  const coveredBy = {};
-  const setCovered = (px, who = 'card') => {
+  const coveredBy: Record<string, number> = {};
+  const setCovered = (px: number, who = 'card') => {
     coveredBy[who] = px;
     const most = Math.max(0, ...Object.values(coveredBy));
     if (most === covered) return; covered = most; frame();
@@ -1368,7 +1427,7 @@ export function mount(ui, host, config) {
   // while sailing or rowing (modes.js hides its button), and without it the panel shows Lessen.
   let learnKind = 'lessen';
   let quizKind = 'onderdelen';
-  let openLearn = () => {};
+  let openLearn: (kind?: string) => void = () => {};
 
   // ---------------------------------------------------------------- the address of the page (adres.js)
   // What it asks for is opened once the lessons are there; with config.adres it then follows what is open.
@@ -1389,17 +1448,17 @@ export function mount(ui, host, config) {
       zoeken.goto(cat);
       if (id && cat === 'onderdelen') partRow(id)?.button.click(); else if (id) zoeken.openItem(cat, id);
     } else if (key === 'onderdeel') partRow(value)?.button.click();
-    else if (key === 'over' || key === 'updates') openPanel.get(key === 'over' ? 'about' : 'updates')();
+    else if (key === 'over' || key === 'updates') openPanel.get(key === 'over' ? 'about' : 'updates')!();
   }
   /** What is open now, as [key, value] for the address, or null. */
-  function adresNu() {
+  function adresNu(): [string, string | null | undefined] | null {
     const kaart = openKaart(wrap) ?? lessons.krachten?.nu?.();
     // a lesson by its key in the list (the quizzes on a card go by 'voorrang-quiz'), on its onderwerp - or a quiz
     // on its niveau or kind
     const les = kaart && Object.keys(lessons).find((k) => k === kaart.sleutel.replace(/-/g, ''));
     if (les && lessons[les].keuze !== undefined) return [les, lessons[les].keuze];
     if (les) return [les, kaart.onderwerp === lessons[les].onderwerpen?.[0]?.id ? '' : kaart.onderwerp];
-    if (handelingen?.active()) return ['manoeuvre', handelingen.info().handeling];
+    if (handelingen?.active()) return ['manoeuvre', handelingen.info()!.handeling];
     if (quiz?.active()) return ['quiz', 'onderdelen'];
     if (tekenQuiz.active()) return ['quiz', 'verkeerstekens'];
     if (!$('parts').hidden) {
@@ -1415,8 +1474,8 @@ export function mount(ui, host, config) {
   }
   const volgAdres = () => zetAdres(adresNu(), [...Object.keys(lessons), ...SLEUTELS]);
   function initLearn() {
-    const buttons = [...ui.querySelectorAll('#learn-kind button')];
-    const quizButtons = [...ui.querySelectorAll('#quiz-soort button')];
+    const buttons = [...ui.querySelectorAll<HTMLButtonElement>('#learn-kind button')];
+    const quizButtons = [...ui.querySelectorAll<HTMLButtonElement>('#quiz-soort button')];
     const show = (kind = learnKind) => {
       const can = !$('learn-manoeuvres').hidden;
       const shown = kind === 'manoeuvres' && !can ? 'lessen' : kind;
@@ -1437,25 +1496,25 @@ export function mount(ui, host, config) {
       if (open && shown === 'manoeuvres') handelingen?.refresh();
       modes?.placePopover();                                  // its height changed: it has to fit again
     };
-    for (const b of buttons) b.addEventListener('click', () => { learnKind = b.dataset.learn; show(); });
-    for (const b of quizButtons) b.addEventListener('click', () => { quizKind = b.dataset.quiz; show(); });
+    for (const b of buttons) b.addEventListener('click', () => { learnKind = b.dataset.learn!; show(); });
+    for (const b of quizButtons) b.addEventListener('click', () => { quizKind = b.dataset.quiz!; show(); });
     // Quiz › Voorrang: the popover makes way for its card, on a situatie of that niveau
-    for (const b of ui.querySelectorAll('#voorrang-niveau button')) {
+    for (const b of ui.querySelectorAll<HTMLButtonElement>('#voorrang-niveau button')) {
       b.addEventListener('click', () => { modes?.closePopover(); lessons.voorrangquiz?.open(b.dataset.niveau); });
     }
     // Quiz › Zeiltermen: the same, on questions of that kind (zeiltermen/quiz.js)
-    for (const b of ui.querySelectorAll('#zeiltermen-soort button')) {
+    for (const b of ui.querySelectorAll<HTMLButtonElement>('#zeiltermen-soort button')) {
       b.addEventListener('click', () => { modes?.closePopover(); lessons.zeiltermenquiz?.open(b.dataset.soort); });
     }
     // a lesson: the popover makes way for its card
-    for (const b of ui.querySelectorAll('#lessen-list button')) {
-      b.addEventListener('click', () => { modes?.closePopover(); lessons[b.dataset.les]?.open(); });
+    for (const b of ui.querySelectorAll<HTMLButtonElement>('#lessen-list button')) {
+      b.addEventListener('click', () => { modes?.closePopover(); lessons[b.dataset.les!]?.open(); });
     }
     // how far each lesson is gevolgd, under its name (lessen/voortgang.js)
     const tellingen = () => {
-      for (const b of ui.querySelectorAll('#lessen-list button')) {
-        const l = lessons[b.dataset.les]; if (!l?.onderwerpen) continue;
-        const { gevolgd, van } = voortgang.telling(b.dataset.les, l.onderwerpen);
+      for (const b of ui.querySelectorAll<HTMLButtonElement>('#lessen-list button')) {
+        const l = lessons[b.dataset.les!]; if (!l?.onderwerpen) continue;
+        const { gevolgd, van } = voortgang.telling(b.dataset.les!, l.onderwerpen);
         let tel = b.querySelector('.les-telling');
         if (!tel) { tel = Object.assign(document.createElement('em'), { className: 'les-telling' }); b.append(tel); }
         tel.textContent = gevolgd ? (gevolgd === van ? `Alles gevolgd (${van})` : `${gevolgd} van ${van} gevolgd`) : `${van} ${van === 1 ? 'onderwerp' : 'onderwerpen'}`;
@@ -1466,8 +1525,9 @@ export function mount(ui, host, config) {
     onDestroy(voortgang.bijWijziging(tellingen));
     $('learn-toggle').addEventListener('click', () => show()); // after modes.js has opened or shut it
     // (quiz.js and the tekenquiz come back to their own: 'onderdelen' or 'verkeerstekens')
-    openLearn = (kind) => {
-      if (['onderdelen', 'verkeerstekens', 'voorrang', 'zeiltermen'].includes(kind)) { learnKind = 'quiz'; quizKind = kind; } else if (kind) learnKind = kind;
+    openLearn = (kind?: string) => {
+      // (the list typed wider: kind may be left out)
+      if ((['onderdelen', 'verkeerstekens', 'voorrang', 'zeiltermen'] as (string | undefined)[]).includes(kind)) { learnKind = 'quiz'; quizKind = kind!; } else if (kind) learnKind = kind;
       if ($('learn-panel').hidden) $('learn-toggle').click(); else show();
     };
   }
@@ -1497,10 +1557,10 @@ export function mount(ui, host, config) {
   // commands ("Op… riemen. Bakboord stopt… af") is split into them.
   const SPEAKERS = { roer: new THREE.Vector3(1.0, 1.45, 0), fok: new THREE.Vector3(3.8, 1.5, 0), voor: new THREE.Vector3(5.1, 1.35, 0) };   // model space: where their heads are (voor: the haakvoor)
   const BUBBLES = { max: 4, gap: 6, tail: 8, fade: [1, 0.72, 0.5, 0.32] };   // per speaker; opacity from the newest up
-  let bubbles = [];                                                 // { el, who, until }, oldest first
-  function say(text, who = 'roer') {
+  let bubbles: { el: HTMLDivElement; who: string; until: number; height?: number }[] = [];   // { el, who, until }, oldest first
+  function say(text: string, who = 'roer') {
     if (!text) return;
-    const at = SPEAKERS[who] ? who : 'roer';
+    const at = SPEAKERS[who as keyof typeof SPEAKERS] ? who : 'roer';   // (cast: a speaker it does not know has none)
     for (const part of text.split(/(?<=[!.?])\s+(?=\S)/)) {
       const el = Object.assign(document.createElement('div'), { className: 'callout', textContent: part });
       wrap.append(el);
@@ -1523,7 +1583,7 @@ export function mount(ui, host, config) {
     for (const w of Object.keys(SPEAKERS)) {
       const mine = bubbles.filter((b) => b.who === w);
       if (!mine.length) continue;
-      calloutPoint.copy(SPEAKERS[w]).project(camera);
+      calloutPoint.copy(SPEAKERS[w as keyof typeof SPEAKERS]).project(camera);
       const behind = calloutPoint.z > 1;
       const x = ((calloutPoint.x + 1) / 2) * box.width; const y = ((1 - calloutPoint.y) / 2) * box.height;
       let lift = 0;
@@ -1559,9 +1619,9 @@ export function mount(ui, host, config) {
   // The picture is drawn from the boat: she stays put and the world turns under her. In a manoeuvre it
   // is her that turns, as you would see it from the water: the camera goes round her by as much as
   // her heading changes, so the steiger, the wind and her track stand still and she swings.
-  let headingWas = null;
+  let headingWas: number | null = null;
   const turnAxis = new THREE.Vector3(0, 1, 0); const turnAbout = new THREE.Vector3(2.8, 0, 0);   // her pivot, in model space
-  const turnPoint = (v, a) => v.sub(turnAbout).applyAxisAngle(turnAxis, a).add(turnAbout);
+  const turnPoint = (v: THREE.Vector3, a: number) => v.sub(turnAbout).applyAxisAngle(turnAxis, a).add(turnAbout);
   // ...and the whole of her track stays in the picture: when it would run off it, the view draws back
   // and moves over, smoothly, until it fits with room to spare - so it does not start and stop again
   // with every bit the track grows - never in closer on its own, and not for a few seconds after the
@@ -1569,13 +1629,13 @@ export function mount(ui, host, config) {
   let refitting = false;
   const trackBox = new THREE.Box3(); const trackSphere = new THREE.Sphere();
   const lookFrom = new THREE.Vector3(); const lookAt = new THREE.Vector3();
-  function keepTrackInView(dt) {
+  function keepTrackInView(dt: number) {
     const dock = modes?.dock;
     if (!dock?.turnsHer) { controls.maxDistance = Math.max(MAX_DISTANCE, lessonDistance); refitting = false; return; }
     if (flight || performance.now() - handledAt < 3000) return;
     // only while the manoeuvre runs: done, she sails on and her track with her, and a view that kept
     // all of it in would draw back for as long as she goes
-    const p = modes.procedure();
+    const p = modes!.procedure();
     if (!dock.followsHer && !(p && (p.playing || p.t < p.total - 1e-6))) { refitting = false; return; }
     if (dock.followsHer) {                                          // kept on her: the camera comes along if the view drifted off her
       const k = 1 - Math.exp(-dt * 1.2);
@@ -1589,7 +1649,7 @@ export function mount(ui, host, config) {
     const need = (trackSphere.radius + 1.5) / Math.sin(half);
     const off = lookFrom.copy(camera.position).sub(controls.target); const dist = off.length();
     // does it all fit, with the target where it is - with `room` to spare?
-    const fits = (room) => dist >= need * room && lookAt.copy(trackSphere.center).sub(controls.target).length() + trackSphere.radius * room <= Math.tan(half) * dist;
+    const fits = (room: number) => dist >= need * room && lookAt.copy(trackSphere.center).sub(controls.target).length() + trackSphere.radius * room <= Math.tan(half) * dist;
     if (!refitting && fits(1)) return;
     refitting = !fits(1.25);                                        // on until there is a quarter more room than needed
     if (!refitting) return;
@@ -1618,15 +1678,16 @@ export function mount(ui, host, config) {
   const RUN_VIEW_STORE = 'lelievlet.beeld.v1';
   let runViewChosen = (() => {
     if (!opslaan) return 'vogel';
-    try { const v = localStorage.getItem(RUN_VIEW_STORE); return RUN_VIEWS.includes(v) ? v : 'vogel'; } catch { return 'vogel'; }
+    // (null is no view: includes() turns it down)
+    try { const v = localStorage.getItem(RUN_VIEW_STORE)!; return RUN_VIEWS.includes(v) ? v : 'vogel'; } catch { return 'vogel'; }
   })();
   /** The view in force: the one chosen while the card of a run is open. */
   // Leren, Verkeerstekens, Op het water: from the helm as in Schipper, looking at what was put out
-  let helmLook = null;
+  let helmLook: THREE.Vector3 | null = null;
   // let go of, the view was never Schipper as far as followRunView is concerned: Zoeken flies back itself
-  const lookFromHelm = (at) => { helmLook = at ? at.clone() : null; easing = null; if (!at) viewWas = 'vogel'; };
+  const lookFromHelm = (at: THREE.Vector3 | null) => { helmLook = at ? at.clone() : null; easing = null; if (!at) viewWas = 'vogel'; };
   const runView = () => (helmLook ? 'schipper' : wrap.classList.contains('ops-on') ? runViewChosen : 'vogel');
-  function chooseRunView(v) {
+  function chooseRunView(v: string) {
     if (!RUN_VIEWS.includes(v) || v === runViewChosen) return;
     runViewChosen = v;
     if (opslaan) try { localStorage.setItem(RUN_VIEW_STORE, v); } catch { /* remembered for this visit only */ }
@@ -1634,15 +1695,15 @@ export function mount(ui, host, config) {
   }
   let viewWas = 'vogel';                                            // the view in force last frame
   let closeAt = -1;                                                 // Dichtbij: the step last gone to
-  let above = null;                                                 // Bovenaf: { box, up } in the world
-  let easing = null;                                                // Bovenaf and Schipper: on the way in, { from, fromTarget, t }
+  let above: { box: THREE.Box3; up: THREE.Vector3; at: THREE.Vector3 } | null = null;   // Bovenaf: { box, up } in the world
+  let easing: { from: THREE.Vector3; fromTarget: THREE.Vector3; t: number } | null = null;                                                // Bovenaf and Schipper: on the way in, { from, fromTarget, t }
   let helmZ = 0;                                                    // Schipper: the side he sits on, to windward
   const aboveTarget = new THREE.Vector3(); const abovePos = new THREE.Vector3(); const aboveUp = new THREE.Vector3();
   const extentBox = new THREE.Box3(); const extentSphere = new THREE.Sphere();
   const tmpV = new THREE.Vector3();
   // where the helmsman's eyes are: sitting just before the achterdek, on the side, the end of the
   // helmstok in hand - measured once the boat is there
-  let helmEyeAt = null;
+  let helmEyeAt: THREE.Vector3 | null = null;
   const helmEye = () => {
     if (helmEyeAt) return helmEyeAt;
     const deck = worldBox(parts.filter((p) => p.extras.id === 'achterdek'), new THREE.Box3());
@@ -1651,11 +1712,12 @@ export function mount(ui, host, config) {
   };
 
   /** The step one on (+1) or back (-1), looked at close: the parts it is about, from the side. */
-  function flyToStep(direction, ms = STEP_FLIGHT_MS) {
-    const focus = modes?.procedureControl.focus(direction);
+  function flyToStep(direction: number, ms = STEP_FLIGHT_MS) {
+    // (cast: they are main's own parts, which modes holds as its Deel - and xray is main's, set here)
+    const focus = modes?.procedureControl.focus(direction) as Deel[] | undefined;
     if (!focus?.length) return false;
     const span = new THREE.Box3();
-    modes.procedureControl.across(direction, () => span.union(worldBox(focus, stepBox)));
+    modes!.procedureControl.across(direction, () => span.union(worldBox(focus, stepBox)));
     const flying = !span.isEmpty() && flyTo(focus, { box: span, low: true, near: true, ms });
     // what cannot be seen from anywhere (the midzwaard going up into its kast) is selected for the
     // step: lit, and drawn through the boat
@@ -1664,7 +1726,7 @@ export function mount(ui, host, config) {
   }
 
   /** Per frame, in a view other than Vogelvlucht: the camera where that view has it. False in Vogelvlucht. */
-  function followRunView(dt) {
+  function followRunView(dt: number) {
     const v = runView(); const dock = modes?.dock;
     // from the helm: land all round, or in a channel only its two banks, standing up along it
     modes?.lookFrom(v);
@@ -1688,7 +1750,7 @@ export function mount(ui, host, config) {
     viewWas = v;
     if (v === 'vogel' || !dock) { closeAt = -1; above = null; easing = null; return false; }
     if (v === 'dichtbij') {                                         // played on its own: along to each step as it begins
-      const p = modes.procedure();
+      const p = modes!.procedure();
       if (p?.playing && !p.stepping && p.index !== closeAt && !flight) { closeAt = p.index; flyToStep(1); }
       controls.maxDistance = MAX_DISTANCE;
       return true;
@@ -1702,12 +1764,12 @@ export function mount(ui, host, config) {
       dock.extent(extentBox);
       const at = dock.toWorld(tmpV.set(0, 0, 0), new THREE.Vector3()).setY(0);
       if (!above) {
-        const wind = THREE.MathUtils.degToRad(modes.state.course);
+        const wind = THREE.MathUtils.degToRad(modes!.state.course);
         const up = dock.toWorld(tmpV.set(turnAbout.x + Math.cos(wind), 0, Math.sin(wind)), new THREE.Vector3())
           .sub(dock.toWorld(tmpV.copy(turnAbout), new THREE.Vector3())).setY(0).normalize();
         above = { box: extentBox.clone(), up, at };
       } else {
-        const p = modes.procedure();
+        const p = modes!.procedure();
         if (dock.turnsHer && p?.playing) above.box.union(extentBox);
         else above.box.translate(tmpV.subVectors(at, above.at));
         above.at = at;
@@ -1722,14 +1784,14 @@ export function mount(ui, host, config) {
       controls.maxDistance = Math.max(MAX_DISTANCE, height * 1.2);
     } else {
       // Schipper: on the achterdoft, on the side the wind comes from, looking ahead past the mast
-      const wind = Math.sin(THREE.MathUtils.degToRad(modes.state.course));
+      const wind = Math.sin(THREE.MathUtils.degToRad(modes!.state.course));
       helmZ += ((Math.abs(wind) > 0.05 ? Math.sign(wind) * 0.55 : 0) - helmZ) * (1 - Math.exp(-dt * 1.5));
       const eye = helmEye();
       abovePos.set(eye.x, eye.y, helmZ);
       if (helmLook) aboveTarget.copy(helmLook); else aboveTarget.set(eye.x + 12, eye.y - 0.9, helmZ * 0.3);
       controls.maxDistance = MAX_DISTANCE;
       horizon.matrix.makeRotationY(dock.heading).setPosition(abovePos.x, 0, abovePos.z);
-      if (easing?.t >= 1) {
+      if (easing?.t! >= 1) {
         // sitting there: a drag turns the head. What it orbits is a hand's width before the eye, and
         // the eye is put back every frame, so only the way it looks changes - and stays, with her
         tmpV.copy(controls.target).sub(camera.position).normalize();
@@ -1751,7 +1813,7 @@ export function mount(ui, host, config) {
   const horizon = (() => {
     const group = new THREE.Group(); group.matrixAutoUpdate = false; group.visible = false;
     const R = 150; const N = 360; const pos = [];
-    const rise = (a) => 1.6 + 0.7 * Math.sin(a * 3 + 1) + 0.4 * Math.sin(a * 11 + 2)
+    const rise = (a: number) => 1.6 + 0.7 * Math.sin(a * 3 + 1) + 0.4 * Math.sin(a * 11 + 2)
       + 3.2 * Math.max(0, Math.sin(a * 23) * Math.sin(a * 5 + 0.5));                   // the trees
     for (let i = 0; i < N; i++) {
       const a0 = (i / N) * 2 * Math.PI; const a1 = ((i + 1) / N) * 2 * Math.PI;
@@ -1764,7 +1826,7 @@ export function mount(ui, host, config) {
     const land = new THREE.MeshBasicMaterial({ color: 0x93a391, side: THREE.DoubleSide });
     group.add(new THREE.Mesh(geometry, land));
     const far = new THREE.MeshBasicMaterial({ color: 0x7c8a82 });
-    const at = (a, r = R - 3) => new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+    const at = (a: number, r = R - 3) => new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
     for (const a of [0.5, 2.6, 4.3]) {                                                   // church towers
       const tower = new THREE.Mesh(new THREE.BoxGeometry(3, 13, 3), far); tower.position.copy(at(a)).setY(6.5);
       const spire = new THREE.Mesh(new THREE.ConeGeometry(2.2, 8, 4), far); spire.position.copy(at(a)).setY(17);
@@ -1794,8 +1856,8 @@ export function mount(ui, host, config) {
   let drawnAt = -Infinity;
   const underSheet = () => {
     if (canvasSize.x > SHEET) return false;
-    const card = wrap.querySelector(':scope > .les-kaart:not([hidden]), :scope > #krachten:not([hidden])');
-    return Boolean(card) && !card.style.transform;
+    const card = wrap.querySelector<HTMLElement>(':scope > .les-kaart:not([hidden]), :scope > #krachten:not([hidden])');
+    return Boolean(card) && !card!.style.transform;
   };
   const frameLoop = () => {
     const dt = Math.min(clock.getDelta(), 0.05);
@@ -1828,13 +1890,13 @@ export function mount(ui, host, config) {
   // Only drawn while it can be seen: scrolled out of the page, or in a container that is hidden, the
   // viewer stops altogether (a hidden tab stops by itself), and takes up where it was when it is back.
   let running = false;
-  const run = (on) => {
+  const run = (on: boolean) => {
     if (on === running || destroyed) return;
     running = on;
     renderer.setAnimationLoop(on ? frameLoop : null);
     if (on) clock.getDelta();                                       // the time away is no step
   };
-  const inView = new IntersectionObserver((entries) => run(entries.at(-1).isIntersecting));
+  const inView = new IntersectionObserver((entries) => run(entries.at(-1)!.isIntersecting));
   inView.observe(host);
   onDestroy(() => inView.disconnect());
   run(true);
@@ -1861,13 +1923,13 @@ export function mount(ui, host, config) {
   // later, animated as if the user had done it (or at once, with { direct: true }). What is set
   // before the model is in is kept and applied with the configuration's own toestand, at once.
   let loaded = false;
-  let early = {};
-  const VIEWS = { '3d': 'iso', zij: 'side', boven: 'top', voor: 'bow', achter: 'stern' };
+  let early: Toestand = {};
+  const VIEWS: Record<string, 'iso' | 'side' | 'top' | 'bow' | 'stern'> = { '3d': 'iso', zij: 'side', boven: 'top', voor: 'bow', achter: 'stern' };
 
-  function applyState(want = {}, direct = false) {
-    modes.apply(want, { direct });
+  function applyState(want: Toestand = {}, direct = false) {
+    modes!.apply(want, { direct });
     const { aanzicht, selectie, camera: view } = want;
-    const point = (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+    const point = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
     if (view !== undefined) {                              // the exact viewpoint; it wins over aanzicht
       if (point(view?.positie) && point(view?.doel)) {
         const position = new THREE.Vector3(...view.positie); const target = new THREE.Vector3(...view.doel);
@@ -1896,48 +1958,48 @@ export function mount(ui, host, config) {
   }
 
   /** Take the viewer to this toestand (only the keys given); before `ready` it waits for the model. */
-  function set(want = {}, { direct = false } = {}) {
+  function set(want: Toestand = {}, { direct = false } = {}) {
     if (destroyed) return;
-    if (loaded) applyState(want, direct); else early = merge(early, want);
+    if (loaded) applyState(want, direct); else early = merge(early, want) as Toestand;   // (cast: two toestanden merged are one)
   }
 
   /** Where the viewer is now, in the form set() takes (with the camera, not the aanzicht); null until the model is in. */
   function get() {
     if (!loaded) return null;
-    const at = (v) => v.toArray().map((x) => Math.round(x * 1000) / 1000);   // to the millimetre
+    const at = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1000) / 1000);   // to the millimetre
     const to = flight ? flight.toTarget : controls.target;                   // mid-flight: where it is going
-    return { ...modes.current(), selectie: selected.map((p) => p.extras.id),
+    return { ...modes!.current(), selectie: selected.map((p) => p.extras.id),
              camera: { positie: at(flight ? flight.to : camera.position), doel: at(to) } };
   }
 
   // debug.toestand: the state as it is, written as the configuration that starts a viewer there. It
   // follows the boat and the camera while the panel is open.
   $('toestand-toggle').hidden = !config.debug.toestand;
-  let night = null;                                                    // see initNight, once the model is there
+  let night: Night | null = null;                                                    // see initNight, once the model is there
   ready.then(() => {
-    if (modes?.leechFlag) loadImage(asset('textures/embleem.png')).then((img) => modes.leechFlag.setEmblem(img), () => {});
+    if (modes?.leechFlag) loadImage(asset('textures/embleem.png')).then((img) => modes!.leechFlag.setEmblem(img), () => {});
     followNumber();
     // night keeps its own time; see initNight in rig.js
     night = initNight({ scene, sun, hemi, wrap, water: modes?.water, toplicht: modes?.toplicht,
-                        slowest: Number($('speed').min) || 0.25, note: logboek.note });
-    const stir = () => night.activity();
+                        slowest: Number($<HTMLInputElement>('speed').min) || 0.25, note: logboek.note });
+    const stir = () => night!.activity();
     for (const type of ['pointermove', 'pointerdown', 'wheel']) wrap.addEventListener(type, stir, { signal, passive: true });
     window.addEventListener('keydown', stir, { signal });
   }, () => {});
-  let toestandPoll = null;
-  onDestroy(() => clearInterval(toestandPoll));
+  let toestandPoll: number | null = null;
+  onDestroy(() => clearInterval(toestandPoll!));       // (null too: it clears nothing)
   function toestandText() {
     const now = get();
     if (!now) return '';
     const { commando, selectie, camera: view, ...rest } = now;
-    const toestand = { ...rest, commando: commando.bb === commando.sb ? commando.bb : commando };
+    const toestand: Record<string, unknown> = { ...rest, commando: commando.bb === commando.sb ? commando.bb : commando };
     if (selectie.length) toestand.selectie = selectie.length === 1 ? selectie[0] : selectie;
     toestand.camera = view;
     // one line per point: [x, y, z] reads better than a number per line
     return JSON.stringify({ toestand }, null, 2).replace(/\[\s+([^\]]*?)\s+\]/g, (_, inner) => `[${inner.split(/,\s+/).join(', ')}]`);
   }
-  function toestandToggled(open) {
-    clearInterval(toestandPoll);
+  function toestandToggled(open: boolean) {
+    clearInterval(toestandPoll!);
     toestandPoll = null;
     if (!open) return;
     const pre = $('toestand-json');
@@ -1951,7 +2013,7 @@ export function mount(ui, host, config) {
       await navigator.clipboard.writeText(toestandText());
       button.textContent = 'Gekopieerd';
     } catch {                                           // no clipboard (http, or refused): select it to copy by hand
-      getSelection().selectAllChildren($('toestand-json'));
+      getSelection()!.selectAllChildren($('toestand-json'));
       button.textContent = 'Selecteer en kopieer zelf';
     }
     setTimeout(() => { button.textContent = 'Kopieer als JSON'; }, 1500);
@@ -1960,8 +2022,8 @@ export function mount(ui, host, config) {
   // ---------------------------------------------------------------- what a report takes along
   // The last few errors on the page: a report of something stuck is more use with them. The page's
   // own errors are in it too - an embed cannot tell them apart - which is all the more to go on.
-  const errors = [];
-  const keepError = (message) => { errors.push({ tijd: new Date().toISOString(), melding: String(message).slice(0, 500) }); if (errors.length > 10) errors.shift(); };
+  const errors: { tijd: string; melding: string }[] = [];
+  const keepError = (message: unknown) => { errors.push({ tijd: new Date().toISOString(), melding: String(message).slice(0, 500) }); if (errors.length > 10) errors.shift(); };
   window.addEventListener('error', (e) => keepError(e.error?.stack ?? e.message), { signal });
   window.addEventListener('unhandledrejection', (e) => keepError(e.reason?.stack ?? e.reason), { signal });
 
@@ -1978,7 +2040,7 @@ export function mount(ui, host, config) {
     const m = modes; if (!m) return undefined;
     const on = { bs: m.bowsprit?.on, sp: m.chill?.on, sl: m.tow?.on, bi: m.island?.on, av: m.lostAnchor?.on,
                  zb: m.boardDrop?.on, sv: m.leechFlag?.on, mo: m.mob?.on, nz: night?.on };
-    return pack(JSON.stringify({ on: Object.keys(on).filter((k) => on[k]), log: logboek.entries }));
+    return pack(JSON.stringify({ on: Object.keys(on).filter((k) => on[k as keyof typeof on]), log: logboek.entries }));
   }
 
   /**
@@ -1990,13 +2052,13 @@ export function mount(ui, host, config) {
    */
   /** The card of a lesson that stands open: which, which onderwerp, and its question as it is on the card now. */
   function lesInfo() {
-    const card = [...wrap.querySelectorAll(':scope > .les-kaart, :scope > #krachten')].find((c) => !c.hidden);
+    const card = [...wrap.querySelectorAll<HTMLElement>(':scope > .les-kaart, :scope > #krachten')].find((c) => !c.hidden);
     if (!card) return undefined;
-    const tekst = (el) => el?.textContent.replace(/\s+/g, ' ').trim() || undefined;
+    const tekst = (el: Element | null | undefined) => el?.textContent.replace(/\s+/g, ' ').trim() || undefined;
     const vragen = [...card.querySelectorAll('.kr-vraag')].filter((v) => v.querySelector('button'));
     return {
       kaart: card.id, titel: tekst(card.querySelector('header h2')),
-      onderwerp: tekst(card.querySelector('.kr-lessen')?.selectedOptions[0]),
+      onderwerp: tekst(card.querySelector<HTMLSelectElement>('.kr-lessen')?.selectedOptions[0]),
       vragen: vragen.map((v) => ({
         kop: tekst(v.querySelector('h3')), vraag: tekst(v.querySelector('p')),
         opties: [...v.querySelectorAll('.kr-opties button')].map((b) => ({ tekst: tekst(b), ...(b.classList.contains('goed') ? { goed: true } : {}), ...(b.classList.contains('fout') ? { fout: true } : {}) })),
@@ -2006,18 +2068,18 @@ export function mount(ui, host, config) {
     };
   }
 
-  function snapshot() {
-    let screenshot = null; let klaar = null;
+  function snapshot(): Snapshot {
+    let screenshot: string | null = null; let klaar: Promise<string | null> | null = null;
     try {
       if (loaded) renderer.render(scene, camera);
       const scale = Math.min(1, SHOT_WIDTH / canvas.width);
       const out = Object.assign(document.createElement('canvas'), { width: Math.round(canvas.width * scale), height: Math.round(canvas.height * scale) });
-      const g = out.getContext('2d');
+      const g = out.getContext('2d')!;
       const box = wrap.getBoundingClientRect(); const style = getComputedStyle(wrap);
       g.fillStyle = style.getPropertyValue('--bg-bottom').trim() || '#f4f7f9';      // the sky is the page behind a transparent canvas
       g.fillRect(0, 0, out.width, out.height);
       g.drawImage(canvas, 0, 0, out.width, out.height);
-      let later = null;
+      let later: Promise<unknown> | null = null;
       try { later = tekenPanelen(ui, g, box, out); } catch (error) { keepError(`schermafbeelding, panelen: ${error}`); }
       if (box.width && box.height) {
         screenshot = out.toDataURL('image/jpeg', 0.85);
@@ -2025,7 +2087,7 @@ export function mount(ui, host, config) {
       }
     } catch (error) { keepError(`schermafbeelding: ${error}`); }
 
-    const visibleText = (el) => el && el.offsetParent !== null ? el.innerText.replace(/\s+\n/g, '\n').trim().slice(0, 1000) : undefined;
+    const visibleText = (el: HTMLElement | null | undefined) => el && el.offsetParent !== null ? el.innerText.replace(/\s+\n/g, '\n').trim().slice(0, 1000) : undefined;
     const p = modes?.procedure();
     const { width: w, height: h } = wrap.getBoundingClientRect();
     const gegevens = {
@@ -2036,7 +2098,7 @@ export function mount(ui, host, config) {
       toestand: get(),
       // what toestand cannot say: what the handelingen left her with, and the boat as the user made it
       boot: modes?.situation(),
-      aanpassen: boat ? Object.fromEntries(['zeilnummer', 'naam', 'naamKleur', 'plaats', 'plaatsKleur', 'bakskleur', 'zeilkleur', 'rompnummer', 'naamBordje', 'plechtKleur', 'roerKleur', 'roerbeslagKleur', 'beslagKleur', 'lummelKleur', 'boeiselBanen', 'boeiselVoor', 'spiegelKleur', 'spiegelTekst', 'spiegelTekstKleur', 'spiegelBand', 'spiegelPunt', 'onderdelen', 'kleuren'].map((k) => [k, boat[k]])) : undefined,
+      aanpassen: boat ? Object.fromEntries((['zeilnummer', 'naam', 'naamKleur', 'plaats', 'plaatsKleur', 'bakskleur', 'zeilkleur', 'rompnummer', 'naamBordje', 'plechtKleur', 'roerKleur', 'roerbeslagKleur', 'beslagKleur', 'lummelKleur', 'boeiselBanen', 'boeiselVoor', 'spiegelKleur', 'spiegelTekst', 'spiegelTekstKleur', 'spiegelBand', 'spiegelPunt', 'onderdelen', 'kleuren'] as const).map((k) => [k, boat![k]])) : undefined,
       extra: extra(),
       // the step numbered the way the bar numbers it: without the steps skipped this time
       procedure: p && { naam: p.name, stap: p.label, index: p.index, stappen: p.steps.filter((st) => !st.skipped).length,
@@ -2051,9 +2113,9 @@ export function mount(ui, host, config) {
       beeld: runView(),
       snelheid: speed,
       // what stands open, and what it says: the card of a run or a quiz, the procedure bar, the calls
-      panelen: [...ui.querySelectorAll('aside, .popover, #cmd-panel, .focus-card')].filter((e) => e.offsetParent !== null && e.id !== 'feedback').map((e) => e.id || e.className),
+      panelen: [...ui.querySelectorAll<HTMLElement>('aside, .popover, #cmd-panel, .focus-card')].filter((e) => e.offsetParent !== null && e.id !== 'feedback').map((e) => e.id || e.className),
       teksten: {
-        kaart: visibleText([...ui.querySelectorAll('.focus-card')].find((e) => e.offsetParent !== null)),
+        kaart: visibleText([...ui.querySelectorAll<HTMLElement>('.focus-card')].find((e) => e.offsetParent !== null)),
         procedure: visibleText(procBar),
         onderdeel: visibleText(infoCard),
         roepen: bubbles.map((b) => b.el.textContent),
@@ -2063,7 +2125,7 @@ export function mount(ui, host, config) {
         browser: navigator.userAgent, taal: navigator.language,
         scherm: `${screen.width}×${screen.height}`, viewer: `${Math.round(w)}×${Math.round(h)}`,
         pixelratio: window.devicePixelRatio, aanraken: matchMedia('(pointer: coarse)').matches,
-        app: runsAsApp(), volledigScherm: Boolean(document.fullscreenElement ?? document.webkitFullscreenElement) || host.hasAttribute('data-lv-vol'),
+        app: runsAsApp(), volledigScherm: Boolean(document.fullscreenElement ?? (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement) || host.hasAttribute('data-lv-vol'),
         gpu,
       },
       fouten: errors.length ? [...errors] : undefined,
@@ -2117,13 +2179,16 @@ const NAV_KEYS = new Map([['ArrowLeft', 'left'], ['ArrowRight', 'right'], ['Arro
 const NAV_CODES = new Map([['ArrowLeft', 'left'], ['ArrowRight', 'right'], ['ArrowUp', 'up'], ['ArrowDown', 'down'],
                            ['Equal', 'in'], ['NumpadAdd', 'in'], ['Minus', 'out'], ['NumpadSubtract', 'out']]);
 
-const fold = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+/** Whether a node of the model is a mesh (its isMesh, as three.js sets it); the model's materials are standard ones. */
+const isMesh = (node: THREE.Object3D): node is THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> => (node as THREE.Mesh).isMesh;
+
+const fold = (text: string) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 
 // The two ways a name carries its side: as a suffix, "Wantputting (bakboord)", or as a prefix,
 // "Bakboord want". Anything else is no twin and keeps its own name - "Voorstag met spanner" and
 // "Achterlijk grootzeil" name no side, and "Dol" is one name for four parts that are not a pair.
-const SIDES = { bakboord: 'bb', stuurboord: 'sb' };
-function sideOf(naam) {
+const SIDES: Record<string, string> = { bakboord: 'bb', stuurboord: 'sb' };
+function sideOf(naam: string): { base: string; side: string | null } {
   const suffix = naam.match(/^(.+?) \((bakboord|stuurboord)\)$/);
   if (suffix) return { base: suffix[1], side: SIDES[suffix[2]] };
   const prefix = naam.match(/^(Bakboord|Stuurboord) (.+)$/);
@@ -2133,18 +2198,19 @@ function sideOf(naam) {
 
 // Every vertex from the CAD carries the handle of the body it came from (_BODY), as the float value
 // of the hexadecimal handle. Geometry built in the viewer has no such attribute, or a handle of 0.
-function handleAt(hit) {
-  const attr = hit?.object?.geometry?.attributes?._body;
-  const value = attr && hit.face ? Math.round(attr.getX(hit.face.a)) : 0;
+function handleAt(hit: THREE.Intersection | null) {
+  const attr = (hit?.object as Partial<THREE.Mesh> | undefined)?.geometry?.attributes?._body;
+  const value = attr && hit!.face ? Math.round(attr.getX(hit!.face.a)) : 0;
   return value ? value.toString(16).toUpperCase().padStart(4, '0') : null;
 }
 
 /** Give back every geometry, material and texture hanging under a node, each one once. */
-function disposeTree(root) {
-  const geometries = new Set(); const materials = new Set();
+function disposeTree(root: THREE.Object3D) {
+  const geometries = new Set<THREE.BufferGeometry>(); const materials = new Set<THREE.Material>();
   root.traverse((node) => {
-    if (node.geometry) geometries.add(node.geometry);
-    for (const m of [node.material].flat()) if (m) materials.add(m);
+    // (casts: a mesh, or anything else that has a geometry and a material)
+    if ((node as Partial<THREE.Mesh>).geometry) geometries.add((node as THREE.Mesh).geometry);
+    for (const m of [(node as Partial<THREE.Mesh>).material].flat()) if (m) materials.add(m);
   });
   for (const g of geometries) g.dispose();
   for (const m of materials) {

@@ -158,9 +158,10 @@ function stepsOf(name) {
   }
   return out;
 }
-/** An object literal of modes.js (or of `source`), by the name it is bound to. */
+/** An object literal of modes.ts (or of `source`), by the name it is bound to; a type annotation on it is passed over. */
 function objectOf(name, source = modes) {
-  const at = source.indexOf(`const ${name} = {`);
+  const at = source.search(new RegExp(`const ${name}(?:\\s*:[^=]*)? = \\{`));
+  if (at < 0) throw new Error(`docs.mjs: no \`const ${name} = { ... };\``);
   const text = source.slice(source.indexOf('{', at), source.indexOf('};', at) + 1);
   return Function(`return ${text}`)();
 }
