@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The round "i" under Volledig scherm: a menu - Melden, the handleiding, Updates, Over dit model and
 // the homepage - of which Melden is the one that stays in this panel.
 //
@@ -10,10 +9,73 @@
 //
 // Where the report goes is `feedback.url` in the configuration: it is POSTed there as JSON. Without
 // one it cannot be sent, and the last screen offers it as a file instead.
+import type { Config } from './config.ts';
+import type { Aanpassen } from './customize.ts';
+import type { Boot } from './groepen.ts';
+
+/** A quiz as its info() has it in the gegevens: only what Melden reads is named. */
+interface QuizInfo {
+  vraag?: number | string; klaar?: boolean; beantwoord?: boolean;
+  opties?: unknown; onderdeel?: unknown; teken?: unknown;
+  [key: string]: unknown;
+}
+/** The state as data, as main.ts snapshot() has it (plain JSON): only what Melden reads is named. */
+export interface Gegevens {
+  quiz?: QuizInfo;
+  verkeerstekens?: QuizInfo;
+  les?: { kaart: string; titel?: string; onderwerp?: string; vragen: { vraag?: string; [key: string]: unknown }[]; [key: string]: unknown };
+  procedure?: { naam: string; stap?: string; stapNr?: number; stappen: number; [key: string]: unknown };
+  handeling?: { naam?: string; handeling?: string; [key: string]: unknown };
+  panelen?: string[];
+  [key: string]: unknown;
+}
+/** What snapshot() gives: the picture as a data URL (or null), the promise of it again, and the state. */
+export interface Snapshot {
+  screenshot: string | null;
+  klaar: Promise<string | null> | null;
+  gegevens: Gegevens;
+}
+/** What initFeedback is given (see the comment above it). */
+export interface FeedbackOptions {
+  ui: ShadowRoot; config: Config; signal: AbortSignal; engaged: () => boolean;
+  snapshot: () => Snapshot; closeOthers: () => void; about: () => void; updates: () => void;
+  aanpassen?: () => Aanpassen | null; naarEigen?: () => void;
+}
+/** What initFeedback hands back. */
+export interface Feedback {
+  close(): void;
+  busy(): boolean;
+  groep: (() => void) | null;
+}
+
+type Screen = 'start' | 'zichtbaar' | 'opnieuw' | 'nogmaals' | 'stappen' | 'categorie' | 'model' | 'quiz' | 'quizWat'
+  | 'welkeVraag' | 'plek' | 'welke' | 'manoeuvres' | 'afwijking' | 'bron' | 'verzoek' | 'versturen' | 'groep' | 'groepEerst'
+  | 'groepGegevens' | 'groepOpBoot' | 'groepBoten' | 'groepAnders' | 'verstuurd' | 'mislukt';
+/** What a screen is made of: null, undefined and false are left out. */
+type Kid = Node | string | null | undefined | false;
+type OpBootKey = 'naam' | 'plaats' | 'nummer' | 'groep' | 'bakskleur';
+/** A boat on the screen Welke boten: every field there, the bakskleur too. */
+type BootRegel = Required<Pick<Boot, 'zeilnummer' | 'naam' | 'bakskleur'>>;
+/** The manoeuvre and step on screen. */
+interface Plek { manoeuvre?: string; stap?: string; nr?: number; van?: number }
+/** A group's report in the payload, filled in by groepOmschrijving(). */
+interface GroepMelding {
+  naam?: string; plaats?: string; opBoot?: Record<OpBootKey, string>; boten?: Boot[];
+  anders?: string; kleuren?: Aanpassen | null;
+}
+/** The text fields: what field() remembers in the report. */
+type Tekst = 'stappen' | 'omschrijving' | 'naam' | 'contact' | 'groepNaam' | 'groepPlaats' | 'groepAnders';
+/** What is being put together, answer by answer. */
+type Report = Partial<Record<Tekst, string>> & {
+  screenshot?: string | null; gegevens?: Gegevens; metAfbeelding?: boolean; issue?: string | null;
+  zichtbaar?: boolean; categorie?: string; quizFout?: string; plek?: Plek | null;
+  documentatie?: { klopt: boolean; sectie: string | null }; bron?: string;
+  groep?: GroepMelding; groepOpBoot?: Record<OpBootKey, string>; groepBoten?: BootRegel[];
+};
 
 // what the manoeuvre documentation calls each operation: the heading the link goes to
 const DOCS = 'https://github.com/wiebren/lelievlet/blob/main/docs/manoeuvres.md';
-const SECTIONS = {
+const SECTIONS: Record<string, string> = {
   aanslaan: 'Zeilen aanslaan en afslaan', afslaan: 'Zeilen aanslaan en afslaan', hijsen: 'Zeilen hijsen',
   nachtklaar: 'Zeilklaar en nachtklaar maken', zeilklaar: 'Zeilklaar en nachtklaar maken',
   strijken: 'Zeilen strijken', reven: 'Reven', mastStrijken: 'Mast strijken', mastZetten: 'Mast zetten',
@@ -30,34 +92,34 @@ const SECTIONS = {
   mobRoeiend: 'Man overboord roeiend', ankerenRoeiend: 'Ankeren roeiend', ankerOpRoeiend: 'Anker op roeiend',
 };
 // GitHub's anchor for a heading: lower case, punctuation out, spaces to hyphens
-const anchor = (heading) => heading.toLowerCase().replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-');
+const anchor = (heading: string): string => heading.toLowerCase().replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-');
 
 const CATEGORIES = [
   { key: 'model', naam: 'Model, animaties, bediening', uitleg: 'De boot zelf, hoe iets beweegt, wat een klik of knop doet' },
   { key: 'manoeuvres', naam: 'Manoeuvres en uitleg', uitleg: 'De stappen, commando’s en uitleg van een handeling' },
   { key: 'verzoek', naam: 'Iets ontbreekt', uitleg: 'Iets wat bij een bestaand onderdeel nog niet af is' },
   { key: 'quiz', naam: 'Een quizvraag', uitleg: 'Een vraag die niet klopt, onduidelijk is of verwarrende antwoorden heeft' },
-];
+] as const;
 // what is wrong with a quiz question
-const QUIZ_FOUT = [
+const QUIZ_FOUT: [string, string, string][] = [
   ['klopt-niet', 'Het antwoord klopt niet', 'Wat als goed telt is fout, of een goed antwoord telt als fout'],
   ['onduidelijk', 'De vraag is onduidelijk', 'Je snapt niet wat er gevraagd wordt, of wat je moet aanwijzen'],
   ['verwarrend', 'De antwoorden zijn verwarrend', 'Ze lijken te veel op elkaar, of er zijn er meer goed'],
   ['anders', 'Iets anders', ''],
 ];
 /** The question on screen when Melden was pressed: of the quiz Onderdelen or Verkeerstekens, or on a lesson's card. */
-const quizVraag = (g) => {
+const quizVraag = (g: Gegevens | undefined): string | null => {
   const q = g?.quiz ?? g?.verkeerstekens;
-  if (q?.vraag && !q.klaar) return `${g.quiz ? 'Quiz Onderdelen' : 'Quiz Verkeerstekens'}, vraag ${q.vraag}`;
+  if (q?.vraag && !q.klaar) return `${g!.quiz ? 'Quiz Onderdelen' : 'Quiz Verkeerstekens'}, vraag ${q.vraag}`;
   const les = g?.les?.vragen?.[0];
-  if (les?.vraag) return `${g.les.titel ?? 'Les'}${g.les.onderwerp && g.les.kaart.indexOf('quiz') < 0 ? ` › ${g.les.onderwerp}` : ''}: ${les.vraag}`;
+  if (les?.vraag) return `${g!.les!.titel ?? 'Les'}${g!.les!.onderwerp && g!.les!.kaart.indexOf('quiz') < 0 ? ` › ${g!.les!.onderwerp}` : ''}: ${les.vraag}`;
   return null;
 };
 const MIN_TEXT = 10;                      // characters: "werkt niet" alone is no report
 const SITE = 'https://scoutvaardig.nl/lelievlet/';   // the project's own pages: home and handleiding
 // a group's report: what is lettered where on its boats ([value, button]), and whether each has a bakskleur of her own.
 // The values go to the receiver as they are (lelievlet-melden checks them against the same lists)
-const OP_BOOT = {
+const OP_BOOT: Record<OpBootKey, [string, string][]> = {
   naam: [['boeisel', 'Boeisel'], ['bordje', 'Bordje'], ['spiegel', 'Spiegel'], ['geen', 'Geen']],
   plaats: [['boeisel', 'Boeisel'], ['spiegel', 'Spiegel'], ['geen', 'Geen']],
   nummer: [['zeil', 'Alleen zeil'], ['midscheeps', 'Midscheeps'], ['spiegel', 'Spiegel']],
@@ -75,44 +137,46 @@ const OP_BOOT = {
  * Returns { close, busy, groep }: busy while a report is being put together, past the menu; groep() starts the
  * report of a group's colours (from Aanpassen › Bekend).
  */
-export function initFeedback({ ui, config, signal, engaged, snapshot, closeOthers, about, updates, aanpassen, naarEigen }) {
-  const $ = (id) => ui.getElementById(id);
+export function initFeedback({ ui, config, signal, engaged, snapshot, closeOthers, about, updates, aanpassen, naarEigen }: FeedbackOptions): Feedback {
+  const $ = (id: string) => ui.getElementById(id)!;
   const button = $('feedback-toggle'); const panel = $('feedback'); const body = $('feedback-body'); const title = $('feedback-title');
   const melden = config.feedback !== false;                         // false: the menu without Melden
-  const url = config.feedback?.url ?? null;
+  const url = config.feedback !== false ? config.feedback?.url ?? null : null;   // the same as config.feedback?.url ?? null; tsc has no ?. on false
   // who reports: name and e-mailadres are kept in this browser for the next report (not on a viewer told not to keep
   // anything) - the address goes into the issue openly anyway, as the form says
   const MELDER = 'lelievlet.melder.v1';
   const opslaan = config?.aanpassen?.opslaan !== false;
   const melder = {
-    get: () => { if (!opslaan) return {}; try { return JSON.parse(localStorage.getItem(MELDER) ?? 'null') ?? {}; } catch { return {}; } },
-    set: (naam, contact) => {
+    get: (): { naam?: string; contact?: string } => { if (!opslaan) return {}; try { return JSON.parse(localStorage.getItem(MELDER) ?? 'null') ?? {}; } catch { return {}; } },
+    set: (naam: string, contact: string) => {
       if (!opslaan) return;
       try { if (naam || contact) localStorage.setItem(MELDER, JSON.stringify({ naam, contact })); else localStorage.removeItem(MELDER); } catch { /* not kept */ }
     },
   };
 
-  let report = null;                       // what is being put together; null while closed
-  let trail = [];                          // the screens gone through, for Terug
+  let report: Report | null = null;                       // what is being put together; null while closed
+  let trail: Screen[] = [];                          // the screens gone through, for Terug
 
-  const el = (tag, props = {}, ...children) => {
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: Kid[]): HTMLElementTagNameMap[K] => {
     const node = Object.assign(document.createElement(tag), props);
     node.append(...children.filter((c) => c !== null && c !== undefined && c !== false));
     return node;
   };
-  const text = (t, className = 'hint') => el('p', { className, textContent: t });
-  const choice = (label, fn, primary = false) => {
+  const text = (t: string, className = 'hint') => el('p', { className, textContent: t });
+  const choice = (label: string, fn: () => void, primary = false) => {
     const b = el('button', { type: 'button', textContent: label, className: primary ? 'primary' : '' });
     b.addEventListener('click', fn);
     return b;
   };
-  const row = (...buttons) => el('div', { className: 'fb-actions' }, ...buttons);
+  const row = (...buttons: HTMLElement[]) => el('div', { className: 'fb-actions' }, ...buttons);
 
   /** A text field that remembers what was typed in `report[key]`, and keeps `next` shut until there is enough. */
-  function field(key, label, placeholder, next, { rows = 5, min = MIN_TEXT, single = false, type = 'text', focus = true } = {}) {
-    const input = el(single ? 'input' : 'textarea', { value: report[key] ?? '', placeholder, id: `fb-${key}` });
-    if (single) { input.type = type; if (type === 'email') input.autocomplete = 'email'; } else input.rows = rows;
-    const check = () => { report[key] = input.value; if (next) next.disabled = input.value.trim().length < min; };
+  function field(key: Tekst, label: string, placeholder: string, next: HTMLButtonElement | null,
+    { rows = 5, min = MIN_TEXT, single = false, type = 'text', focus = true }: { rows?: number; min?: number; single?: boolean; type?: string; focus?: boolean } = {}) {
+    const input = el(single ? 'input' : 'textarea', { value: report![key] ?? '', placeholder, id: `fb-${key}` });
+    // single: an input, else a textarea
+    if (single) { (input as HTMLInputElement).type = type; if (type === 'email') (input as HTMLInputElement).autocomplete = 'email'; } else (input as HTMLTextAreaElement).rows = rows;
+    const check = () => { report![key] = input.value; if (next) next.disabled = input.value.trim().length < min; };
     input.addEventListener('input', check);
     check();
     if (focus) queueMicrotask(() => input.focus());
@@ -121,24 +185,24 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
 
   function capture() {
     const { screenshot, klaar, gegevens } = snapshot();
-    report.screenshot = screenshot; report.gegevens = gegevens;
+    report!.screenshot = screenshot; report!.gegevens = gegevens;
     // the maps and pictures in the open cards come in a moment later: then the picture is taken over, and the
     // thumbnail on the screen with it
-    const mine = report;
+    const mine = report!;
     klaar?.then((shot) => {
       if (!shot || report !== mine) return;
       mine.screenshot = shot;
-      for (const img of body.querySelectorAll('img.fb-shot')) img.src = shot;
+      for (const img of body.querySelectorAll<HTMLImageElement>('img.fb-shot')) img.src = shot;
     });
   }
-  const thumb = () => (report.screenshot ? el('img', { className: 'fb-shot', src: report.screenshot, alt: 'Het scherm toen je op Melden drukte' }) : null);
+  const thumb = () => (report!.screenshot ? el('img', { className: 'fb-shot', src: report!.screenshot, alt: 'Het scherm toen je op Melden drukte' }) : null);
 
   // ---------------------------------------------------------------- the screens
-  const SCREENS = {
+  const SCREENS: Record<Screen, () => Kid[]> = {
     // the menu: what stays in the viewer is a button, what goes to the site a link (↗)
     start: () => {
-      const item = (naam, uitleg, fn) => el('button', { type: 'button', onclick: fn }, el('b', { textContent: naam }), el('span', { textContent: uitleg }));
-      const away = (naam, uitleg, href) => el('a', { href, target: '_blank', rel: 'noreferrer' }, el('b', { textContent: `${naam} ↗` }), el('span', { textContent: uitleg }));
+      const item = (naam: string, uitleg: string, fn: () => void) => el('button', { type: 'button', onclick: fn }, el('b', { textContent: naam }), el('span', { textContent: uitleg }));
+      const away = (naam: string, uitleg: string, href: string) => el('a', { href, target: '_blank', rel: 'noreferrer' }, el('b', { textContent: `${naam} ↗` }), el('span', { textContent: uitleg }));
       return [el('div', { className: 'fb-kinds' },
         melden && item('Melden', 'Iets gezien dat niet klopt? Dit is een bètaversie: laat het ons weten.', () => go('zichtbaar')),
         away('Handleiding', 'Hoe de viewer werkt, stap voor stap', `${SITE}handleiding/`),
@@ -153,11 +217,11 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
       return [
         el('h3', { textContent: 'Is wat je wilt melden nu op het scherm te zien?' }),
         thumb(),
-        text(report.screenshot ? 'Dit was er te zien toen je op Melden drukte. Je kunt de boot nog draaien en het opnieuw vastleggen.'
+        text(report!.screenshot ? 'Dit was er te zien toen je op Melden drukte. Je kunt de boot nog draaien en het opnieuw vastleggen.'
           : 'Er kon geen afbeelding van het scherm gemaakt worden; wat er in de app gebeurt wordt wel meegestuurd.'),
-        report.screenshot ? el('p', { className: 'fb-retake' }, retake) : null,
-        row(choice('Nee', () => { report.zichtbaar = false; go('opnieuw'); }),
-            choice('Ja', () => { report.zichtbaar = true; report.stappen = ''; go('categorie'); }, true)),
+        report!.screenshot ? el('p', { className: 'fb-retake' }, retake) : null,
+        row(choice('Nee', () => { report!.zichtbaar = false; go('opnieuw'); }),
+            choice('Ja', () => { report!.zichtbaar = true; report!.stappen = ''; go('categorie'); }, true)),
       ];
     },
 
@@ -187,8 +251,8 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
       el('div', { className: 'fb-kinds' }, ...CATEGORIES.map((c) => {
         const b = el('button', { type: 'button' }, el('b', { textContent: c.naam }), el('span', { textContent: c.uitleg }));
         b.addEventListener('click', () => {
-          report.categorie = c.key;
-          go(c.key === 'manoeuvres' ? (activeStep(report.gegevens) ? 'plek' : 'welke') : c.key === 'quiz' ? (quizVraag(report.gegevens) ? 'quiz' : 'welkeVraag') : c.key);
+          report!.categorie = c.key;
+          go(c.key === 'manoeuvres' ? (activeStep(report!.gegevens) ? 'plek' : 'welke') : c.key === 'quiz' ? (quizVraag(report!.gegevens) ? 'quiz' : 'welkeVraag') : c.key);
         });
         return b;
       })),
@@ -199,7 +263,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
       return [
         el('h3', { textContent: 'Model, animaties, bediening' }),
         text('Kleine dingen aan het model, zoals een harpje dat scheef hangt, passen we op dit moment niet aan. Meld alleen wat echt niet klopt of stuk is.', 'fb-note'),
-        field('omschrijving', report.zichtbaar ? 'Wat klopt er niet?' : 'Wat klopte er niet?', 'Wat zie je, en wat had je verwacht?', next),
+        field('omschrijving', report!.zichtbaar ? 'Wat klopt er niet?' : 'Wat klopte er niet?', 'Wat zie je, en wat had je verwacht?', next),
         row(next),
       ];
     },
@@ -208,17 +272,17 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     quiz: () => [
       el('h3', { textContent: 'Een quizvraag' }),
       text('Toen je op Melden drukte, stond deze vraag op het scherm:', 'fb-lead'),
-      el('p', { className: 'fb-lead', textContent: quizVraag(report.gegevens) }),
+      el('p', { className: 'fb-lead', textContent: quizVraag(report!.gegevens)! }),   // gone to only with a question on screen
       el('h3', { textContent: 'Wat is er mis mee?' }),
       el('div', { className: 'fb-kinds' }, ...QUIZ_FOUT.map(([key, naam, uitleg]) => {
         const b = el('button', { type: 'button' }, el('b', { textContent: naam }), uitleg ? el('span', { textContent: uitleg }) : null);
-        b.addEventListener('click', () => { report.quizFout = key; go('quizWat'); });
+        b.addEventListener('click', () => { report!.quizFout = key; go('quizWat'); });
         return b;
       })),
     ],
     quizWat: () => {
       const next = choice('Verder', () => go('versturen'), true);
-      const [, naam] = QUIZ_FOUT.find(([k]) => k === report.quizFout) ?? [];
+      const [, naam]: (string | undefined)[] = QUIZ_FOUT.find(([k]) => k === report!.quizFout) ?? [];
       return [
         el('h3', { textContent: naam ?? 'Een quizvraag' }),
         field('omschrijving', 'Wat klopt er niet, en hoe zou het wel moeten?', 'Bijvoorbeeld: de vraag zegt … maar het goede antwoord is …, want …', next),
@@ -234,7 +298,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
 
     // what was on screen when Melden was pressed: is that where it goes wrong?
     plek: () => {
-      const at = activeStep(report.gegevens);
+      const at = activeStep(report!.gegevens)!;   // this screen is only gone to with a step on screen
       return [
         el('h3', { textContent: 'Manoeuvres en uitleg' }),
         text('Toen je op Melden drukte, was je hier:', 'fb-lead'),
@@ -244,7 +308,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
           at.stap ? el('dd', { textContent: at.stap }) : null),
         el('h3', { textContent: 'Zit hier wat je wilt melden?' }),
         row(choice('Nee', () => go('welke')),
-            choice('Ja', () => { report.plek = at; go('manoeuvres'); }, true)),
+            choice('Ja', () => { report!.plek = at; go('manoeuvres'); }, true)),
       ];
     },
 
@@ -256,15 +320,15 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     ],
 
     manoeuvres: () => {
-      const section = sectionFor(report.gegevens);
+      const section = sectionFor(report!.gegevens);
       const link = el('a', { href: section ? `${DOCS}#${anchor(section)}` : DOCS, target: '_blank', rel: 'noreferrer',
                              textContent: section ? `${section} in de beschrijving van de manoeuvres` : 'de beschrijving van de manoeuvres' });
       return [
         el('h3', { textContent: 'Manoeuvres en uitleg' }),
         el('p', { className: 'fb-lead' }, 'Kijk eerst in ', link, '.'),
         el('h3', { textContent: 'Staat wat je wilt melden daar wél goed uitgelegd?' }),
-        row(choice('Nee', () => { report.documentatie = { klopt: false, sectie: section }; go('bron'); }),
-            choice('Ja', () => { report.documentatie = { klopt: true, sectie: section }; report.bron = ''; go('afwijking'); }, true)),
+        row(choice('Nee', () => { report!.documentatie = { klopt: false, sectie: section }; go('bron'); }),
+            choice('Ja', () => { report!.documentatie = { klopt: true, sectie: section }; report!.bron = ''; go('afwijking'); }, true)),
       ];
     },
 
@@ -281,11 +345,11 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
       const next = choice('Verder', () => go('versturen'), true);
       const description = field('omschrijving', 'Wat klopt er niet in de beschreven procedure?', 'Welke stap, en hoe hoort het te gaan?', next);
       const source = el('label', { className: 'fb-field' }, el('span', { textContent: 'Waar staat hoe het wel moet?' }),
-        Object.assign(el('input', { type: 'text', value: report.bron ?? '', placeholder: 'Bijvoorbeeld: BPR artikel 6.04, CWO Kielboot II, Vlettenboek blz. 42' }), { id: 'fb-bron' }));
-      const input = source.querySelector('input');
-      const check = () => { report.bron = input.value; next.disabled = (report.omschrijving ?? '').trim().length < MIN_TEXT || input.value.trim().length < 3; };
+        Object.assign(el('input', { type: 'text', value: report!.bron ?? '', placeholder: 'Bijvoorbeeld: BPR artikel 6.04, CWO Kielboot II, Vlettenboek blz. 42' }), { id: 'fb-bron' }));
+      const input = source.querySelector('input')!;
+      const check = () => { report!.bron = input.value; next.disabled = (report!.omschrijving ?? '').trim().length < MIN_TEXT || input.value.trim().length < 3; };
       input.addEventListener('input', check);
-      description.querySelector('textarea').addEventListener('input', check);
+      description.querySelector('textarea')!.addEventListener('input', check);
       check();
       return [
         el('h3', { textContent: 'De beschrijving klopt niet' }),
@@ -306,24 +370,24 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
 
     versturen: () => {
       const send = choice(url ? 'Versturen' : 'Opslaan als bestand', submit, true);
-      const withShot = el('input', { type: 'checkbox', checked: report.metAfbeelding ?? Boolean(report.screenshot) });
-      withShot.addEventListener('change', () => { report.metAfbeelding = withShot.checked; });
-      report.metAfbeelding = withShot.checked;
+      const withShot = el('input', { type: 'checkbox', checked: report!.metAfbeelding ?? Boolean(report!.screenshot) });
+      withShot.addEventListener('change', () => { report!.metAfbeelding = withShot.checked; });
+      report!.metAfbeelding = withShot.checked;
       // what a quiz asks about goes with the report, but is not shown here before it is answered: the
       // details are not to give the answer away (it is said so, rather than left out)
-      const shown = { ...report.gegevens };
-      for (const [key, field] of [['quiz', 'onderdeel'], ['verkeerstekens', 'teken']]) {
+      const shown = { ...report!.gegevens };
+      for (const [key, field] of [['quiz', 'onderdeel'], ['verkeerstekens', 'teken']] as const) {
         if (shown[key]?.[field] && !shown[key].beantwoord) shown[key] = { ...shown[key], [field]: '(meegestuurd, hier verborgen tot je hebt geantwoord)' };
       }
       // and so are the answers to choose from: in their order they would say which picture or part it is
-      for (const key of ['quiz', 'verkeerstekens']) {
+      for (const key of ['quiz', 'verkeerstekens'] as const) {
         if (shown[key]?.opties && !shown[key].beantwoord) shown[key] = { ...shown[key], opties: '(meegestuurd, hier verborgen tot je hebt geantwoord)' };
       }
       return [
         el('h3', { textContent: 'Klaar om te versturen' }),
         field('naam', 'Je naam of scoutinggroep (mag leeg blijven)', '', null, { single: true, min: 0 }),
         field('contact', 'Je e-mailadres, als je antwoord wilt (mag leeg blijven)', 'naam@voorbeeld.nl', null, { single: true, min: 0, type: 'email', focus: false }),
-        report.screenshot ? el('label', { className: 'fb-check' }, withShot, el('span', { textContent: 'Afbeelding van het scherm meesturen' })) : null,
+        report!.screenshot ? el('label', { className: 'fb-check' }, withShot, el('span', { textContent: 'Afbeelding van het scherm meesturen' })) : null,
         text('Je melding wordt openbaar zichtbaar, met je naam en je e-mailadres als je die invult. Zet er niets in wat niet iedereen mag lezen.'),
         el('details', { className: 'fb-details' }, el('summary', { textContent: 'Wat wordt er meegestuurd?' }),
           el('pre', { textContent: JSON.stringify(shown, null, 2) })),
@@ -351,8 +415,8 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
       // the place written out: how it is on the hull (R-dam) comes along with the boat from Aanpassen
       const plaats = field('groepPlaats', 'Plaats', 'Voluit, bijvoorbeeld: Rotterdam', null, { single: true, min: 2 });
       const naam = field('groepNaam', 'Naam van de groep', 'Bijvoorbeeld: Shawano’s', null, { single: true, min: 2 });   // made last: it has the focus
-      const check = () => { next.disabled = (report.groepNaam ?? '').trim().length < 2 || (report.groepPlaats ?? '').trim().length < 2; };
-      for (const input of [naam, plaats].map((f) => f.querySelector('input'))) input.addEventListener('input', check);
+      const check = () => { next.disabled = (report!.groepNaam ?? '').trim().length < 2 || (report!.groepPlaats ?? '').trim().length < 2; };
+      for (const input of [naam, plaats].map((f) => f.querySelector('input')!)) input.addEventListener('input', check);
       check();
       return [el('h3', { textContent: 'Over je groep' }), naam, plaats,
         text('Staat de plaats anders op de boot, zoals R-dam? Dat komt vanzelf mee uit Aanpassen.'), row(next)];
@@ -360,8 +424,8 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
 
     // what is lettered where, and whether the boats have a bakskleur each: one choice a line, as Aanpassen has her now
     groepOpBoot: () => {
-      const o = report.groepOpBoot;
-      const keus = (key, label, options) => {
+      const o = report!.groepOpBoot!;
+      const keus = (key: OpBootKey, label: string, options: [string, string][]) => {
         const buttons = options.map(([value, text]) => {
           const b = el('button', { type: 'button', textContent: text, role: 'radio' });
           b.setAttribute('aria-checked', String(o[key] === value));
@@ -386,13 +450,13 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     // their own; Verder once every row that was begun is whole
     groepBoten: () => {
       const next = choice('Verder', () => go('groepAnders'), true);
-      const boten = report.groepBoten;
-      const metNaam = report.groepOpBoot.naam !== 'geen'; const metBaks = report.groepOpBoot.bakskleur === 'ja';
+      const boten = report!.groepBoten!;
+      const metNaam = report!.groepOpBoot!.naam !== 'geen'; const metBaks = report!.groepOpBoot!.bakskleur === 'ja';
       const list = el('div', { className: `fb-boten${metNaam ? '' : ' zonder-naam'}${metBaks ? '' : ' zonder-baks'}` });
-      const whole = (b) => /^\d{1,4}$/.test(b.zeilnummer.trim()) && (!metNaam || b.naam.trim().length > 0);
-      const begun = (b) => b.zeilnummer.trim() || (metNaam && b.naam.trim());
+      const whole = (b: BootRegel) => /^\d{1,4}$/.test(b.zeilnummer.trim()) && (!metNaam || b.naam.trim().length > 0);
+      const begun = (b: BootRegel) => b.zeilnummer.trim() || (metNaam && b.naam.trim());
       const check = () => { next.disabled = !boten.some(whole) || boten.some((b) => begun(b) && !whole(b)); };
-      const input = (b, key, props) => {
+      const input = (b: BootRegel, key: keyof BootRegel, props: Partial<HTMLInputElement>) => {
         const i = el('input', { value: b[key], ...props });
         i.addEventListener('input', () => { b[key] = i.value; check(); });
         return i;
@@ -410,11 +474,11 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
             weg);
         }));
       };
-      const nieuw = () => ({ zeilnummer: '', naam: '', bakskleur: boten.at(-1)?.bakskleur ?? aanpassen?.()?.bakskleur ?? '#c8102e' });
-      const meer = choice('+ Boot toevoegen', () => { boten.push(nieuw()); draw(); check(); list.querySelector('.fb-boot:last-child input')?.focus(); });
+      const nieuw = (): BootRegel => ({ zeilnummer: '', naam: '', bakskleur: boten.at(-1)?.bakskleur ?? aanpassen?.()?.bakskleur ?? '#c8102e' });
+      const meer = choice('+ Boot toevoegen', () => { boten.push(nieuw()); draw(); check(); list.querySelector<HTMLInputElement>('.fb-boot:last-child input')?.focus(); });
       meer.className = 'link-button';
       draw(); check();
-      queueMicrotask(() => list.querySelector('.fb-boot:not(.fb-kop) input')?.focus());
+      queueMicrotask(() => list.querySelector<HTMLInputElement>('.fb-boot:not(.fb-kop) input')?.focus());
       return [
         el('h3', { textContent: 'Welke boten hebben jullie?' }),
         metBaks ? text('Met de bakskleur van elke boot: daaraan zie je welke het is.') : null,
@@ -436,7 +500,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     verstuurd: () => [
       el('h3', { textContent: 'Bedankt!' }),
       text(url ? 'Je melding is verstuurd.' : 'De melding is opgeslagen als bestand.', 'fb-lead'),
-      report.issue ? el('p', { className: 'fb-lead' }, el('a', { href: report.issue, target: '_blank', rel: 'noreferrer', textContent: 'Bekijk je melding' })) : null,
+      report!.issue ? el('p', { className: 'fb-lead' }, el('a', { href: report!.issue, target: '_blank', rel: 'noreferrer', textContent: 'Bekijk je melding' })) : null,
       row(choice('Sluiten', close, true)),
     ],
 
@@ -448,14 +512,14 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
   };
 
   /** The manoeuvre and step on screen: the run of an operation, else the procedure the bar shows. */
-  function activeStep(gegevens) {
+  function activeStep(gegevens: Gegevens | undefined): Plek | null {
     const p = gegevens?.procedure; const run = gegevens?.handeling;
     if (!p && !run) return null;
     return { manoeuvre: run?.naam ?? p?.naam, stap: p?.stap, nr: p?.stapNr, van: p?.stappen };
   }
 
   /** The docs heading for what is on screen: the operation that runs, else the one the procedure bar shows. */
-  function sectionFor(gegevens) {
+  function sectionFor(gegevens: Gegevens | undefined): string | null {
     const op = gegevens?.handeling?.handeling;
     if (op && SECTIONS[op]) return SECTIONS[op];
     const name = gegevens?.procedure?.naam;
@@ -465,32 +529,32 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     return null;
   }
 
-  function show(name, push = true) {
+  function show(name: Screen, push = true): void {
     if (push && trail.at(-1) !== name) trail.push(name);
     const back = el('button', { type: 'button', className: 'link-button fb-back', textContent: '‹ Terug' });
     back.addEventListener('click', () => { trail.pop(); show(trail.at(-1) ?? 'start', false); });
     const final = ['verstuurd', 'nogmaals'].includes(name);
     title.textContent = name === 'start' ? 'Lelievlet 3D' : 'Melden';
-    body.replaceChildren(...SCREENS[name]().filter(Boolean), trail.length > 1 && !final ? back : '');
+    body.replaceChildren(...(SCREENS[name]().filter(Boolean) as (Node | string)[]), trail.length > 1 && !final ? back : '');
     body.scrollTop = 0;
   }
-  const go = (name) => show(name);
+  const go = (name: Screen): void => show(name);
 
   /** A group's report in words, for the issue it becomes, with the boat as Aanpassen has her. */
   function groepOmschrijving() {
-    const g = report.groep;
-    g.naam = (report.groepNaam ?? '').trim(); g.plaats = (report.groepPlaats ?? '').trim();
-    const o = g.opBoot = { ...report.groepOpBoot };
+    const g = report!.groep!;
+    g.naam = (report!.groepNaam ?? '').trim(); g.plaats = (report!.groepPlaats ?? '').trim();
+    const o = g.opBoot = { ...report!.groepOpBoot! };
     const metNaam = o.naam !== 'geen'; const metBaks = o.bakskleur === 'ja';
-    g.boten = report.groepBoten.filter((b) => b.zeilnummer.trim() && (!metNaam || b.naam.trim()))
+    g.boten = report!.groepBoten!.filter((b) => b.zeilnummer.trim() && (!metNaam || b.naam.trim()))
       .map((b) => ({ zeilnummer: b.zeilnummer.trim(), naam: metNaam ? b.naam.trim() : '', ...(metBaks ? { bakskleur: b.bakskleur } : {}) }));
-    g.anders = report.groepAnders?.trim() || undefined;
+    g.anders = report!.groepAnders?.trim() || undefined;
     g.kleuren = aanpassen?.() ?? null;
     const opBoot = o.plaats === 'boeisel' ? g.kleuren?.plaats?.trim() : '';
-    const WAAR = { boeisel: 'op het boeisel', bordje: 'op een bordje', spiegel: 'op de spiegel', geen: 'niet', zeil: 'alleen op het zeil',
+    const WAAR: Record<string, string> = { boeisel: 'op het boeisel', bordje: 'op een bordje', spiegel: 'op de spiegel', geen: 'niet', zeil: 'alleen op het zeil',
       midscheeps: 'ook midscheeps op het boeisel' };
-    const waar = (key) => WAAR[o[key]];
-    report.omschrijving = [
+    const waar = (key: OpBootKey) => WAAR[o[key]];
+    report!.omschrijving = [
       `Groep: ${g.naam}, ${g.plaats}${opBoot && opBoot !== g.plaats ? ` (op de boot: ${opBoot})` : ''}`,
       'De kleuren van de boot in de app kloppen zo goed als het gaat (zie Kleuren).',
       `Op de boot: naam ${waar('naam')}, plaats ${waar('plaats')}, zeilnummer ${waar('nummer')}, naam van de groep ${waar('groep')}.`,
@@ -503,7 +567,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
   // ---------------------------------------------------------------- sending
   /** The report as it goes out: the answers, the state, and the picture if it may go along. */
   function payload() {
-    const { screenshot, gegevens, metAfbeelding, issue, groepNaam, groepPlaats, groepOpBoot, groepBoten, groepAnders, ...answers } = report;
+    const { screenshot, gegevens, metAfbeelding, issue, groepNaam, groepPlaats, groepOpBoot, groepBoten, groepAnders, ...answers } = report!;
     return {
       versie: 1, ...answers,
       omschrijving: answers.omschrijving?.trim() ?? '', stappen: answers.stappen?.trim() || undefined,
@@ -523,19 +587,19 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
 
   // the report on its way, if one is: closing the panel, or opening a new report, does not stop it -
   // and when its answer comes, it only shows if that report is still the one in the panel
-  let sending = null;
+  let sending: Report | null = null;
   async function submit() {
     if (sending === report) return;
-    if (!url) { melder.set(report.naam?.trim() ?? '', report.contact?.trim() ?? ''); download(); go('verstuurd'); return; }
-    const mine = report; sending = mine;
-    const button = body.querySelector('.fb-actions .primary');
+    if (!url) { melder.set(report!.naam?.trim() ?? '', report!.contact?.trim() ?? ''); download(); go('verstuurd'); return; }
+    const mine = report!; sending = mine;
+    const button = body.querySelector<HTMLButtonElement>('.fb-actions .primary');
     if (button) { button.disabled = true; button.textContent = 'Bezig…'; }
     try {
       const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const { issue } = await response.json().catch(() => ({}));
+      const { issue }: { issue?: unknown } = await response.json().catch(() => ({}));
       if (report !== mine) return;                                 // sent; the panel has moved on
-      report.issue = typeof issue === 'string' && issue.startsWith('https://') ? issue : null;   // where it was filed, if it says
+      report!.issue = typeof issue === 'string' && issue.startsWith('https://') ? issue : null;   // where it was filed, if it says
       melder.set(mine.naam?.trim() ?? '', mine.contact?.trim() ?? '');   // for the next report
       go('verstuurd');
     } catch (error) {
@@ -545,7 +609,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
   }
 
   // ---------------------------------------------------------------- open and close
-  function open(start = 'start') {
+  function open(start: Screen = 'start'): void {
     const { naam, contact } = melder.get();
     report = { naam: naam || undefined, contact: contact || undefined }; trail = [];
     if (melden) capture();                      // before anything else moves: what the user saw, the panels it closes too
@@ -553,10 +617,10 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     panel.hidden = false; button.setAttribute('aria-expanded', 'true');
     if (start === 'groep') {
       // the boat as she is now as the first of the group's (unless she is still the one every viewer starts with)
-      const boot = aanpassen?.() ?? {};
+      const boot: Partial<Aanpassen> = aanpassen?.() ?? {};
       const eigen = boot.zeilnummer && boot.zeilnummer !== '000';
       report.categorie = 'groep'; report.groep = {}; report.zichtbaar = true;
-      report.groepBoten = [{ zeilnummer: eigen ? boot.zeilnummer : '', naam: eigen ? boot.naam ?? '' : '', bakskleur: boot.bakskleur ?? '#c8102e' }];
+      report.groepBoten = [{ zeilnummer: eigen ? boot.zeilnummer! : '', naam: eigen ? boot.naam ?? '' : '', bakskleur: boot.bakskleur ?? '#c8102e' }];
       // what is lettered where as Aanpassen letters her now; whether the bakskleur is each boat's own, asked
       report.groepOpBoot = {
         naam: boot.naamBordje ? 'bordje' : eigen && !boot.naam?.trim() ? 'geen' : 'boeisel',
@@ -568,7 +632,7 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
     }
     show(start);
   }
-  function close() {
+  function close(): void {
     panel.hidden = true; button.setAttribute('aria-expanded', 'false');
     report = null; trail = []; body.replaceChildren();
   }
@@ -577,6 +641,6 @@ export function initFeedback({ ui, config, signal, engaged, snapshot, closeOther
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && engaged() && !panel.hidden) close(); }, { signal });
 
   // a report being put together: a tap beside the panel does not throw it away
-  const busy = () => !panel.hidden && !['start', 'verstuurd', 'nogmaals'].includes(trail.at(-1));
+  const busy = () => !panel.hidden && !(['start', 'verstuurd', 'nogmaals'] as (Screen | undefined)[]).includes(trail.at(-1));   // widened: an empty trail may be asked
   return { close, busy, groep: melden ? () => open('groep') : null };
 }
