@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Zeiltermen: the lessons. They follow Sint Maarten Kielboot I, § 1.2 (Peppelman 2025, CC BY-NC-SA 4.0)
 // in order and in words: bakboord en stuurboord, loef en lij, hogerwal en lagerwal, de koersen, oploeven
 // en afvallen, overstag, opkruisen en gijpen. "Met de wind over stuurboord" says which side the wind comes
@@ -20,18 +19,63 @@
 //   status(z)             one line under the controls: what the boat does now (z: see index.js `zo`)
 //   helt                  she heels a little to lij, so the lage kant is low
 
+/** What the card asks of the boat: the settings a lesson starts from, and what answering its vraag sets (index.ts set). */
+export interface ZeilWens {
+  koers?: number;                        // 0 .. 180 off the wind
+  side?: number;                         // +1: the wind over stuurboord
+  kijk?: 'achter' | 'voor';
+  draai?: 'op' | 'af' | null;
+  drift?: boolean;
+  doe?: Manoeuvre | null;
+}
+/** The manoeuvres of the viewer a lesson can do. */
+export type Manoeuvre = 'overstag' | 'opkruisen' | 'gijpen';
+/** What the line under the controls is told of the boat now (index.ts `z`). */
+export interface Zo {
+  koers: number;
+  side: number;
+  kijk: 'achter' | 'voor' | undefined;
+  draai: 'op' | 'af' | null | undefined;
+  van: number | undefined;
+  bezig: boolean;
+  klaar: boolean;
+}
+/** What the controls of the card are called (index.ts CONTROLS). */
+export type Bediening = 'kijk' | 'boeg' | 'koers' | 'draai' | 'laag' | Manoeuvre;
+/** What can be drawn on the boat and the map (index.ts). */
+export type Toon = 'wind' | 'vaarrichting' | 'boorden' | 'loeflij' | 'wal' | 'koersen' | 'koersnaam' | 'draai' | 'spoor';
+/** One onderwerp of Zeiltermen: see above. */
+export interface ZeilLes {
+  id: string;
+  titel: string;
+  cwo: string;
+  bron: string;
+  aanzicht: 'achter' | 'voor' | 'boven' | 'achterboven' | 'hoog';
+  kaart: 'boot' | 'wind';
+  kort: string[];
+  meer: { kop: string; tekst: string }[];
+  bediening: Bediening[];
+  toon: Toon[];
+  begin: ZeilWens;
+  vraag?: { tekst: string; opties: [string, boolean][]; uitleg: string; laat: ZeilWens };
+  status: (z: Zo) => string;
+  helt?: boolean;
+  quiz?: [string, string];
+}
+
 // the course names as the windroos of the viewer has them (modes.js), and in de wind
-export const KOERSEN = [[22, 'in de wind'], [70, 'aan de wind'], [112, 'halve wind'], [158, 'ruime wind'], [181, 'voor de wind']];
-export const koersNaam = (c) => KOERSEN.find(([b]) => Math.min(Math.abs(c), 180) < b)[1];
-const kant = (side) => (side > 0 ? 'stuurboord' : 'bakboord');
-const hoofd = (t) => `${t[0].toUpperCase()}${t.slice(1)}`;
-const vaart = (z) => (z.koers < 22 ? 'Je ligt in de wind: de zeilen klapperen en de boot komt stil te liggen.'
+export const KOERSEN: readonly (readonly [number, string])[] = [[22, 'in de wind'], [70, 'aan de wind'], [112, 'halve wind'], [158, 'ruime wind'], [181, 'voor de wind']];
+// (the last one is past 180, so every course finds its name)
+export const koersNaam = (c: number): string => KOERSEN.find(([b]) => Math.min(Math.abs(c), 180) < b)![1];
+const kant = (side: number) => (side > 0 ? 'stuurboord' : 'bakboord');
+const hoofd = (t: string) => `${t[0].toUpperCase()}${t.slice(1)}`;
+const vaart = (z: Zo) => (z.koers < 22 ? 'Je ligt in de wind: de zeilen klapperen en de boot komt stil te liggen.'
   : `Je vaart ${koersNaam(z.koers)} met de wind over ${kant(z.side)}.`);
 // where something in the wind (or straight out of it) lies from her, in words: `c` its angle off the bow
-const waar = (c, side) => (c < 25 ? 'recht voor je' : c > 155 ? 'recht achter je'
+const waar = (c: number, side: number) => (c < 25 ? 'recht voor je' : c > 155 ? 'recht achter je'
   : `${c < 65 ? 'schuin voor je' : c > 115 ? 'schuin achter je' : 'dwars'} aan ${kant(side)}`);
 
-export const LESSEN = [
+export const LESSEN: ZeilLes[] = [
   {
     id: 'boorden', titel: 'Bakboord en stuurboord', cwo: 'KB I', bron: 'Sint Maarten KB I § 1.2.1',
     aanzicht: 'achter', kaart: 'boot',

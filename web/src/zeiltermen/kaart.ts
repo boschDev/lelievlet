@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Zeiltermen as a map in the card: the boat from above, with the wind, the wallen, the koersen and her
 // track, the way the lesboek draws them. Two ways round: 'boot', the bow up and stuurboord to the right;
 // 'wind', the wind coming from the top (Sint Maarten fig. 1.1 to 1.7), and the boat turned as she lies in it.
@@ -15,15 +14,47 @@
 //
 // Lines and words are sized in screen pixels, so a map that takes in a whole wal has no bigger letters.
 
+import type { Punt } from './zeilen.ts';
+
+/** What the map draws, each in the boat's frame (see above). fit false: it does not count for the box. */
+interface Vlak { type: 'vlak'; pts: Punt[]; fill: string; stroke?: string; fit?: boolean }
+interface Lijn { type: 'lijn'; pts: Punt[]; kleur: string; px?: number; dashed?: boolean; opacity?: number; fit?: boolean }
+interface Pijl { type: 'pijl'; from: Punt; vec: Punt; kleur: string; label?: string; labelAt?: number; dun?: boolean; fit?: boolean }
+interface Boog { type: 'boog'; pts: Punt[]; kleur: string; label?: string; fit?: boolean }
+interface Stip { type: 'punt'; at: Punt; kleur: string; r?: number; fit?: boolean }
+interface Tekst { type: 'tekst'; at: Punt; label: string; kleur: string; klein?: boolean; groot?: boolean; fit?: boolean }
+export type KaartItem = Vlak | Lijn | Pijl | Boog | Stip | Tekst;
+
+/** One drawing of the map: see draw() below. */
+export interface KaartTekening {
+  frame: 'boot' | 'wind';
+  wind: number;
+  centre: Punt;
+  min?: Punt;
+  items: KaartItem[];
+  titel: string;
+  hoek?: boolean;
+}
+
+export interface Kaart {
+  draw(tekening: KaartTekening): void;
+  opnieuw(): void;
+  dispose(): void;
+}
+
+/** A word waiting to be placed, in screen units [u, v]. */
+interface Woord { u: number; v: number; text: string; kleur: string; klein?: boolean; groot?: boolean }
+interface Box { u: number; v: number; w: number; h: number }
+
 const NS = 'http://www.w3.org/2000/svg';
 const ASPECT = 1.05;
-const f = (n) => Math.round(n * 1000) / 1000;
-const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const f = (n: number): number => Math.round(n * 1000) / 1000;
+const esc = (t: unknown): string => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-export function createKaart(host) {
+export function createKaart(host: HTMLElement): Kaart {
   const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'kr-schema zt-kaart'); svg.setAttribute('role', 'img');
   host.append(svg);
-  let box = null; let frameWas = '';
+  let box: Box | null = null; let frameWas = '';
   let most = 340; let hostWidth = -1;
 
   return {
@@ -32,12 +63,12 @@ export function createKaart(host) {
      * turns about (her middle); min: [w, h] in metres the map takes in at least; items as above. hoek: the wind
      * as a small arrow in the top right-hand corner, out of the way of a track (with the wind from the top only).
      */
-    draw({ frame, wind, centre, min = [9, 9], items, titel, hoek = false }) {
+    draw({ frame, wind, centre, min = [9, 9], items, titel, hoek = false }: KaartTekening) {
       const [cx, cz] = centre;
       const wx = Math.cos(wind); const wz = Math.sin(wind);
       // to the screen: [right, down]. 'boot': right is stuurboord, up the bow; 'wind': up where the wind comes from
-      const P = frame === 'boot' ? ([x, z]) => [z - cz, -(x - cx)]
-        : ([x, z]) => { const dx = x - cx; const dz = z - cz; return [-dx * wz + dz * wx, -(dx * wx + dz * wz)]; };
+      const P = frame === 'boot' ? ([x, z]: Punt): Punt => [z - cz, -(x - cx)]
+        : ([x, z]: Punt): Punt => { const dx = x - cx; const dz = z - cz; return [-dx * wz + dz * wx, -(dx * wx + dz * wz)]; };
       if (host.clientWidth !== hostWidth) { hostWidth = host.clientWidth; most = parseFloat(getComputedStyle(svg).maxHeight) || 340; }
       const width = Math.max(host.clientWidth, 120);
       const height = Math.min(width / ASPECT, most);
@@ -45,12 +76,12 @@ export function createKaart(host) {
 
       // the box: round everything that counts, at least `min`, in the shape of the pane; eased, unless the map turned round
       let u0 = Infinity; let u1 = -Infinity; let v0 = Infinity; let v1 = -Infinity;
-      const take = (p) => { const [u, v] = P(p); u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); };
+      const take = (p: Punt) => { const [u, v] = P(p); u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); };
       for (const it of items) {
         if (it.fit === false) continue;
-        if (it.pts) it.pts.forEach(take);
-        if (it.from) { take(it.from); take([it.from[0] + it.vec[0], it.from[1] + it.vec[1]]); }
-        if (it.at) take(it.at);
+        if ('pts' in it) it.pts.forEach(take);
+        if ('from' in it) { take(it.from); take([it.from[0] + it.vec[0], it.from[1] + it.vec[1]]); }
+        if ('at' in it) take(it.at);
       }
       if (u0 === Infinity) { u0 = v0 = -1; u1 = v1 = 1; }
       const pad = 1.2; u0 -= pad; u1 += pad; v0 -= pad; v1 += pad;
@@ -66,8 +97,8 @@ export function createKaart(host) {
       svg.setAttribute('aria-label', titel);
 
       let out = `<rect x="${f(box.u)}" y="${f(box.v)}" width="${f(box.w)}" height="${f(box.h)}" fill="#e3eef5"/>`;
-      const words = [];
-      const head = ([u1, v1], [du, dv], size, kleur) => {
+      const words: Woord[] = [];
+      const head = ([u1, v1]: Punt, [du, dv]: Punt, size: number, kleur: string): string => {
         const len = Math.hypot(du, dv) || 1; const eu = du / len; const ev = dv / len;
         const hl = 4.5 * size; const hw = 2 * size; const bu = u1 - eu * hl; const bv = v1 - ev * hl;
         return `<polygon points="${f(u1)},${f(v1)} ${f(bu - ev * hw)},${f(bv + eu * hw)} ${f(bu + ev * hw)},${f(bv - eu * hw)}" fill="${kleur}"/>`;
@@ -101,7 +132,7 @@ export function createKaart(host) {
         }
       }
       // the words last, over everything, each moved down a line while it would sit on one before it
-      const placed = [];
+      const placed: { u: number; v: number; half: number }[] = [];
       for (const wd of words) {
         const font = (wd.groot ? 22 : wd.klein ? 10.5 : 12) * px; const lh = 1.25 * font; const half = (wd.text.length * 0.56 * font) / 2 + 2 * px;
         let { v } = wd;

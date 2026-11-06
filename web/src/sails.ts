@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // Paints the sails: cloth, panel seams, edge tape, zeilteken and sail number.
@@ -8,10 +7,19 @@ import * as THREE from 'three';
 // Texture space: u runs from the luff aft to the leech, v runs up. The mesh faces port, so the
 // port texture is drawn as-is and the starboard one (seen from behind) gets its artwork mirrored.
 
+/** The sail data of a part (extras.zeil, pipeline/sails.py): its size, outline and seams in uv. */
+interface Zeil { breedte_m: number; hoogte_m: number; omtrek: [number, number][]; naden: [number, number, number, number][] }
+/** A part as dressSails needs it. */
+interface Deel {
+  extras: { id: string; zeil?: Zeil };
+  meshes: THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.MeshStandardMaterial>[];
+}
+interface Patch { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; ctx: CanvasRenderingContext2D }
+
 export const CLOTH = '#ece7d8';
 const PX_PER_M = 620;
 
-export function loadImage(url) {
+export function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     // an embed fetches it from another origin; without CORS it taints the canvas it is painted
@@ -28,7 +36,7 @@ export function loadImage(url) {
 // stretched into the box makes a narrow "1" far bolder than the rest).
 // Coordinates in cm inside a 20 x 30 box, y down; centre lines stay 2.5 cm inside the box.
 const PI = Math.PI;
-const DIGITS = {
+const DIGITS: Record<string, (c: CanvasRenderingContext2D) => void> = {
   0: (c) => { c.roundRect(2.5, 2.5, 15, 25, 7); },
   1: (c) => { c.moveTo(1.5, 9.5); c.lineTo(8.5, 2.5); c.lineTo(8.5, 30); },
   2: (c) => { c.ellipse(10, 9.5, 7.5, 7, 0, PI, 2.2 * PI); c.lineTo(3.2, 27.5); c.lineTo(20, 27.5); },
@@ -43,9 +51,9 @@ const DIGITS = {
   8: (c) => { c.ellipse(10, 8.5, 6.75, 6, 0, 0, 2 * PI); c.moveTo(17.5, 21); c.ellipse(10, 21, 7.5, 6.5, 0, 0, 2 * PI); },
   9: (c) => { c.moveTo(3.5, 27.5); c.bezierCurveTo(13, 27.5, 17.5, 21, 17.5, 10); c.ellipse(10, 10, 7.5, 7.5, 0, 0, 2 * PI); },
 };
-const ADVANCE = { 1: 11 };                     // a "1" is narrower than the 20 cm box
+const ADVANCE: Record<string, number> = { 1: 11 };                     // a "1" is narrower than the 20 cm box
 
-export function drawDigits(ctx, text, centerX, top, boxW, boxH, gap) {
+export function drawDigits(ctx: CanvasRenderingContext2D, text: string, centerX: number, top: number, boxW: number, boxH: number, gap: number): void {
   const cm = boxH / 30;                          // pixels per centimetre
   const gapCm = gap / cm;
   const widths = [...text].map((ch) => ADVANCE[ch] ?? 20);
@@ -71,11 +79,11 @@ export function drawDigits(ctx, text, centerX, top, boxW, boxH, gap) {
   ctx.restore();
 }
 
-function paint(canvas, zeil) {
+function paint(canvas: HTMLCanvasElement, zeil: Zeil): void {
   const W = canvas.width; const H = canvas.height;
-  const ctx = canvas.getContext('2d');
-  const X = (u) => u * W; const Y = (v) => (1 - v) * H;
-  const px = (metres) => metres * PX_PER_M;
+  const ctx = canvas.getContext('2d')!;
+  const X = (u: number) => u * W; const Y = (v: number) => (1 - v) * H;
+  const px = (metres: number) => metres * PX_PER_M;
 
   ctx.fillStyle = CLOTH;
   ctx.fillRect(0, 0, W, H);
@@ -125,7 +133,7 @@ function paint(canvas, zeil) {
  * (their place on screen does not change). For thin things lying on a surface that is itself being
  * deformed: it keeps them in front of that surface, and of nothing that is further off than that.
  */
-function drawNearer(material, metres) {
+function drawNearer(material: THREE.Material, metres: number): void {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
       {
@@ -140,7 +148,7 @@ function drawNearer(material, metres) {
 }
 
 /** A patch lying on the sail (zeilteken, zeilnummer) that carries its own painted texture. */
-function decalPatch(parts, id, widthM, heightM, renderer) {
+function decalPatch(parts: Deel[], id: string, widthM: number, heightM: number, renderer: THREE.WebGLRenderer): Patch | null {
   const part = parts.find((p) => p.extras.id === id);
   if (!part) return null;
   const canvas = document.createElement('canvas');
@@ -155,11 +163,12 @@ function decalPatch(parts, id, widthM, heightM, renderer) {
     drawNearer(mesh.material, 0.010);
     mesh.material.userData.keepTransparent = true;
   }
-  return { canvas, texture, ctx: canvas.getContext('2d') };
+  return { canvas, texture, ctx: canvas.getContext('2d')! };
 }
 
 /** asset(path): where the textures are fetched from; see assets.js. */
-export async function dressSails(parts, renderer, asset, start = '000', emblemLoad = null) {
+export async function dressSails(parts: Deel[], renderer: THREE.WebGLRenderer, asset: (path: string) => string, start = '000',
+  emblemLoad: Promise<HTMLImageElement | null> | null = null): Promise<{ setNumber(value: string): void; setInk(white: boolean): void }> {
   // fetched while the model was still coming in, when the caller started it then
   const emblem = await (emblemLoad ?? loadImage(asset('textures/zeilteken.png')).catch(() => null));
   // What lies on the cloth is a millimetre or two off it and meshed on a grid of its own, and the
@@ -167,7 +176,7 @@ export async function dressSails(parts, renderer, asset, start = '000', emblemLo
   // triangles, by more than any polygonOffset covers. Every layer has a face of its own on either
   // side of the sail, so each is drawn one-sided and takes its depth from a point some millimetres
   // nearer the eye: tape first, corner patches over it, battens and artwork on top.
-  const LAYERS = { zeil_lijk: 0.006, zeil_hoek: 0.008, zeillat: 0.010 };
+  const LAYERS: Record<string, number> = { zeil_lijk: 0.006, zeil_hoek: 0.008, zeillat: 0.010 };
   for (const part of parts) {
     for (const mesh of part.meshes) {
       const nearer = LAYERS[mesh.material.name];
@@ -187,7 +196,7 @@ export async function dressSails(parts, renderer, asset, start = '000', emblemLo
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     paint(canvas, zeil);
-    const material = (side) => new THREE.MeshStandardMaterial({
+    const material = (side: 'bb' | 'sb') => new THREE.MeshStandardMaterial({
       map: texture, roughness: 0.9, metalness: 0,
       side: side === 'bb' ? THREE.FrontSide : THREE.BackSide,
     });
@@ -196,7 +205,7 @@ export async function dressSails(parts, renderer, asset, start = '000', emblemLo
       const back = new THREE.Mesh(mesh.geometry, material('sb'));   // same cloth seen from starboard
       back.position.copy(mesh.position); back.quaternion.copy(mesh.quaternion); back.scale.copy(mesh.scale);
       back.userData.part = mesh.userData.part;
-      mesh.parent.add(back);
+      mesh.parent!.add(back);
       part.meshes.push(back);
     }
   }
@@ -218,7 +227,7 @@ export async function dressSails(parts, renderer, asset, start = '000', emblemLo
     ctx.globalCompositeOperation = 'source-over';
     texture.needsUpdate = true;
   };
-  const paintNumber = (value) => {
+  const paintNumber = (value: string) => {
     number = value;
     if (!numberPatch) return;
     const { canvas, ctx, texture } = numberPatch;
@@ -229,7 +238,7 @@ export async function dressSails(parts, renderer, asset, start = '000', emblemLo
     texture.needsUpdate = true;
   };
 
-  const setInk = (white) => {
+  const setInk = (white: boolean) => {
     const want = white ? '#f4f4f2' : '#111';
     if (want === ink) return;
     ink = want; paintEmblem(); paintNumber(number);

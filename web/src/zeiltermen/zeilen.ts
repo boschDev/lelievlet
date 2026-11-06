@@ -1,15 +1,21 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // The sails from above, for the maps of Zeiltermen (zeiltermen/index.js) and its quiz (zeiltermen/quiz.js), as
 // Krachten en koppels draws them: the onderlijk from the halshoek to the schoothoek.
 
-const ZEILEN = [['grootzeil_halshoek', 'grootzeil_schoothoek'], ['fok_halshoek', 'fok_schoothoek']];
+const ZEILEN = [['grootzeil_halshoek', 'grootzeil_schoothoek'], ['fok_halshoek', 'fok_schoothoek']] as const;
 
-export function makeZeilen({ parts, boat }) {
+/** A point on the map: [x, z] in metres in the boat's frame, x to the bow, z to stuurboord. */
+export type Punt = [number, number];
+/** What makeZeilen needs of a part of the viewer: its id and its meshes. */
+export interface ZeilDeel { extras: { id: string }; meshes: THREE.Mesh[] }
+/** The onderlijk of each sail from above, for wind (off the bow, + over stuurboord) and side (+1: over stuurboord). */
+export type Zeilen = (wind: number, side: number) => Punt[][];
+
+export function makeZeilen({ parts, boat }: { parts: ZeilDeel[]; boat: THREE.Object3D }): Zeilen {
   const byId = new Map(parts.map((p) => [p.extras.id, p]));
   /** The middle of a (small) part, in the boat's frame. */
-  const partAt = (id) => {
+  const partAt = (id: string): THREE.Vector3 | null => {
     const out = new THREE.Vector3(); const tmp = new THREE.Vector3(); let n = 0;
     for (const mesh of byId.get(id)?.meshes ?? []) {
       mesh.updateWorldMatrix(true, false);
@@ -29,11 +35,11 @@ export function makeZeilen({ parts, boat }) {
     let nx = -cz / len; let nz = cx / len;
     const mee = -(nx * Math.cos(wind) + nz * Math.sin(wind));     // along the way the wind blows
     if (Math.abs(mee) > 0.05 ? mee < 0 : nz * side > 0) { nx = -nx; nz = -nz; }
-    const pts = [];
+    const pts: Punt[] = [];
     for (let i = 0; i <= 16; i++) {
       const t = i / 16; const d = 0.1 * len * Math.sin(Math.PI * t ** 0.75);
       pts.push([hals.x + cx * t + nx * d, hals.z + cz * t + nz * d]);
     }
     return pts;
-  }).filter(Boolean);
+  }).filter((pts) => pts !== null);
 }

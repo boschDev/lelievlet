@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // Two aids that make a highlighted part easier to find, both stepped from the render loop in
@@ -35,9 +34,28 @@ const HOME_SCALE = 3;
 const FADE_MS = 180;               // coming and going
 const BOUNDS_MS = 200;             // vertices that move are measured again at most this often
 
+/** A part as the locator sees it: a model part, or a gebied with its own box (regions.ts). */
+interface Deel {
+  extras: { id: string; gebied?: boolean };
+  meshes: THREE.Mesh[];
+  box?(out: THREE.Box3): THREE.Box3;
+}
+type Veld = 'opacity' | 'emissiveIntensity';
+interface Adem { material: Record<Veld, number>; field: Veld; base: number }
+export interface Doel { parts: Deel[]; color: THREE.Color }
+interface Plek { x: number; y: number; r: number; ids: string[]; key: string }
+interface Ring {
+  el: HTMLDivElement | null; on: boolean; fade: number; born: number; x: number; y: number; rest: number;
+  color: THREE.Color; drawn: string;
+}
+export interface LocatorOptions {
+  wrap: HTMLElement; canvas: HTMLCanvasElement; camera: THREE.PerspectiveCamera; visible(part: Deel): boolean;
+  rings(): boolean; signal: AbortSignal; onResize(f: () => void): void; onDestroy(f: () => void): void;
+}
+
 const TAU = Math.PI * 2;
-const easeOut = (t) => 1 - (1 - t) ** 3;
-const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
+const easeOut = (t: number): number => 1 - (1 - t) ** 3;
+const clamp = (v: number, low: number, high: number): number => Math.min(high, Math.max(low, v));
 
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -55,7 +73,8 @@ const _part = new THREE.Sphere();
  *            the part is the question)
  * Returns { release, setTargets, update }.
  */
-export function initLocator({ wrap, canvas, camera, visible, rings: allowed, signal, onResize, onDestroy }) {
+export function initLocator({ wrap, canvas, camera, visible, rings: allowed, signal, onResize, onDestroy }: LocatorOptions):
+  { release(): void; setTargets(list: Doel[]): void; update(now: number, dt: number): void } {
   const layer = document.createElement('div');
   layer.className = 'locators';
   canvas.insertAdjacentElement('afterend', layer);
@@ -77,9 +96,9 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
   onResize(measure);
 
   // ---------------------------------------------------------------- the pulse
-  const breathing = [];            // { material, field, base }: each material once, its painted strength
-  const taken = new Set();
-  let groups = [];                 // [{ parts, color }] as refreshHighlight() painted them
+  const breathing: Adem[] = [];    // { material, field, base }: each material once, its painted strength
+  const taken = new Set<unknown>();
+  let groups: Doel[] = [];                 // [{ parts, color }] as refreshHighlight() painted them
 
   /** Every material back at the strength paint() gave it. Called before the parts are painted anew. */
   function release() {
@@ -94,13 +113,13 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
    * so what stands on the materials at this moment is the base the pulse works from. A gebied is no
    * tint but an overlay, so what breathes there is the opacity of that overlay.
    */
-  function setTargets(list) {
+  function setTargets(list: Doel[]) {
     groups = list;
     for (const group of list) {
       for (const part of group.parts) {
-        const field = part.extras.gebied ? 'opacity' : 'emissiveIntensity';
+        const field: Veld = part.extras.gebied ? 'opacity' : 'emissiveIntensity';
         for (const mesh of part.meshes) {
-          const material = mesh.material;
+          const material = mesh.material as unknown as Record<Veld, number>;
           if (taken.has(material) || typeof material[field] !== 'number') continue;
           taken.add(material);
           breathing.push({ material, field, base: material[field] });
@@ -113,10 +132,10 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
   // Bounding spheres are cached per geometry and never written to geometry.boundingSphere: the
   // picking leans on that one. A live rope and a bent sail rewrite their vertices every frame,
   // which shows in the version of the attribute; those are measured again a few times a second.
-  const geometryBounds = new WeakMap();      // geometry -> { sphere, version, at }
-  const regionBounds = new WeakMap();        // a gebied measures its own triangles -> { sphere, at }
+  const geometryBounds = new WeakMap<THREE.BufferGeometry, { sphere: THREE.Sphere; version: number; at: number }>();
+  const regionBounds = new WeakMap<Deel, { sphere: THREE.Sphere; at: number }>();        // a gebied measures its own triangles -> { sphere, at }
 
-  function measureSphere(position, sphere) {
+  function measureSphere(position: THREE.BufferAttribute, sphere: THREE.Sphere) {
     _box.setFromBufferAttribute(position);
     _box.getCenter(sphere.center);
     let far = 0;
@@ -126,8 +145,8 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
     sphere.radius = Math.sqrt(far);
   }
 
-  function localSphere(mesh, now) {
-    const position = mesh.geometry?.attributes?.position;
+  function localSphere(mesh: THREE.Mesh, now: number): THREE.Sphere | null {
+    const position = mesh.geometry?.attributes?.position as THREE.BufferAttribute | undefined;
     if (!position) return null;
     let entry = geometryBounds.get(mesh.geometry);
     if (!entry) {
@@ -143,7 +162,7 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
   }
 
   /** World sphere around a part as it stands right now, or null when there is nothing of it to see. */
-  function sphereOf(part, now) {
+  function sphereOf(part: Deel, now: number): THREE.Sphere | null {
     if (part.box) {                          // a gebied: the triangles it covers, in world space already
       let entry = regionBounds.get(part);
       if (!entry) {
@@ -169,7 +188,7 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
   }
 
   /** Where that sphere lands on the canvas, in CSS pixels; null when it is behind us or off it. */
-  function toScreen(sphere) {
+  function toScreen(sphere: THREE.Sphere): Plek | null {
     _v.copy(sphere.center).applyMatrix4(camera.matrixWorldInverse);
     const depth = -_v.z;
     if (depth <= camera.near) return null;
@@ -179,15 +198,15 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
     const x = (_v.x * 0.5 + 0.5) * width;
     const y = (-_v.y * 0.5 + 0.5) * height;
     if (x < -r || y < -r || x > width + r || y > height + r) return null;
-    return { x, y, r, ids: null, key: '' };
+    return { x, y, r, ids: [], key: '' };
   }
 
   /**
    * The spots one highlight asks a ring for: one per part, but parts that land on the same place
    * share a ring around their joint centre, and there are never more than RING_MAX of them.
    */
-  function spotsOf(group, now) {
-    const spots = [];
+  function spotsOf(group: Doel, now: number): Plek[] {
+    const spots: Plek[] = [];
     for (const part of group.parts) {
       if (!visible(part)) continue;
       const sphere = sphereOf(part, now);
@@ -218,10 +237,10 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
   }
 
   // ---------------------------------------------------------------- the rings
-  const rings = new Map();         // key (the parts it is around) -> { el, on, fade, born, ... }
+  const rings = new Map<string, Ring>();   // key (the parts it is around) -> { el, on, fade, born, ... }
 
-  function stepRings(now, dt) {
-    const wanted = new Map();
+  function stepRings(now: number, dt: number) {
+    const wanted = new Map<string, { spot: Plek; color: THREE.Color }>();
     if (width > 0 && height > 0 && allowed()) {
       for (const group of groups) {
         for (const spot of spotsOf(group, now)) wanted.set(spot.key, { spot, color: group.color });
@@ -265,12 +284,12 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
   }
 
   /** One ring, placed and sized in CSS pixels; the ping and the homing are both pure scale. */
-  function draw(ring, now, phase) {
+  function draw(ring: Ring, now: number, phase: number) {
     const home = calm ? 1 : 1 + (HOME_SCALE - 1) * (1 - easeOut(Math.min(1, (now - ring.born) / HOME_MS)));
     const ping = calm ? 1 : 1 + (RING_PING - 1) * easeOut(phase);
     const size = ring.rest * home * ping;
     const opacity = ring.fade * (calm ? RING_OPAQUE : RING_OPAQUE + (RING_FAINT - RING_OPAQUE) * easeOut(phase));
-    const style = ring.el.style;
+    const style = ring.el!.style;
     style.width = `${size.toFixed(1)}px`;
     style.height = style.width;
     style.transform = `translate3d(${(ring.x - size / 2).toFixed(1)}px, ${(ring.y - size / 2).toFixed(1)}px, 0)`;
@@ -281,7 +300,7 @@ export function initLocator({ wrap, canvas, camera, visible, rings: allowed, sig
 
   // ---------------------------------------------------------------- per frame
   /** `now` and `dt` in milliseconds, both from the clock of the render loop. */
-  function update(now, dt) {
+  function update(now: number, dt: number) {
     if (!calm && breathing.length) {
       const k = PULSE_LOW + (1 - PULSE_LOW) * (0.5 + 0.5 * Math.cos((now / PULSE_MS) * TAU));
       for (const b of breathing) b.material[b.field] = b.base * k;

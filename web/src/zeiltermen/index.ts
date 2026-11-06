@@ -1,12 +1,12 @@
-// @ts-nocheck
 import * as THREE from 'three';
-import { LESSEN, koersNaam } from './lessen.ts';
+import { LESSEN, koersNaam, type Bediening, type Manoeuvre, type Toon, type ZeilLes, type ZeilWens, type Zo } from './lessen.ts';
 import { createPijlen } from '../krachten/pijlen.ts';
-import { createKaart } from './kaart.ts';
+import { createKaart, type KaartItem } from './kaart.ts';
 import { createWal, AF } from './wal.ts';
 import { createLesKaart } from '../lessen/kaart.ts';
 import { deckOutline } from '../lessen/boot.ts';
-import { makeZeilen } from './zeilen.ts';
+import { makeZeilen, type Punt } from './zeilen.ts';
+import type { ModelDeel } from '../bootonderdelen/onderdeel.ts';
 
 // Zeiltermen: a card of short lessons on the words of Sint Maarten Kielboot I § 1.2 - bakboord en
 // stuurboord, loef en lij, hogerwal en lagerwal, de koersen, oploeven en afvallen, overstag, opkruisen
@@ -21,18 +21,55 @@ const KLEUR = {
   vaart: '#36454f', wal: '#55663f', koers: '#5f5a50', nu: '#c96f00', draai: '#7a3fa0', spoor: '#d0202a', drift: '#a14a00',
 };
 const STORE = 'lelievlet.zeiltermen.v1';
-const C = [2.8, 0];                 // her middle, [x, z]: what she turns about, and the middle of the map
-const MAST = [3.62, 0];
+/** What Zeiltermen and its quiz use of the viewer's modes (modes.ts initModes). */
+export interface ZeilModes {
+  state: { mode: string; course: number };
+  dock: {
+    /** the wind off her bow now (radians, + : over stuurboord) */
+    readonly wind: number;
+    schoon(): void;
+    way(n?: number): { x: number; z: number }[];
+    track(): { x: number; z: number }[];
+  };
+  apply(want: { modus?: string; tuig?: string; koers?: number }, options?: { direct?: boolean }): void;
+  current(): { tuig: string };
+  run: { begin(op: string): boolean; ops(): { op: string; blocked: string | null }[] };
+  procedure(): { name: string; t: number; total: number; playing: boolean } | null | undefined;
+  kracht: { heel: number };
+}
+
+type LesKaartOpties = Parameters<typeof createLesKaart>[0];
+type PijlenOpties = Parameters<typeof createPijlen>[0];
+/** What main.ts hands a lesson (main.js `lesson`), as far as Zeiltermen and its quiz use it. */
+export type ZeiltermenOpties = Pick<LesKaartOpties, 'wrap' | 'opslaan' | 'fly' | 'setCoveredRight' | 'onOpen' | 'sleutel' | 'naarQuiz'>
+  & Pick<PijlenOpties, 'camera' | 'controls'>
+  & { scene: THREE.Scene; parts: ModelDeel[]; modes: ZeilModes };
+
+/** A row of controls in the card, with how it shows the state of now. */
+type Rij = HTMLElement & { sync?: () => void };
+/** What the card asks of her now (see `s` below). */
+interface Staat extends ZeilWens { van?: number }
+/** A manoeuvre under way: waiting for her course, or going (its procedure's naam). */
+interface Bezig { op: Manoeuvre; wacht: boolean; sinds: number; naam?: string | null }
+type Vec3 = [number, number, number];
+/** What Zeiltermen and its quiz draw on the boat, in world space (krachten/pijlen.ts). */
+export type PijlItem =
+  | { type: 'pijl'; from: Vec3; vec: Vec3; kleur: string; label?: string; labelAt?: number }
+  | { type: 'tekst'; at: Vec3; label: string; kleur: string; groot?: boolean }
+  | { type: 'boog'; center: Vec3; as: 'x' | 'y'; r: number; start: number; sweep: number; kleur: string; label?: string };
+
+const C: Punt = [2.8, 0];           // her middle, [x, z]: what she turns about, and the middle of the map
+const MAST: Punt = [3.62, 0];
 const NA = 5000;                    // ms a manoeuvre's track stays once it is done
 const STAP = 15;                    // degrees a click on Oploeven or Afvallen turns her
-const MAN = { overstag: 45, opkruisen: 45, gijpen: 180 };   // the course each manoeuvre starts from
-const KNOP = { overstag: 'Ga overstag', opkruisen: 'Kruis op', gijpen: 'Gijp' };
+const MAN: Record<Manoeuvre, number> = { overstag: 45, opkruisen: 45, gijpen: 180 };   // the course each manoeuvre starts from
+const KNOP: Record<Manoeuvre, string> = { overstag: 'Ga overstag', opkruisen: 'Kruis op', gijpen: 'Gijp' };
 // what Zelf verkennen can switch on: chip -> what it draws
-const LAGEN = [['Bakboord en stuurboord', ['boorden', 'vaarrichting']], ['Loef en lij', ['loeflij']], ['Wallen', ['wal']], ['Koersen', ['koersen', 'koersnaam']]];
+const LAGEN: [string, Toon[]][] = [['Bakboord en stuurboord', ['boorden', 'vaarrichting']], ['Loef en lij', ['loeflij']], ['Wallen', ['wal']], ['Koersen', ['koersen', 'koersnaam']]];
 
-export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen, sleutel, naarQuiz }) {
-  const lelievlet = scene.getObjectByName('lelievlet');
-  let boat = lelievlet; while (boat.parent && boat.parent !== scene) boat = boat.parent;
+export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fly, setCoveredRight, opslaan, onOpen, sleutel, naarQuiz }: ZeiltermenOpties) {
+  const lelievlet = scene.getObjectByName('lelievlet')!;    // the model is in the scene before the lessons are made
+  let boat: THREE.Object3D = lelievlet; while (boat.parent && boat.parent !== scene) boat = boat.parent;
   const waterline = lelievlet.userData.tuig?.waterlijn_m ?? 0.3;
 
   const deck = deckOutline(parts, scene);           // the map's boat
@@ -43,30 +80,30 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
 
   const lk = createLesKaart({ wrap, id: 'zeiltermen', sleutel, titel: 'Zeiltermen', lessen: LESSEN, store: STORE, opslaan, fly, setCoveredRight, onOpen, naarQuiz });
   const { layer, q } = lk;
-  const les = () => lk.les;
+  const les = (): ZeilLes => lk.les;
 
   const pijlen = createPijlen({ scene, camera, controls, layer });
-  const kaart = createKaart(q('.kr-schema-host'));
+  const kaart = createKaart(q('.kr-schema-host')!);
   const wal = createWal(scene, { waterline, at: [C[0], 0, C[1]] });
 
   // ------------------------------------------------------------------ state
   // s: what the card asks of her. koers 0 .. 180 off the wind and side (+1: the wind over stuurboord) are
   // read back from the boat each frame, so a manoeuvre that takes her to the other boeg shows in the card
-  let s = {};
+  let s: Staat = {};
   const lagen = new Set(['Loef en lij', 'Wallen']);
   let heel = 0;                                         // the heel drawn: it eases to what the lesson wants
   let draaiTijd = 0;                                    // when Oploeven or Afvallen was last clicked
-  let man = null;                                       // a manoeuvre: { op, naam, wacht } - waiting for her course, or under way
-  let klaar = null;                                     // the one last done, for the status
+  let man: Bezig | null = null;                         // a manoeuvre: { op, naam, wacht } - waiting for her course, or under way
+  let klaar: Manoeuvre | null = null;                   // the one last done, for the status
   let klaarOm = 0;                                      // when it was done: its track stays a moment, then goes
-  let kanNiet = null;                                   // why the one asked for could not be done
+  let kanNiet: string | null = null;                    // why the one asked for could not be done
 
   // ------------------------------------------------------------------ the boat follows the card
   const sideNow = () => Math.sign(modes.state.course) || s.side || 1;
   // her wind as she has it now - in a turn too - off the bow, + over stuurboord (in a gijp it can run past half a turn)
   const windNu = () => Math.atan2(Math.sin(modes.dock.wind), Math.cos(modes.dock.wind));
-  const setBoat = () => modes.apply({ koers: s.koers === 0 ? 0 : s.side * s.koers });
-  const set = (want) => {
+  const setBoat = () => modes.apply({ koers: s.koers === 0 ? 0 : s.side! * s.koers! });
+  const set = (want: ZeilWens) => {
     if ('draai' in want && want.draai !== s.draai) s.van = s.koers;   // turning: from where (a series of clicks one way, from its start)
     Object.assign(s, want);
     if ('koers' in want || 'side' in want) { if (!('draai' in want)) { s.draai = null; s.van = undefined; } klaar = null; kanNiet = null; setBoat(); }
@@ -76,68 +113,70 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
   };
 
   /** Overstag, opkruisen or gijpen, as the viewer does them: first to the course it starts from, then off. */
-  function doe(op) {
+  function doe(op: Manoeuvre) {
     s.doe = null; klaar = null; kanNiet = null; s.draai = null;
     const from = MAN[op];
     if (Math.abs(Math.abs(modes.state.course) - from) > 2) { s.koers = from; setBoat(); }
     man = { op, wacht: true, sinds: 0 };
   }
   const startMan = () => {
-    if (!modes.run.begin(man.op)) return false;
-    man.wacht = false; man.naam = modes.procedure()?.name ?? null;
+    if (!modes.run.begin(man!.op)) return false;
+    man!.wacht = false; man!.naam = modes.procedure()?.name ?? null;
     return true;
   };
 
   // ------------------------------------------------------------------ controls
-  const segmented = (label, key, options, cast = (v) => v) => {
-    const row = document.createElement('div'); row.className = 'kr-rij';
+  const segmented = (label: string, key: 'kijk' | 'side', options: [string, string][], cast: (v: string) => unknown = (v) => v): Rij => {
+    const row: Rij = document.createElement('div'); row.className = 'kr-rij';
     row.innerHTML = `<span>${label}</span><div class="segmented" role="radiogroup" aria-label="${label}">${options.map(([v, t]) => `<button type="button" role="radio" data-v="${v}">${t}</button>`).join('')}</div>`;
-    row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => set({ [key]: cast(b.dataset.v) })));
+    row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => set({ [key]: cast(b.dataset.v!) })));
     row.sync = () => row.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(String(s[key]) === b.dataset.v)));
     return row;
   };
-  const knoppen = (buttons) => {
-    const row = document.createElement('div'); row.className = 'kr-rij zt-knoppen';
+  const knoppen = (buttons: [string, string][]): Rij => {
+    const row: Rij = document.createElement('div'); row.className = 'kr-rij zt-knoppen';
     row.innerHTML = buttons.map(([k, t]) => `<button type="button" data-k="${k}">${t}</button>`).join('');
     return row;
   };
-  const CONTROLS = {
+  // (the manoeuvres' buttons are added below)
+  const CONTROLS: Partial<Record<Bediening, () => Rij>> = {
     kijk: () => segmented('Kijk van', 'kijk', [['achter', 'Achteren'], ['voor', 'Voren']]),
     boeg: () => segmented('Wind over', 'side', [['-1', 'Bakboord'], ['1', 'Stuurboord']], Number),
     // 0, or 45 .. 180: between them there is no course to sail, so the slider jumps
     koers: () => {
-      const row = document.createElement('label'); row.className = 'kr-rij kr-schuif';
+      const row: Rij = document.createElement('label'); row.className = 'kr-rij kr-schuif';
       row.innerHTML = '<span>Koers <b></b></span><input type="range" min="0" max="180" step="5"><small><i>in de wind</i><i>voor de wind</i></small>';
-      const input = row.querySelector('input'); const value = row.querySelector('b');
+      const input = row.querySelector('input')!; const value = row.querySelector('b')!;
       input.addEventListener('input', () => { const v = Number(input.value); set({ koers: v < 25 ? 0 : Math.max(v, 45) }); });
-      row.sync = () => { if (!input.matches(':active') && Number(input.value) !== s.koers) input.value = String(s.koers); value.textContent = koersNaam(s.koers); };
+      row.sync = () => { if (!input.matches(':active') && Number(input.value) !== s.koers) input.value = String(s.koers); value.textContent = koersNaam(s.koers!); };
       return row;
     },
     draai: () => {
       const row = knoppen([['op', 'Oploeven'], ['af', 'Afvallen']]);
       row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-        const op = b.dataset.k === 'op';
-        const k = op ? (s.koers <= 45 ? 0 : Math.max(s.koers - STAP, 45)) : (s.koers === 0 ? 45 : Math.min(s.koers + STAP, 180));
+        const op = b.dataset.k === 'op'; const koers = s.koers!;
+        const k = op ? (koers <= 45 ? 0 : Math.max(koers - STAP, 45)) : (koers === 0 ? 45 : Math.min(koers + STAP, 180));
         draaiTijd = performance.now(); set({ draai: op ? 'op' : 'af', koers: k });
       }));
-      row.sync = () => row.querySelectorAll('button').forEach((b) => { b.disabled = b.dataset.k === 'op' ? s.koers === 0 : s.koers >= 180; });
+      row.sync = () => row.querySelectorAll('button').forEach((b) => { b.disabled = b.dataset.k === 'op' ? s.koers === 0 : s.koers! >= 180; });
       return row;
     },
     laag: () => {
-      const row = document.createElement('div'); row.className = 'kr-lagen';
+      const row: Rij = document.createElement('div'); row.className = 'kr-lagen';
       row.innerHTML = LAGEN.map(([naam]) => `<button type="button" aria-pressed="false" data-laag="${naam}">${naam}</button>`).join('');
       row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-        if (lagen.has(b.dataset.laag)) lagen.delete(b.dataset.laag); else lagen.add(b.dataset.laag);
+        const laag = b.dataset.laag!;
+        if (lagen.has(laag)) lagen.delete(laag); else lagen.add(laag);
         renderControls(); frame();
       }));
-      row.sync = () => row.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(lagen.has(b.dataset.laag))));
+      row.sync = () => row.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(lagen.has(b.dataset.laag!))));
       return row;
     },
   };
-  for (const op of Object.keys(MAN)) {
+  for (const op of Object.keys(MAN) as Manoeuvre[]) {
     CONTROLS[op] = () => {
       const row = knoppen([[op, KNOP[op]]]);
-      const b = row.querySelector('button'); b.classList.add('primary');
+      const b = row.querySelector('button')!; b.classList.add('primary');
       b.addEventListener('click', () => set({ doe: op }));
       row.sync = () => { b.disabled = Boolean(man); };
       return row;
@@ -155,7 +194,7 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
   };
   const frame = () => lk.frame();
   lk.koppel({
-    begin(l) {
+    begin(l: ZeilLes) {
       man = null; klaar = null; kanNiet = null;
       if (modes.state.mode !== 'zeilen') modes.apply({ modus: 'zeilen' });
       if (modes.current().tuig !== 'op') modes.apply({ tuig: 'op' });
@@ -163,15 +202,15 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
       const course = modes.state.course;
       s = { koers: Math.abs(course), side: Math.sign(course) || 1, kijk: 'achter', draai: null, van: undefined, drift: false, ...l.begin };
       if (l.begin.koers !== undefined) setBoat();
-      return l.bediening.map((key) => CONTROLS[key]());
+      return l.bediening.map((key) => CONTROLS[key]!());
     },
-    antwoord(laat) { if (laat.draai) draaiTijd = performance.now(); set(laat); },
+    antwoord(laat: ZeilWens) { if (laat.draai) draaiTijd = performance.now(); set(laat); },
     release() { modes.kracht.heel = 0; heel = 0; pijlen.visible = false; wal.visible = false; },
     aanzicht,
   });
 
   // ------------------------------------------------------------------ every frame
-  function update(dt, width, height) {
+  function update(dt: number, width: number, height: number) {
     if (!lk.tick(width)) return;
     if (modes.state.mode !== 'zeilen') { modes.kracht.heel = 0; pijlen.visible = false; wal.visible = false; return; }
     const l = les();
@@ -186,7 +225,7 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
         man.sinds += dt;
         const off = Math.abs(Math.abs(THREE.MathUtils.radToDeg(windNu())) - MAN[man.op]);
         if ((off < 3 || man.sinds > 6) && !startMan() && man.sinds > 6) {
-          kanNiet = modes.run.ops().find((o) => o.op === man.op)?.blocked ?? 'het lukt nu niet';
+          kanNiet = modes.run.ops().find((o) => o.op === man!.op)?.blocked ?? 'het lukt nu niet';
           man = null;
         }
       } else {
@@ -217,9 +256,9 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
     modes.kracht.heel = heel;
 
     // ---- on the boat
-    const items = [];
-    const at = (x, y, z) => [x, y, z];
-    const P = (u, y = 1.0) => at(C[0] + u[0], y, C[1] + u[1]);           // [dx, dz] from her middle
+    const items: PijlItem[] = [];
+    const at = (x: number, y: number, z: number): Vec3 => [x, y, z];
+    const P = (u: Punt, y = 1.0) => at(C[0] + u[0], y, C[1] + u[1]);           // [dx, dz] from her middle
     // (the wind on the water is the viewer's own arrow: on the boat nothing more is drawn for it)
     // ahead of her bow, up high enough that from astern its word stands over the boat, not on her spiegel
     if (toon.has('vaarrichting')) items.push({ type: 'pijl', from: at(6.4, 2.6, 0), vec: [1.6, 0, 0], kleur: KLEUR.vaart, label: 'vaarrichting', labelAt: 0.5 });
@@ -249,14 +288,14 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
 
     // ---- on the map
     if (lk.bladOpen) {
-      const m = [];
-      const add = (u) => [C[0] + u[0], C[1] + u[1]];
+      const m: KaartItem[] = [];
+      const add = (u: Punt): Punt => [C[0] + u[0], C[1] + u[1]];
       if (toon.has('wal')) {
         // (with the koersen round her, a little further off on the map, clear of their words)
         const af = toon.has('koersen') ? AF + 3.5 : AF;
-        for (const [sg, naam] of [[1, 'hogerwal'], [-1, 'lagerwal']]) {
+        for (const [sg, naam] of [[1, 'hogerwal'], [-1, 'lagerwal']] as const) {
           const rx = -wz; const rz = wx;
-          const e = (d, a) => add([sg * wx * d + rx * a, sg * wz * d + rz * a]);
+          const e = (d: number, a: number) => add([sg * wx * d + rx * a, sg * wz * d + rz * a]);
           m.push({ type: 'vlak', pts: [e(af, -40), e(af, 40), e(af + 30, 40), e(af + 30, -40)], fill: '#c5cdb0', stroke: '#93a391', fit: false });
           m.push({ type: 'tekst', at: e(af + 2, 0), label: naam, kleur: KLEUR.wal });
         }
@@ -264,11 +303,11 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
       if (toon.has('koersen')) {
         // the koersen round her as the book draws them: with the wind from the top, each a ray on either side
         const R0 = 4.2; const R1 = 8.4;
-        const ray = (c, sg) => { const a = THREE.MathUtils.degToRad(c); return [Math.cos(a) * wx - sg * Math.sin(a) * -wz, Math.cos(a) * wz - sg * Math.sin(a) * wx]; };
-        const geen = [];
+        const ray = (c: number, sg: number): Punt => { const a = THREE.MathUtils.degToRad(c); return [Math.cos(a) * wx - sg * Math.sin(a) * -wz, Math.cos(a) * wz - sg * Math.sin(a) * wx]; };
+        const geen: Punt[] = [];
         for (let c = -45; c <= 45; c += 5) { const d = ray(Math.abs(c), Math.sign(c) || 1); geen.push(add([d[0] * R1, d[1] * R1])); }
         m.push({ type: 'vlak', pts: [add([0, 0]), ...geen], fill: 'rgba(54, 69, 79, 0.08)', fit: false });
-        for (const [c, naam] of [[0, 'in de wind'], [45, 'aan de wind'], [90, 'halve wind'], [135, 'ruime wind'], [180, 'voor de wind']]) {
+        for (const [c, naam] of [[0, 'in de wind'], [45, 'aan de wind'], [90, 'halve wind'], [135, 'ruime wind'], [180, 'voor de wind']] as const) {
           for (const sg of c === 0 || c === 180 ? [1] : [1, -1]) {
             const d = ray(c, sg); const hier = koersNaam(nu) === naam && (sg === side || c === 0 || c === 180);
             // in de wind only its word: the wind comes down that way already
@@ -281,9 +320,9 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
       // (the map takes it in only while it is sailed: once done it stays a moment and goes, and does not draw the
       // map out after it as it drifts off with the water)
       if (toon.has('spoor') && (man || klaarOm)) {
-        const way = modes.dock.way(60).map((p) => [p.x, p.z]);
+        const way = modes.dock.way(60).map((p): Punt => [p.x, p.z]);
         if (way.length > 1 && man) m.push({ type: 'lijn', pts: way, kleur: '#8a96a3', px: 1.2, dashed: true });
-        const track = modes.dock.track().map((p) => [p.x, p.z]);
+        const track = modes.dock.track().map((p): Punt => [p.x, p.z]);
         if (track.length > 1) m.push({ type: 'lijn', pts: track, kleur: KLEUR.spoor, px: 3, opacity: 0.55, fit: Boolean(man) });
       }
       // the boat: deck, mast, and the sails as they stand
@@ -314,7 +353,7 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
       }
       if (s.drift) m.push({ type: 'pijl', from: C, vec: [-wx * 5, -wz * 5], kleur: KLEUR.drift, label: 'zo drijf je af', labelAt: 0.8 });
       if (draai) {
-        const pts = [];
+        const pts: Punt[] = [];
         for (let i = 0; i <= 24; i++) { const t = (draaiZin * 0.7 * i) / 24; pts.push([C[0] + 3.6 * Math.cos(t), C[1] - 3.6 * Math.sin(t)]); }
         m.push({ type: 'boog', pts, kleur: KLEUR.draai, label: draai === 'op' ? 'oploeven' : 'afvallen' });
       }
@@ -322,7 +361,7 @@ export function initZeiltermen({ wrap, scene, camera, controls, parts, modes, fl
       kaart.draw({ frame: l.kaart, wind, centre: C, min: [ruim, ruim], items: m, titel: l.titel, hoek: hoek && l.kaart === 'wind' });
     }
 
-    const z = { koers: nu, side, kijk: s.kijk, draai: s.draai, van: s.van, bezig: Boolean(man && !man.wacht), klaar: klaar === l.id };
+    const z: Zo = { koers: nu, side, kijk: s.kijk, draai: s.draai, van: s.van, bezig: Boolean(man && !man.wacht), klaar: klaar === l.id };
     const status = kanNiet ? `Dat kan nu niet: ${kanNiet.toLowerCase()}.` : l.status(z);
     lk.status(status, kanNiet ? 'geel' : '');
   }

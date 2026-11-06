@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // Hogerwal and lagerwal on the water: two strips of land square to the wind, one on either side of her,
@@ -13,14 +12,22 @@ export const AF = 9;                                   // m from her middle to t
 const BREED = 7;                                       // m of land
 const LANG = 90;                                       // m along the wal, either way
 
-export function createWal(scene, { waterline, at = [2.8, 0, 0] }) {
+/** The two wallen, as createWal hands them out. */
+export interface Wal {
+  visible: boolean;
+  /** wind: the wind off her bow (radians, + : over stuurboord), the way it comes from. */
+  set(wind: number): void;
+  dispose(): void;
+}
+
+export function createWal(scene: THREE.Object3D, { waterline, at = [2.8, 0, 0] }: { waterline: number; at?: [number, number, number] }): Wal {
   const group = new THREE.Group(); group.name = 'zeiltermen-wal'; group.visible = false;
-  const pos = []; const index = []; const wall = [];
-  const rise = (u, seed) => 1.4 + 0.3 * Math.sin(u * 0.21 + seed) + 3.5 * Math.max(0, Math.sin(u * 0.33 + seed * 2) * Math.sin(u * 0.071 + seed));
-  for (const [sign, seed] of [[1, 1], [-1, 4]]) {
+  const pos: number[] = []; const index: number[] = []; const wall: number[] = [];
+  const rise = (u: number, seed: number) => 1.4 + 0.3 * Math.sin(u * 0.21 + seed) + 3.5 * Math.max(0, Math.sin(u * 0.33 + seed * 2) * Math.sin(u * 0.071 + seed));
+  for (const [sign, seed] of [[1, 1], [-1, 4]] as const) {
     const inner = sign * AF; const outer = sign * (AF + BREED);
     const n = pos.length / 3;
-    for (const [x, z] of [[inner, -LANG], [outer, -LANG], [inner, LANG], [outer, LANG]]) pos.push(x, 0.01, z);
+    for (const [x, z] of [[inner, -LANG], [outer, -LANG], [inner, LANG], [outer, LANG]] as const) pos.push(x, 0.01, z);
     index.push(n, n + 1, n + 2, n + 1, n + 3, n + 2);
     const steps = 2 * LANG;
     for (let i = 0; i < steps; i++) {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as THREE from 'three';
 
 // Vlaggenstok, knop and vlag. The CAD has none of them. The staff stands in the open top end of
@@ -13,10 +12,26 @@ const KNOP_R = 0.034; const KNOP_T = 0.020;                          // disc, 2 
 const HOIST = 0.50; const FLY = 0.75;                                // flag, 50 x 75 cm
 const NU = 26; const NV = 10;                                        // cloth grid: along the fly, along the hoist
 
-function makeTricolour() {
+/** Registers a node as a pickable part (main.ts). */
+type AddPart = (node: THREE.Object3D, id: string, naam: string, groep: string, materiaal: string, maten: number[]) => void;
+
+/** The vlag on its staff, stepped every frame; change() puts up another cloth. */
+export interface Vlag {
+  (t: number, windAngle: number, blow: number, present: number, turn: THREE.Quaternion): void;
+  change(): void;
+}
+/** The vlag on the achterlijk, flying off a hoist given every frame. */
+export interface AchterlijkVlag {
+  (t: number, windAngle: number, wind: number, hoist: THREE.Vector3[], reach?: number): void;
+  mesh: THREE.Mesh; rows: number; hoist: number;
+  setOpacity(a: number): void;
+  setEmblem(image: CanvasImageSource & { width: number; height: number } | null): void;
+}
+
+function makeTricolour(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 4; canvas.height = 3;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   ['#ae1c28', '#ffffff', '#21468b'].forEach((colour, i) => { ctx.fillStyle = colour; ctx.fillRect(0, i, 4, 1); });
   const texture = new THREE.CanvasTexture(canvas);
   texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter;
@@ -25,10 +40,10 @@ function makeTricolour() {
 }
 
 /** Black, with a white skull over crossed bones. */
-function makeJollyRoger() {
+function makeJollyRoger(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 300; canvas.height = 200;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#111111'; ctx.fillRect(0, 0, 300, 200);
   ctx.translate(0, -22);
   ctx.fillStyle = '#f2efe6'; ctx.strokeStyle = '#f2efe6'; ctx.lineCap = 'round';
@@ -55,13 +70,15 @@ function makeJollyRoger() {
  * Returns update(t, windAngle, wind 0..2, present 0..1, turn): wind 0 hanging, 1 straight out, above that flapping
  * harder; turn = how the rudder is turned (quaternion).
  */
-export function initFlag({ foot, axis, addPart, joinPart, accent }) {
+export function initFlag({ foot, axis, addPart, joinPart, accent }: {
+  foot: THREE.Vector3; axis: THREE.Vector3; addPart: AddPart; joinPart: (node: THREE.Object3D, id: string) => void; accent: THREE.Material;
+}): Vlag {
   const wood = new THREE.MeshStandardMaterial({ color: 0xb07a3f, roughness: 0.55 });
 
   // Centre-line from the rim of the tube (the origin), in model space. It bends in the vertical
   // plane through the tube, away from the vertical, more and more towards the top.
   const over = new THREE.Vector3(0, 1, 0).addScaledVector(axis, -axis.y).normalize().negate();
-  const line = []; const lean = [];                                   // points and unit tangents, by length
+  const line: THREE.Vector3[] = []; const lean: THREE.Vector3[] = [];                                   // points and unit tangents, by length
   const STEPS = 60; const at0 = axis.clone().multiplyScalar(-INSERT);
   for (let i = 0; i <= STEPS; i++) {
     const s = -INSERT + ((STAFF_L + INSERT) * i) / STEPS;
@@ -70,7 +87,7 @@ export function initFlag({ foot, axis, addPart, joinPart, accent }) {
     if (i) at0.addScaledVector(tangent, (STAFF_L + INSERT) / STEPS);
     line.push(at0.clone()); lean.push(tangent);
   }
-  const along = (s) => {                                              // point and tangent at s metres above the rim
+  const along = (s: number) => {                                              // point and tangent at s metres above the rim
     const f = THREE.MathUtils.clamp((s + INSERT) / (STAFF_L + INSERT), 0, 1) * STEPS;
     const i = Math.min(Math.floor(f), STEPS - 1);
     return { point: line[i].clone().lerp(line[i + 1], f - i), tangent: lean[i].clone().lerp(lean[i + 1], f - i).normalize() };
@@ -104,7 +121,7 @@ export function initFlag({ foot, axis, addPart, joinPart, accent }) {
   knop.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tip.tangent);
 
   const cloth = new THREE.BufferGeometry();
-  const position = new Float32Array((NU + 1) * (NV + 1) * 3); const uv = []; const index = [];
+  const position = new Float32Array((NU + 1) * (NV + 1) * 3); const uv: number[] = []; const index: number[] = [];
   for (let j = 0; j <= NV; j++) for (let i = 0; i <= NU; i++) uv.push(i / NU, 1 - j / NV);
   for (let j = 0; j < NV; j++) {
     for (let i = 0; i < NU; i++) {
@@ -118,7 +135,7 @@ export function initFlag({ foot, axis, addPart, joinPart, accent }) {
   const flag = new THREE.Mesh(cloth, new THREE.MeshStandardMaterial({ map: makeTricolour(), side: THREE.DoubleSide, roughness: 0.9 }));
   flag.frustumCulled = false;
 
-  const hoist = [];                                                   // where the flag is made fast, down from the knop
+  const hoist: { point: THREE.Vector3; tangent: THREE.Vector3 }[] = [];                                                   // where the flag is made fast, down from the knop
   for (let j = 0; j <= NV; j++) hoist.push(along(STAFF_L - 0.03 - (HOIST * j) / NV));
   addPart(staff, 'vlaggenstok', 'Vlaggenstok', 'roer', 'roerkoning', [25, 1000, 25]);
   joinPart(knop, 'vlaggenstok');                                      // the knop is part of the stok
@@ -130,8 +147,8 @@ export function initFlag({ foot, axis, addPart, joinPart, accent }) {
 
   const leanNow = new THREE.Vector3();
   // the wave along the cloth keeps its own phase, moved on by its speed now: a change of wind, no jump
-  let phase = 0; let lastT = null;
-  const fly = (t, windAngle, blow, present, turn) => {
+  let phase = 0; let lastT: number | null = null;
+  const fly = ((t: number, windAngle: number, blow: number, present: number, turn: THREE.Quaternion) => {
     // taken out for wrikken: drawn up out of the tube, then gone
     const drawn = (1 - present) * 0.4;
     lifted.copy(foot).addScaledVector(axis, drawn);
@@ -162,10 +179,10 @@ export function initFlag({ foot, axis, addPart, joinPart, accent }) {
     cloth.attributes.position.needsUpdate = true;
     cloth.computeVertexNormals();
     cloth.computeBoundingSphere();
-  };
+  }) as Vlag;
   /** Another cloth on the same staff. */
   fly.change = () => {
-    flag.material.map.dispose();
+    flag.material.map!.dispose();
     flag.material.map = makeJollyRoger();
     flag.material.needsUpdate = true;
   };
@@ -176,10 +193,10 @@ export function initFlag({ foot, axis, addPart, joinPart, accent }) {
 const LEECH_HOIST = 2.0; const LEECH_FLY = 3.0;                       // 200 x 300 cm: sixteen times the vlag
 
 /** A white field with the logo on it, as it is, taking most of the hoist. */
-function makeEmblemField(logo) {
+function makeEmblemField(logo: (CanvasImageSource & { width: number; height: number }) | null): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 900; canvas.height = 600;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 900, 600);
   if (logo) {
     const h = 480; const w = h * logo.width / logo.height;
@@ -194,9 +211,9 @@ function makeEmblemField(logo) {
  * A cloth made fast along a hoist that is given afresh every frame (NV + 1 points, top down),
  * flying off it like the vlag does off its staff.
  */
-export function initLeechFlag({ addPart }) {
+export function initLeechFlag({ addPart }: { addPart: AddPart }): AchterlijkVlag {
   const cloth = new THREE.BufferGeometry();
-  const position = new Float32Array((NU + 1) * (NV + 1) * 3); const uv = []; const index = [];
+  const position = new Float32Array((NU + 1) * (NV + 1) * 3); const uv: number[] = []; const index: number[] = [];
   for (let j = 0; j <= NV; j++) for (let i = 0; i <= NU; i++) uv.push(i / NU, 1 - j / NV);
   for (let j = 0; j < NV; j++) {
     for (let i = 0; i < NU; i++) {
@@ -208,7 +225,7 @@ export function initLeechFlag({ addPart }) {
   cloth.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   cloth.setIndex(index);
   // printed through, so it reads right from either side: the back face carries the mirror image
-  const mirrored = (texture) => { const t = texture.clone(); t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.needsUpdate = true; return t; };
+  const mirrored = (texture: THREE.Texture): THREE.Texture => { const t = texture.clone(); t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.needsUpdate = true; return t; };
   const field = makeEmblemField(null);
   const flag = new THREE.Mesh(cloth, new THREE.MeshStandardMaterial({ map: field, side: THREE.FrontSide, roughness: 0.9 }));
   const back = new THREE.Mesh(cloth, new THREE.MeshStandardMaterial({ map: mirrored(field), side: THREE.BackSide, roughness: 0.9 }));
@@ -219,7 +236,7 @@ export function initLeechFlag({ addPart }) {
   const DOWN = new THREE.Vector3(0, -1, 0);
   // reach: how far it stands out, 1 all its length; less, it hangs limp in folds (on a mast with no wind it would
   // otherwise lie flat against itself)
-  const fly = (t, windAngle, wind, hoist, reach = 1) => {
+  const fly = ((t: number, windAngle: number, wind: number, hoist: THREE.Vector3[], reach = 1) => {
     out.set(-Math.cos(windAngle), 0, -Math.sin(windAngle)).multiplyScalar(wind).addScaledVector(DOWN, 1 - 0.78 * wind).normalize();
     const swell = 0.02 + 0.09 * wind + 0.12 * (1 - reach); const speed = 1.5 + 5.5 * wind;
     for (let j = 0; j <= NV; j++) {
@@ -237,12 +254,12 @@ export function initLeechFlag({ addPart }) {
     cloth.attributes.position.needsUpdate = true;
     cloth.computeVertexNormals();
     cloth.computeBoundingSphere();
-  };
+  }) as AchterlijkVlag;
   fly.mesh = flag; fly.rows = NV; fly.hoist = LEECH_HOIST;
-  fly.setOpacity = (a) => { for (const m of [flag.material, back.material]) { m.transparent = a < 0.999; m.opacity = a; } };
+  fly.setOpacity = (a: number) => { for (const m of [flag.material, back.material]) { m.transparent = a < 0.999; m.opacity = a; } };
   fly.setEmblem = (image) => {
     const next = makeEmblemField(image);
-    for (const [mesh, map] of [[flag, next], [back, mirrored(next)]]) { mesh.material.map.dispose(); mesh.material.map = map; mesh.material.needsUpdate = true; }
+    for (const [mesh, map] of [[flag, next], [back, mirrored(next)]] as const) { mesh.material.map!.dispose(); mesh.material.map = map; mesh.material.needsUpdate = true; }
   };
   return fly;
 }
