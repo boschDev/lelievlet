@@ -7,7 +7,7 @@
 //     assets: 'https://…/',                       // where models/ and textures/ are; default: next to the script
 //     volledigScherm: true,                       // false: no full screen button, and the f key does nothing
 //     installeren: true,                          // false: no "Installeer als app" in the settings panel
-//     feedback: { url: 'https://…/melding' },       // where Melden POSTs its report as JSON; default: ours, null: saved as a file. false: no Melden
+//     feedback: { url: 'https://…/melding' },       // where Melden POSTs its report as JSON; true or null: saved as a file. false (the default): no Melden
 //     aanpassen: {
 //       zeilnummer: '442', naam: 'Fluessen', plaats: 'Zwolle',
 //       naamKleur: '#0b0b0b', plaatsKleur: '#0b0b0b',       // the lettering on the boeisel
@@ -46,7 +46,7 @@ export const DEFAULTS = {
   volledigScherm: true,
   installeren: true,
   adres: false,                    // true: the address of the page follows what is open, and opens it again (adres.js)
-  feedback: { url: 'https://europe-west4-lelievlet.cloudfunctions.net/lelievlet-melden' },   // files it as an issue on GitHub
+  feedback: false,                 // off: the original's receiver files reports as issues on its own GitHub, not ours
   aanpassen: { opslaan: true },
   toestand: {},
   quiz: { weg: [], erbij: [], niveau: 3 },
@@ -75,7 +75,7 @@ export function resolveConfig(given = {}) {
   if (given.debug !== undefined && (given.debug === null || typeof given.debug !== 'object')) {
     config.debug = Object.fromEntries(Object.keys(DEFAULTS.debug).map((key) => [key, Boolean(given.debug)]));
   }
-  if (given.feedback === true || given.feedback === null) config.feedback = { ...DEFAULTS.feedback };   // true: the default receiver
+  if (given.feedback === true || given.feedback === null) config.feedback = { url: null };   // no receiver of our own: saved as a file
   const unknown = Object.keys(given).filter((key) => !(key in DEFAULTS));
   if (unknown.length) console.warn(`[lelievlet] onbekende instelling(en): ${unknown.join(', ')}`);
   return config;

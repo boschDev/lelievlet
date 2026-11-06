@@ -447,7 +447,7 @@ groep, wat er waar op de boot staat (naam, plaats, zeilnummer, naam van de groep
 niet) en of elke boot een eigen bakskleur heeft, per boot zeilnummer, naam en bakskleur (zonder de naam of de
 bakskleur als ze die niet hebben), wat er verder anders is, en versturen, met de waarden van
 Aanpassen erbij; staat de plaats daar anders, dan geeft de melding die als `plaatsOpBoot`. Een gemelde groep
-komt na controle met de hand in `groepen.js`. Met `feedback: false` is die knop er niet.
+komt na controle met de hand in `groepen.js`. Met `feedback: false` is die knop er niet; in deze versie is dat de standaard, zie hieronder.
 
 ## Modi en animatie
 
@@ -526,7 +526,9 @@ Alle waarden lopen soepel naar hun doelwaarde toe, dus elke verandering is een a
   Aanpassen heeft opgeslagen. Wie dat niet heeft, begint bij de huidige stand. Wat nieuw is, staat
   er met *Nieuw* bij; een tweede update op dezelfde dag (`nr: 2`) telt als nieuw voor wie de eerste al
   zag. Met `aanpassen.opslaan: false` gebeurt dit niet. Met `feedback: false` blijft het menu, zonder
-  Melden (en zonder *Kleuren van je groep melden* in Aanpassen). Boot en Leren hebben, net als de andere panelen, rechtsboven *Sluiten*.
+  Melden (en zonder *Kleuren van je groep melden* in Aanpassen). In deze versie staat Melden standaard uit: de
+  ontvanger van het origineel maakt van een melding een issue op diens GitHub. Met `feedback: true` (of `null`)
+  komt Melden terug en wordt een melding als bestand opgeslagen; met `feedback: { url }` gaat hij naar een eigen ontvanger. Boot en Leren hebben, net als de andere panelen, rechtsboven *Sluiten*.
   Rechtsonder staat de **onderdelenkaart**: met niets geselecteerd is
   dat alleen een ronde zoekknop, met een onderdeel geselecteerd de kaart met groep en naam en
   rechtsboven daarin dezelfde zoekknop. Die opent **Zoeken** boven de kaart (`web/src/bpr/zoeken.js`).

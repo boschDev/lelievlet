@@ -1,0 +1,8 @@
+# only web/ and the LICENSE go into the build
+*
+!LICENSE
+!web/
+web/node_modules/
+web/dist/
+web/dist-lib/
+**/.DS_Store
