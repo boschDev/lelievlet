@@ -1,4 +1,1 @@
-import { alleenBase } from '../onderdeel.ts';
-import base, { IDS } from './base.ts';
-
-export const achterlandvast = alleenBase('Achterlandvast', IDS, base);
+export { Achterlandvast } from './base.ts';

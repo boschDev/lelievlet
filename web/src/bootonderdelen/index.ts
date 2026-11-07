@@ -1,272 +1,272 @@
-import type { ModelDeel, Onderdeel, Versie } from './onderdeel.ts';
-import { achterdek } from './achterdek/index.ts';
-import { achterlandvast } from './achterlandvast/index.ts';
-import { achterschot } from './achterschot/index.ts';
-import { anker } from './anker/index.ts';
-import { ankerketting } from './ankerketting/index.ts';
-import { ankerlijn } from './ankerlijn/index.ts';
-import { ankeroog } from './ankeroog/index.ts';
-import { bakskist } from './bakskist/index.ts';
-import { bakskist_beslag } from './bakskist_beslag/index.ts';
-import { bakskist_deksel } from './bakskist_deksel/index.ts';
-import { bakskist_handvatten } from './bakskist_handvatten/index.ts';
-import { berghout } from './berghout/index.ts';
-import { beslag_gaffel } from './beslag_gaffel/index.ts';
-import { blok_fokkenschoot } from './blok_fokkenschoot/index.ts';
-import { blok_fokkenval } from './blok_fokkenval/index.ts';
-import { blok_grootschoot_giek } from './blok_grootschoot_giek/index.ts';
-import { blok_grootschoot_kuip } from './blok_grootschoot_kuip/index.ts';
-import { blok_klauwval } from './blok_klauwval/index.ts';
-import { blok_piekenval } from './blok_piekenval/index.ts';
-import { boegrand } from './boegrand/index.ts';
-import { boegspriet } from './boegspriet/index.ts';
-import { boegspriet_bouten } from './boegspriet_bouten/index.ts';
-import { boeisel } from './boeisel/index.ts';
-import { borghaak_spiegel } from './borghaak_spiegel/index.ts';
-import { borgkettinkje } from './borgkettinkje/index.ts';
-import { borglijntje_lummelbout } from './borglijntje_lummelbout/index.ts';
-import { borgoog_roer } from './borgoog_roer/index.ts';
-import { buikdenning } from './buikdenning/index.ts';
-import { dekcontour } from './dekcontour/index.ts';
-import { dodemanseind } from './dodemanseind/index.ts';
-import { doft_achter } from './doft_achter/index.ts';
-import { doft_voor } from './doft_voor/index.ts';
-import { dofthouders } from './dofthouders/index.ts';
-import { dolboord } from './dolboord/index.ts';
-import { dolpotten } from './dolpotten/index.ts';
-import { ehbo_koffer } from './ehbo_koffer/index.ts';
-import { fok } from './fok/index.ts';
-import { fok_achterlijk } from './fok_achterlijk/index.ts';
-import { fok_halshoek } from './fok_halshoek/index.ts';
-import { fok_onderlijk } from './fok_onderlijk/index.ts';
-import { fok_schoothoek } from './fok_schoothoek/index.ts';
-import { fok_tophoek } from './fok_tophoek/index.ts';
-import { fok_voorlijk } from './fok_voorlijk/index.ts';
-import { fokkenschoot } from './fokkenschoot/index.ts';
-import { fokkenval } from './fokkenval/index.ts';
-import { gaffel } from './gaffel/index.ts';
-import { gaffeldraad } from './gaffeldraad/index.ts';
-import { giek } from './giek/index.ts';
-import { grendelbout } from './grendelbout/index.ts';
-import { grootschoot } from './grootschoot/index.ts';
-import { grootschootoog } from './grootschootoog/index.ts';
-import { grootschootoog_steun } from './grootschootoog_steun/index.ts';
-import { grootzeil } from './grootzeil/index.ts';
-import { grootzeil_achterlijk } from './grootzeil_achterlijk/index.ts';
-import { grootzeil_bovenlijk } from './grootzeil_bovenlijk/index.ts';
-import { grootzeil_halshoek } from './grootzeil_halshoek/index.ts';
-import { grootzeil_klauwhoek } from './grootzeil_klauwhoek/index.ts';
-import { grootzeil_onderlijk } from './grootzeil_onderlijk/index.ts';
-import { grootzeil_schoothoek } from './grootzeil_schoothoek/index.ts';
-import { grootzeil_tophoek } from './grootzeil_tophoek/index.ts';
-import { grootzeil_voorlijk } from './grootzeil_voorlijk/index.ts';
-import { grootzeil_zeilnummer } from './grootzeil_zeilnummer/index.ts';
-import { grootzeil_zeilteken } from './grootzeil_zeilteken/index.ts';
-import { hanekam } from './hanekam/index.ts';
-import { hanepootloper } from './hanepootloper/index.ts';
-import { harpje_fokkenval } from './harpje_fokkenval/index.ts';
-import { harpje_strop } from './harpje_strop/index.ts';
-import { harpjes } from './harpjes/index.ts';
-import { harpjes_fok } from './harpjes_fok/index.ts';
-import { harpjes_mast } from './harpjes_mast/index.ts';
-import { harpjes_wantketting } from './harpjes_wantketting/index.ts';
-import { helmstok } from './helmstok/index.ts';
-import { hijsogen } from './hijsogen/index.ts';
-import { hommerring } from './hommerring/index.ts';
-import { hoosblik } from './hoosblik/index.ts';
-import { kettinkje_fok } from './kettinkje_fok/index.ts';
-import { kikkers_mastkoker } from './kikkers_mastkoker/index.ts';
-import { kikkers_voordek } from './kikkers_voordek/index.ts';
-import { kim } from './kim/index.ts';
-import { klauw } from './klauw/index.ts';
-import { klauwval } from './klauwval/index.ts';
-import { landvastogen } from './landvastogen/index.ts';
-import { leiogen } from './leiogen/index.ts';
-import { leuvers } from './leuvers/index.ts';
-import { lummelbeslag } from './lummelbeslag/index.ts';
-import { lummelbout } from './lummelbout/index.ts';
-import { marllijn_gaffel } from './marllijn_gaffel/index.ts';
-import { marllijn_giek } from './marllijn_giek/index.ts';
-import { mast } from './mast/index.ts';
-import { mastband_lummel } from './mastband_lummel/index.ts';
-import { mastbout } from './mastbout/index.ts';
-import { mastkoker } from './mastkoker/index.ts';
-import { masttopring } from './masttopring/index.ts';
-import { meerpen } from './meerpen/index.ts';
-import { mikhouders } from './mikhouders/index.ts';
-import { pelikaanhaak_ring } from './pelikaanhaak_ring/index.ts';
-import { pettenlijntje } from './pettenlijntje/index.ts';
-import { piekenval } from './piekenval/index.ts';
-import { riem } from './riem/index.ts';
-import { rijglijn } from './rijglijn/index.ts';
-import { roerblad } from './roerblad/index.ts';
-import { roerhaken } from './roerhaken/index.ts';
-import { roerkoning } from './roerkoning/index.ts';
-import { roerkop } from './roerkop/index.ts';
-import { scheg } from './scheg/index.ts';
-import { schootring } from './schootring/index.ts';
-import { sleepogen } from './sleepogen/index.ts';
-import { sleepoog_boeg } from './sleepoog_boeg/index.ts';
-import { spanten } from './spanten/index.ts';
-import { spiegel } from './spiegel/index.ts';
-import { spiegelrand } from './spiegelrand/index.ts';
-import { strop_gaffel } from './strop_gaffel/index.ts';
-import { vingerlingen } from './vingerlingen/index.ts';
-import { vlak } from './vlak/index.ts';
-import { voordek } from './voordek/index.ts';
-import { voorlandvast } from './voorlandvast/index.ts';
-import { voorplecht } from './voorplecht/index.ts';
-import { voorschot } from './voorschot/index.ts';
-import { voorstag } from './voorstag/index.ts';
-import { voorstagspanner } from './voorstagspanner/index.ts';
-import { want } from './want/index.ts';
-import { wantketting } from './wantketting/index.ts';
-import { wantputting } from './wantputting/index.ts';
-import { wervel } from './wervel/index.ts';
-import { wrikgat } from './wrikgat/index.ts';
-import { zeillatten } from './zeillatten/index.ts';
-import { zwaard } from './zwaard/index.ts';
-import { zwaardkast } from './zwaardkast/index.ts';
-import { zwaardloper_boven } from './zwaardloper_boven/index.ts';
-import { zwaardloper_onder } from './zwaardloper_onder/index.ts';
-import { zwaardstrippen } from './zwaardstrippen/index.ts';
+import type { ModelDeel, Onderdeel, OnderdeelKlasse, Versie } from './onderdeel.ts';
+import { Achterdek } from './achterdek/index.ts';
+import { Achterlandvast } from './achterlandvast/index.ts';
+import { Achterschot } from './achterschot/index.ts';
+import { Anker } from './anker/index.ts';
+import { Ankerketting } from './ankerketting/index.ts';
+import { Ankerlijn } from './ankerlijn/index.ts';
+import { Ankeroog } from './ankeroog/index.ts';
+import { Bakskist } from './bakskist/index.ts';
+import { BakskistBeslag } from './bakskist_beslag/index.ts';
+import { BakskistDeksel } from './bakskist_deksel/index.ts';
+import { BakskistHandvatten } from './bakskist_handvatten/index.ts';
+import { Berghout } from './berghout/index.ts';
+import { BeslagGaffel } from './beslag_gaffel/index.ts';
+import { BlokFokkenschoot } from './blok_fokkenschoot/index.ts';
+import { BlokFokkenval } from './blok_fokkenval/index.ts';
+import { BlokGrootschootGiek } from './blok_grootschoot_giek/index.ts';
+import { BlokGrootschootKuip } from './blok_grootschoot_kuip/index.ts';
+import { BlokKlauwval } from './blok_klauwval/index.ts';
+import { BlokPiekenval } from './blok_piekenval/index.ts';
+import { Boegrand } from './boegrand/index.ts';
+import { Boegspriet } from './boegspriet/index.ts';
+import { BoegsprietBouten } from './boegspriet_bouten/index.ts';
+import { Boeisel } from './boeisel/index.ts';
+import { BorghaakSpiegel } from './borghaak_spiegel/index.ts';
+import { Borgkettinkje } from './borgkettinkje/index.ts';
+import { BorglijntjeLummelbout } from './borglijntje_lummelbout/index.ts';
+import { BorgoogRoer } from './borgoog_roer/index.ts';
+import { Buikdenning } from './buikdenning/index.ts';
+import { Dekcontour } from './dekcontour/index.ts';
+import { Dodemanseind } from './dodemanseind/index.ts';
+import { DoftAchter } from './doft_achter/index.ts';
+import { DoftVoor } from './doft_voor/index.ts';
+import { Dofthouders } from './dofthouders/index.ts';
+import { Dolboord } from './dolboord/index.ts';
+import { Dolpotten } from './dolpotten/index.ts';
+import { EhboKoffer } from './ehbo_koffer/index.ts';
+import { Fok } from './fok/index.ts';
+import { FokAchterlijk } from './fok_achterlijk/index.ts';
+import { FokHalshoek } from './fok_halshoek/index.ts';
+import { FokOnderlijk } from './fok_onderlijk/index.ts';
+import { FokSchoothoek } from './fok_schoothoek/index.ts';
+import { FokTophoek } from './fok_tophoek/index.ts';
+import { FokVoorlijk } from './fok_voorlijk/index.ts';
+import { Fokkenschoot } from './fokkenschoot/index.ts';
+import { Fokkenval } from './fokkenval/index.ts';
+import { Gaffel } from './gaffel/index.ts';
+import { Gaffeldraad } from './gaffeldraad/index.ts';
+import { Giek } from './giek/index.ts';
+import { Grendelbout } from './grendelbout/index.ts';
+import { Grootschoot } from './grootschoot/index.ts';
+import { Grootschootoog } from './grootschootoog/index.ts';
+import { GrootschootoogSteun } from './grootschootoog_steun/index.ts';
+import { Grootzeil } from './grootzeil/index.ts';
+import { GrootzeilAchterlijk } from './grootzeil_achterlijk/index.ts';
+import { GrootzeilBovenlijk } from './grootzeil_bovenlijk/index.ts';
+import { GrootzeilHalshoek } from './grootzeil_halshoek/index.ts';
+import { GrootzeilKlauwhoek } from './grootzeil_klauwhoek/index.ts';
+import { GrootzeilOnderlijk } from './grootzeil_onderlijk/index.ts';
+import { GrootzeilSchoothoek } from './grootzeil_schoothoek/index.ts';
+import { GrootzeilTophoek } from './grootzeil_tophoek/index.ts';
+import { GrootzeilVoorlijk } from './grootzeil_voorlijk/index.ts';
+import { GrootzeilZeilnummer } from './grootzeil_zeilnummer/index.ts';
+import { GrootzeilZeilteken } from './grootzeil_zeilteken/index.ts';
+import { Hanekam } from './hanekam/index.ts';
+import { Hanepootloper } from './hanepootloper/index.ts';
+import { HarpjeFokkenval } from './harpje_fokkenval/index.ts';
+import { HarpjeStrop } from './harpje_strop/index.ts';
+import { Harpjes } from './harpjes/index.ts';
+import { HarpjesFok } from './harpjes_fok/index.ts';
+import { HarpjesMast } from './harpjes_mast/index.ts';
+import { HarpjesWantketting } from './harpjes_wantketting/index.ts';
+import { Helmstok } from './helmstok/index.ts';
+import { Hijsogen } from './hijsogen/index.ts';
+import { Hommerring } from './hommerring/index.ts';
+import { Hoosblik } from './hoosblik/index.ts';
+import { KettinkjeFok } from './kettinkje_fok/index.ts';
+import { KikkersMastkoker } from './kikkers_mastkoker/index.ts';
+import { KikkersVoordek } from './kikkers_voordek/index.ts';
+import { Kim } from './kim/index.ts';
+import { Klauw } from './klauw/index.ts';
+import { Klauwval } from './klauwval/index.ts';
+import { Landvastogen } from './landvastogen/index.ts';
+import { Leiogen } from './leiogen/index.ts';
+import { Leuvers } from './leuvers/index.ts';
+import { Lummelbeslag } from './lummelbeslag/index.ts';
+import { Lummelbout } from './lummelbout/index.ts';
+import { MarllijnGaffel } from './marllijn_gaffel/index.ts';
+import { MarllijnGiek } from './marllijn_giek/index.ts';
+import { Mast } from './mast/index.ts';
+import { MastbandLummel } from './mastband_lummel/index.ts';
+import { Mastbout } from './mastbout/index.ts';
+import { Mastkoker } from './mastkoker/index.ts';
+import { Masttopring } from './masttopring/index.ts';
+import { Meerpen } from './meerpen/index.ts';
+import { Mikhouders } from './mikhouders/index.ts';
+import { PelikaanhaakRing } from './pelikaanhaak_ring/index.ts';
+import { Pettenlijntje } from './pettenlijntje/index.ts';
+import { Piekenval } from './piekenval/index.ts';
+import { Riem } from './riem/index.ts';
+import { Rijglijn } from './rijglijn/index.ts';
+import { Roerblad } from './roerblad/index.ts';
+import { Roerhaken } from './roerhaken/index.ts';
+import { Roerkoning } from './roerkoning/index.ts';
+import { Roerkop } from './roerkop/index.ts';
+import { Scheg } from './scheg/index.ts';
+import { Schootring } from './schootring/index.ts';
+import { Sleepogen } from './sleepogen/index.ts';
+import { SleepoogBoeg } from './sleepoog_boeg/index.ts';
+import { Spanten } from './spanten/index.ts';
+import { Spiegel } from './spiegel/index.ts';
+import { Spiegelrand } from './spiegelrand/index.ts';
+import { StropGaffel } from './strop_gaffel/index.ts';
+import { Vingerlingen } from './vingerlingen/index.ts';
+import { Vlak } from './vlak/index.ts';
+import { Voordek } from './voordek/index.ts';
+import { Voorlandvast } from './voorlandvast/index.ts';
+import { Voorplecht } from './voorplecht/index.ts';
+import { Voorschot } from './voorschot/index.ts';
+import { Voorstag } from './voorstag/index.ts';
+import { Voorstagspanner } from './voorstagspanner/index.ts';
+import { Want } from './want/index.ts';
+import { Wantketting } from './wantketting/index.ts';
+import { Wantputting } from './wantputting/index.ts';
+import { Wervel } from './wervel/index.ts';
+import { Wrikgat } from './wrikgat/index.ts';
+import { Zeillatten } from './zeillatten/index.ts';
+import { Zwaard } from './zwaard/index.ts';
+import { Zwaardkast } from './zwaardkast/index.ts';
+import { ZwaardloperBoven } from './zwaardloper_boven/index.ts';
+import { ZwaardloperOnder } from './zwaardloper_onder/index.ts';
+import { Zwaardstrippen } from './zwaardstrippen/index.ts';
 
-// Every part the model renders, a folder each (a part on both sides, _bb and _sb, is one). Most have only their base
-// yet (alleenBase in onderdeel.ts); riem has versions. A new version: a file beside the part's base.ts, and in its
-// index.ts. A new part: a folder with a base.ts and an index.ts, and its name here.
+// Every part the model renders, a class each (a part on both sides, _bb and _sb, is one). Most have only their base
+// yet; riem has versions. A new version: a file beside the part's base.ts, and its index.ts gives versies, standaard
+// and maakVersies() (see riem/). A new part: a folder with a base.ts and an index.ts, and its class here.
 export const ONDERDELEN = {
-  achterdek,
-  achterlandvast,
-  achterschot,
-  anker,
-  ankerketting,
-  ankerlijn,
-  ankeroog,
-  bakskist,
-  bakskist_beslag,
-  bakskist_deksel,
-  bakskist_handvatten,
-  berghout,
-  beslag_gaffel,
-  blok_fokkenschoot,
-  blok_fokkenval,
-  blok_grootschoot_giek,
-  blok_grootschoot_kuip,
-  blok_klauwval,
-  blok_piekenval,
-  boegrand,
-  boegspriet,
-  boegspriet_bouten,
-  boeisel,
-  borghaak_spiegel,
-  borgkettinkje,
-  borglijntje_lummelbout,
-  borgoog_roer,
-  buikdenning,
-  dekcontour,
-  dodemanseind,
-  doft_achter,
-  doft_voor,
-  dofthouders,
-  dolboord,
-  dolpotten,
-  ehbo_koffer,
-  fok,
-  fok_achterlijk,
-  fok_halshoek,
-  fok_onderlijk,
-  fok_schoothoek,
-  fok_tophoek,
-  fok_voorlijk,
-  fokkenschoot,
-  fokkenval,
-  gaffel,
-  gaffeldraad,
-  giek,
-  grendelbout,
-  grootschoot,
-  grootschootoog,
-  grootschootoog_steun,
-  grootzeil,
-  grootzeil_achterlijk,
-  grootzeil_bovenlijk,
-  grootzeil_halshoek,
-  grootzeil_klauwhoek,
-  grootzeil_onderlijk,
-  grootzeil_schoothoek,
-  grootzeil_tophoek,
-  grootzeil_voorlijk,
-  grootzeil_zeilnummer,
-  grootzeil_zeilteken,
-  hanekam,
-  hanepootloper,
-  harpje_fokkenval,
-  harpje_strop,
-  harpjes,
-  harpjes_fok,
-  harpjes_mast,
-  harpjes_wantketting,
-  helmstok,
-  hijsogen,
-  hommerring,
-  hoosblik,
-  kettinkje_fok,
-  kikkers_mastkoker,
-  kikkers_voordek,
-  kim,
-  klauw,
-  klauwval,
-  landvastogen,
-  leiogen,
-  leuvers,
-  lummelbeslag,
-  lummelbout,
-  marllijn_gaffel,
-  marllijn_giek,
-  mast,
-  mastband_lummel,
-  mastbout,
-  mastkoker,
-  masttopring,
-  meerpen,
-  mikhouders,
-  pelikaanhaak_ring,
-  pettenlijntje,
-  piekenval,
-  riem,
-  rijglijn,
-  roerblad,
-  roerhaken,
-  roerkoning,
-  roerkop,
-  scheg,
-  schootring,
-  sleepogen,
-  sleepoog_boeg,
-  spanten,
-  spiegel,
-  spiegelrand,
-  strop_gaffel,
-  vingerlingen,
-  vlak,
-  voordek,
-  voorlandvast,
-  voorplecht,
-  voorschot,
-  voorstag,
-  voorstagspanner,
-  want,
-  wantketting,
-  wantputting,
-  wervel,
-  wrikgat,
-  zeillatten,
-  zwaard,
-  zwaardkast,
-  zwaardloper_boven,
-  zwaardloper_onder,
-  zwaardstrippen,
-} satisfies Record<string, Onderdeel>;
+  achterdek: Achterdek,
+  achterlandvast: Achterlandvast,
+  achterschot: Achterschot,
+  anker: Anker,
+  ankerketting: Ankerketting,
+  ankerlijn: Ankerlijn,
+  ankeroog: Ankeroog,
+  bakskist: Bakskist,
+  bakskist_beslag: BakskistBeslag,
+  bakskist_deksel: BakskistDeksel,
+  bakskist_handvatten: BakskistHandvatten,
+  berghout: Berghout,
+  beslag_gaffel: BeslagGaffel,
+  blok_fokkenschoot: BlokFokkenschoot,
+  blok_fokkenval: BlokFokkenval,
+  blok_grootschoot_giek: BlokGrootschootGiek,
+  blok_grootschoot_kuip: BlokGrootschootKuip,
+  blok_klauwval: BlokKlauwval,
+  blok_piekenval: BlokPiekenval,
+  boegrand: Boegrand,
+  boegspriet: Boegspriet,
+  boegspriet_bouten: BoegsprietBouten,
+  boeisel: Boeisel,
+  borghaak_spiegel: BorghaakSpiegel,
+  borgkettinkje: Borgkettinkje,
+  borglijntje_lummelbout: BorglijntjeLummelbout,
+  borgoog_roer: BorgoogRoer,
+  buikdenning: Buikdenning,
+  dekcontour: Dekcontour,
+  dodemanseind: Dodemanseind,
+  doft_achter: DoftAchter,
+  doft_voor: DoftVoor,
+  dofthouders: Dofthouders,
+  dolboord: Dolboord,
+  dolpotten: Dolpotten,
+  ehbo_koffer: EhboKoffer,
+  fok: Fok,
+  fok_achterlijk: FokAchterlijk,
+  fok_halshoek: FokHalshoek,
+  fok_onderlijk: FokOnderlijk,
+  fok_schoothoek: FokSchoothoek,
+  fok_tophoek: FokTophoek,
+  fok_voorlijk: FokVoorlijk,
+  fokkenschoot: Fokkenschoot,
+  fokkenval: Fokkenval,
+  gaffel: Gaffel,
+  gaffeldraad: Gaffeldraad,
+  giek: Giek,
+  grendelbout: Grendelbout,
+  grootschoot: Grootschoot,
+  grootschootoog: Grootschootoog,
+  grootschootoog_steun: GrootschootoogSteun,
+  grootzeil: Grootzeil,
+  grootzeil_achterlijk: GrootzeilAchterlijk,
+  grootzeil_bovenlijk: GrootzeilBovenlijk,
+  grootzeil_halshoek: GrootzeilHalshoek,
+  grootzeil_klauwhoek: GrootzeilKlauwhoek,
+  grootzeil_onderlijk: GrootzeilOnderlijk,
+  grootzeil_schoothoek: GrootzeilSchoothoek,
+  grootzeil_tophoek: GrootzeilTophoek,
+  grootzeil_voorlijk: GrootzeilVoorlijk,
+  grootzeil_zeilnummer: GrootzeilZeilnummer,
+  grootzeil_zeilteken: GrootzeilZeilteken,
+  hanekam: Hanekam,
+  hanepootloper: Hanepootloper,
+  harpje_fokkenval: HarpjeFokkenval,
+  harpje_strop: HarpjeStrop,
+  harpjes: Harpjes,
+  harpjes_fok: HarpjesFok,
+  harpjes_mast: HarpjesMast,
+  harpjes_wantketting: HarpjesWantketting,
+  helmstok: Helmstok,
+  hijsogen: Hijsogen,
+  hommerring: Hommerring,
+  hoosblik: Hoosblik,
+  kettinkje_fok: KettinkjeFok,
+  kikkers_mastkoker: KikkersMastkoker,
+  kikkers_voordek: KikkersVoordek,
+  kim: Kim,
+  klauw: Klauw,
+  klauwval: Klauwval,
+  landvastogen: Landvastogen,
+  leiogen: Leiogen,
+  leuvers: Leuvers,
+  lummelbeslag: Lummelbeslag,
+  lummelbout: Lummelbout,
+  marllijn_gaffel: MarllijnGaffel,
+  marllijn_giek: MarllijnGiek,
+  mast: Mast,
+  mastband_lummel: MastbandLummel,
+  mastbout: Mastbout,
+  mastkoker: Mastkoker,
+  masttopring: Masttopring,
+  meerpen: Meerpen,
+  mikhouders: Mikhouders,
+  pelikaanhaak_ring: PelikaanhaakRing,
+  pettenlijntje: Pettenlijntje,
+  piekenval: Piekenval,
+  riem: Riem,
+  rijglijn: Rijglijn,
+  roerblad: Roerblad,
+  roerhaken: Roerhaken,
+  roerkoning: Roerkoning,
+  roerkop: Roerkop,
+  scheg: Scheg,
+  schootring: Schootring,
+  sleepogen: Sleepogen,
+  sleepoog_boeg: SleepoogBoeg,
+  spanten: Spanten,
+  spiegel: Spiegel,
+  spiegelrand: Spiegelrand,
+  strop_gaffel: StropGaffel,
+  vingerlingen: Vingerlingen,
+  vlak: Vlak,
+  voordek: Voordek,
+  voorlandvast: Voorlandvast,
+  voorplecht: Voorplecht,
+  voorschot: Voorschot,
+  voorstag: Voorstag,
+  voorstagspanner: Voorstagspanner,
+  want: Want,
+  wantketting: Wantketting,
+  wantputting: Wantputting,
+  wervel: Wervel,
+  wrikgat: Wrikgat,
+  zeillatten: Zeillatten,
+  zwaard: Zwaard,
+  zwaardkast: Zwaardkast,
+  zwaardloper_boven: ZwaardloperBoven,
+  zwaardloper_onder: ZwaardloperOnder,
+  zwaardstrippen: Zwaardstrippen,
+} satisfies Record<string, OnderdeelKlasse>;
 
 export type OnderdeelNaam = keyof typeof ONDERDELEN;
 /** Which version of which part: what a group gives (groepen.ts `onderdelen`); a part left out has its standaard. */
@@ -277,7 +277,7 @@ const namen = Object.keys(ONDERDELEN) as OnderdeelNaam[];
 /** Every part with the version it has: the one chosen, if that is one of its versions, else the standaard. */
 export function volledig(keuze: Keuze | null | undefined): Record<OnderdeelNaam, string> {
   return Object.fromEntries(namen.map((naam) => {
-    const onderdeel: Onderdeel = ONDERDELEN[naam];
+    const onderdeel: OnderdeelKlasse = ONDERDELEN[naam];
     const gekozen = keuze?.[naam];
     return [naam, gekozen && onderdeel.versies.includes(gekozen) ? gekozen : onderdeel.standaard];
   })) as Record<OnderdeelNaam, string>;
@@ -289,16 +289,24 @@ export const zelfde = (a: Keuze | null | undefined, b: Keuze | null | undefined)
   return namen.every((naam) => va[naam] === vb[naam]);
 };
 
-/** The parts of this model with their versions; set() puts on what is chosen, and takes off what was on. */
-export function makeBootonderdelen(delen: ModelDeel[]): { set(keuze: Keuze | null | undefined): void } {
+/** The parts of this model, each its class, with their versions; set() puts on what is chosen, and takes off what
+ *  was on. A part the model does not have is left out. */
+export function makeBootonderdelen(delen: ModelDeel[]): {
+  onderdelen: Map<OnderdeelNaam, Onderdeel>;
+  set(keuze: Keuze | null | undefined): void;
+} {
+  const onderdelen = new Map<OnderdeelNaam, Onderdeel>();
   const versies = new Map<OnderdeelNaam, Record<string, Versie>>();
   for (const naam of namen) {
-    const gemaakt = (ONDERDELEN[naam] as Onderdeel).maak(delen);
-    if (gemaakt) versies.set(naam, gemaakt);
+    const onderdeel = new (ONDERDELEN[naam] as OnderdeelKlasse)(delen);
+    if (!onderdeel.delen.length) continue;
+    onderdelen.set(naam, onderdeel);
+    versies.set(naam, onderdeel.maakVersies());
   }
   // what the model has when it is loaded: every part in its standaard
   const actief = volledig(null);
   return {
+    onderdelen,
     set(keuze) {
       const gewenst = volledig(keuze);
       for (const [naam, vs] of versies) {

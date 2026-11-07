@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Voorste doft (mastdoft) (interieur): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Voorste doft (mastdoft) (interieur), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['doft_voor'] as const;
-
-/** Base: the voorste doft (mastdoft) as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class DoftVoor extends Onderdeel {
+  static override readonly naam = 'Voorste doft (mastdoft)';
+  static override readonly ids = ['doft_voor'];
 }

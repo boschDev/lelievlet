@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Tophoek grootzeil (piek) (zeil): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Tophoek grootzeil (piek) (zeil), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['grootzeil_tophoek'] as const;
-
-/** Base: the tophoek grootzeil (piek) as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class GrootzeilTophoek extends Onderdeel {
+  static override readonly naam = 'Tophoek grootzeil (piek)';
+  static override readonly ids = ['grootzeil_tophoek'];
 }

@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Contour boeisel (romp): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Contour boeisel (romp), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['dekcontour'] as const;
-
-/** Base: the contour boeisel as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Dekcontour extends Onderdeel {
+  static override readonly naam = 'Contour boeisel';
+  static override readonly ids = ['dekcontour'];
 }

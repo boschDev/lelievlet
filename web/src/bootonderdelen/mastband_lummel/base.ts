@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Mastband met lummelbeslag (rondhout): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Mastband met lummelbeslag (rondhout), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['mastband_lummel'] as const;
-
-/** Base: the mastband met lummelbeslag as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class MastbandLummel extends Onderdeel {
+  static override readonly naam = 'Mastband met lummelbeslag';
+  static override readonly ids = ['mastband_lummel'];
 }

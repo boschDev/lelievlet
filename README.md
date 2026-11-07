@@ -87,9 +87,16 @@ model het heeft. Versies zijn er nu voor:
 |---|---|---|
 | `riem` (roeiriemen en wrikriem) | `base` (zonder markering), `handvat` (band in de bakskleur bij het handvat), `blad` (band 5 cm van de punt van het blad, half zo breed) | `handvat` |
 
-Een nieuwe versie: een bestand naast de `base.ts` van het onderdeel, en erbij in zijn `index.ts` (zie `riem/`). Een
-nieuw onderdeel: een map met een `base.ts` en een `index.ts`, en de naam in `bootonderdelen/index.ts`. De versies veranderen het model in de viewer; het model zelf (`lelievlet.glb`) heeft elk
-onderdeel in één vorm.
+Elk onderdeel is een class (`class Berghout extends Onderdeel`, in zijn `base.ts`) met de meshes uit het model, en
+daar wordt de vorm gemaakt: `vervorm()` verplaatst de punten van de vorm uit het model (schalen, buigen, inkorten),
+`zetVorm()` geeft een mesh een andere geometrie, `verberg()` laat (een deel van) het onderdeel weg, `voegToe()` zet er
+een eigen mesh bij, en `herstel()` maakt het weer zoals het model het heeft. Een versie is een class
+(`class Blad extends Versie<RiemBase>`) met `aan()` en `uit()`, en werkt via zijn onderdeel.
+
+Een nieuwe versie: een bestand naast de `base.ts` van het onderdeel; zijn `index.ts` geeft dan `versies`, `standaard`
+en `maakVersies()` (zie `riem/`). Een nieuw onderdeel: een map met een `base.ts` en een `index.ts`, en de class in
+`bootonderdelen/index.ts`. De versies veranderen het model in de viewer; het model zelf (`lelievlet.glb`) heeft elk
+onderdeel in één vorm. De lijnen langs de randen (`edges.ts`) worden één keer getekend, van de vorm uit het model.
 
 `web/index.html` is niet meer dan een lege `<div>` die de viewer vult; alles zit in de bibliotheek
 (`web/src/lib.ts`). Zie hieronder hoe je hem in een eigen pagina zet.

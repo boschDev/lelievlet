@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Bouten boegspriet (beslag): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Bouten boegspriet (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['boegspriet_bouten'] as const;
-
-/** Base: the bouten boegspriet as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class BoegsprietBouten extends Onderdeel {
+  static override readonly naam = 'Bouten boegspriet';
+  static override readonly ids = ['boegspriet_bouten'];
 }

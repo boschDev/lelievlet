@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Grendelbout (beslag): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Grendelbout (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['grendelbout'] as const;
-
-/** Base: the grendelbout as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Grendelbout extends Onderdeel {
+  static override readonly naam = 'Grendelbout';
+  static override readonly ids = ['grendelbout'];
 }

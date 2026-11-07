@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Anker (beslag): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Anker (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['anker'] as const;
-
-/** Base: the anker as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Anker extends Onderdeel {
+  static override readonly naam = 'Anker';
+  static override readonly ids = ['anker'];
 }

@@ -1,4 +1,1 @@
-import { alleenBase } from '../onderdeel.ts';
-import base, { IDS } from './base.ts';
-
-export const mastbout = alleenBase('Mastbout', IDS, base);
+export { Mastbout } from './base.ts';

@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Fok (zeil): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Fok (zeil), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['fok'] as const;
-
-/** Base: the fok as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Fok extends Onderdeel {
+  static override readonly naam = 'Fok';
+  static override readonly ids = ['fok'];
 }

@@ -21,7 +21,8 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
 - **Bootonderdelen** (`web/src/bootonderdelen/{onderdeel}/{versie}.ts`): wat per lelievlet in vorm verschilt. Per
   onderdeel een `base.ts` (wat de versies delen, en het onderdeel op zijn kaalst), een bestand per versie en een
   `index.ts` (versies en standaard: de versie die het model heeft). Registreren in `bootonderdelen/index.ts`. Elk
-  onderdeel uit `lelievlet.parts.json` heeft een map (`_bb`/`_sb` samen); met alleen een `base` via `alleenBase`. Een
+  onderdeel uit `lelievlet.parts.json` heeft een map (`_bb`/`_sb` samen); elk een class (`extends Onderdeel`) die zijn meshes beheert en waar de vorm
+  gemaakt wordt (`vervorm`, `zetVorm`, `verberg`, `voegToe`, `herstel`); versies zijn classes (`extends Versie`). Een
   groep kiest met `onderdelen: { riem: 'blad' }`. Kleur hoort hier niet: dat is Aanpassen (`customize.ts`).
 - Stijl van het origineel aanhouden: commentaar in het Engels met de Nederlandse vaktermen (boeisel, bakskleur,
   roerkoning), tekst voor gebruikers in het Nederlands, commitberichten in dezelfde stijl als de bestaande.
@@ -84,7 +85,7 @@ komen op de importregels (`.js` ↔ `.ts`) en, hoe meer we typeren, in de code z
   materiaal (`romp`, `verzinkt`, `bakskleur`, `hout_gelakt`). Komt er een nieuw model binnen, controleer dan of ze nog
   bestaan en hetzelfde materiaal hebben; anders verandert er stil niets op de boot.
 - **Onderdelen erbij of eraf** in `lelievlet.parts.json`: elk onderdeel heeft een map in `bootonderdelen/` met zijn
-  id's in `IDS` (`base.ts`). Een nieuw onderdeel: map erbij; een verdwenen id: uit `IDS` halen.
+  id's in `static ids` (`base.ts`). Een nieuw onderdeel: map erbij; een verdwenen id: uit `ids` halen.
 - **De riem** (`bootonderdelen/riem/base.ts`) gaat ervan uit dat de band in het model bij het handvat zit en het enige
   stuk met materiaal `bakskleur` op de riem is. Verandert dat in `pipeline/parts.py` (`BANDS`), dan opnieuw kijken.
 - **`ROER`** in `customize.ts` is bij ons alleen `['roerblad']`; `roerkoning` en `roerhaken` staan in `ROERBESLAG`.

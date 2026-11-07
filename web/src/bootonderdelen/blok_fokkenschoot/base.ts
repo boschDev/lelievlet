@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Blok fokkenschoot (lopend_want, bakboord en stuurboord): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Blok fokkenschoot (lopend_want, bakboord en stuurboord), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['blok_fokkenschoot_bb', 'blok_fokkenschoot_sb'] as const;
-
-/** Base: the blok fokkenschoot as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class BlokFokkenschoot extends Onderdeel {
+  static override readonly naam = 'Blok fokkenschoot';
+  static override readonly ids = ['blok_fokkenschoot_bb', 'blok_fokkenschoot_sb'];
 }

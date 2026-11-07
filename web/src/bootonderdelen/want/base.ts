@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Bakboord zijstag (staand_want, bakboord en stuurboord): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Bakboord zijstag (staand_want, bakboord en stuurboord), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['want_bb', 'want_sb'] as const;
-
-/** Base: the bakboord zijstag as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Want extends Onderdeel {
+  static override readonly naam = 'Bakboord zijstag';
+  static override readonly ids = ['want_bb', 'want_sb'];
 }

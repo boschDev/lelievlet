@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Vlak (romp, bakboord en stuurboord): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Vlak (romp, bakboord en stuurboord), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['vlak_bb', 'vlak_sb'] as const;
-
-/** Base: the vlak as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Vlak extends Onderdeel {
+  static override readonly naam = 'Vlak';
+  static override readonly ids = ['vlak_bb', 'vlak_sb'];
 }

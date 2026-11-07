@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Beslag van de bakskist (interieur): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Beslag van de bakskist (interieur), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['bakskist_beslag'] as const;
-
-/** Base: the beslag van de bakskist as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class BakskistBeslag extends Onderdeel {
+  static override readonly naam = 'Beslag van de bakskist';
+  static override readonly ids = ['bakskist_beslag'];
 }

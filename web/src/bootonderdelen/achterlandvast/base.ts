@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Achterlandvast (lopend_want): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Achterlandvast (lopend_want), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['achterlandvast'] as const;
-
-/** Base: the achterlandvast as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Achterlandvast extends Onderdeel {
+  static override readonly naam = 'Achterlandvast';
+  static override readonly ids = ['achterlandvast'];
 }

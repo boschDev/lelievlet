@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Wantketting (staand_want, bakboord en stuurboord): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Wantketting (staand_want, bakboord en stuurboord), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['wantketting_bb', 'wantketting_sb'] as const;
-
-/** Base: the wantketting as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Wantketting extends Onderdeel {
+  static override readonly naam = 'Wantketting';
+  static override readonly ids = ['wantketting_bb', 'wantketting_sb'];
 }

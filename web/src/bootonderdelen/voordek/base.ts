@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Voordek (romp): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Voordek (romp), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['voordek'] as const;
-
-/** Base: the voordek as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Voordek extends Onderdeel {
+  static override readonly naam = 'Voordek';
+  static override readonly ids = ['voordek'];
 }

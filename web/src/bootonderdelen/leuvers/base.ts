@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Leuvers (beslag): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Leuvers (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['leuvers'] as const;
-
-/** Base: the leuvers as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Leuvers extends Onderdeel {
+  static override readonly naam = 'Leuvers';
+  static override readonly ids = ['leuvers'];
 }

@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Voorstag met spanner (staand_want): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Voorstag met spanner (staand_want), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['voorstag'] as const;
-
-/** Base: the voorstag met spanner as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Voorstag extends Onderdeel {
+  static override readonly naam = 'Voorstag met spanner';
+  static override readonly ids = ['voorstag'];
 }

@@ -1,16 +1,14 @@
 import * as THREE from 'three';
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { type Mesh, type ModelDeel, Onderdeel, Versie } from '../onderdeel.ts';
 
 // De riem: the two roeiriemen and the wrikriem. The model has them with a band in the bakskleur cut in near the
 // handle (pipeline/parts.py BANDS): that is the version handvat. The base is the riem without any marking, all of
 // it in its varnish; blad has the band near the tip of the blade instead.
 
-const IDS = ['riem_bb', 'riem_sb', 'wrikriem'];
-
 /** One riem, measured along its length: from the tip of the blade towards the handle. */
-export interface Riem {
-  hout: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;   // the varnished wood
-  band: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;   // the band at the handle, as the model has it
+export interface RiemMaat {
+  hout: Mesh;                                                           // the varnished wood
+  band: Mesh;                                                           // the band at the handle, as the model has it
   eigen: THREE.MeshStandardMaterial;                                    // the band's own paint (the bakskleur zone)
   tip: THREE.Vector3;                                                   // the tip of the blade, in the space of hout
   as: THREE.Vector3;                                                    // unit vector from the tip to the handle
@@ -25,10 +23,9 @@ function positionsIn(mesh: THREE.Mesh, space: THREE.Mesh): THREE.Vector3[] {
 }
 
 /** The riemen of the model, measured; those without a band at the handle are left out. */
-export function riemen(delen: ModelDeel[]): Riem[] {
-  const out: Riem[] = [];
-  for (const id of IDS) {
-    const deel = delen.find((d) => d.extras.id === id);
+function meet(delen: ModelDeel[]): RiemMaat[] {
+  const out: RiemMaat[] = [];
+  for (const deel of delen) {
     const hout = deel?.meshes.find((m) => m.material.name === 'hout_gelakt');
     const band = deel?.meshes.find((m) => m.material.name === 'bakskleur');
     if (!hout || !band) continue;
@@ -44,16 +41,23 @@ export function riemen(delen: ModelDeel[]): Riem[] {
   return out;
 }
 
-/** The band at the handle in the riem's own varnish (true), or in its own paint again (false). */
-export function zonderHandvatBand(rs: Riem[], weg: boolean): void {
-  for (const r of rs) r.band.material = weg ? r.hout.material : r.eigen;
+/** The riem's class: its versions in index.ts (Riem). */
+export class RiemBase extends Onderdeel {
+  static override readonly naam = 'Riem';
+  static override readonly ids = ['riem_bb', 'riem_sb', 'wrikriem'];
+
+  /** Each riem measured, when the model is loaded. */
+  readonly riemen: RiemMaat[] = meet(this.delen);
+
+  /** The band at the handle in the riem's own varnish (true), or in its own paint again (false). */
+  zonderHandvatBand(weg: boolean): void {
+    for (const r of this.riemen) r.band.material = weg ? r.hout.material : r.eigen;
+  }
 }
 
 /** Base: no marking at all. */
-export default function base(rs: Riem[]): Versie {
-  return {
-    naam: 'Zonder markering',
-    aan: () => zonderHandvatBand(rs, true),
-    uit: () => zonderHandvatBand(rs, false),
-  };
+export class Kaal extends Versie<RiemBase> {
+  readonly naam = 'Zonder markering';
+  override aan(): void { this.onderdeel.zonderHandvatBand(true); }
+  override uit(): void { this.onderdeel.zonderHandvatBand(false); }
 }

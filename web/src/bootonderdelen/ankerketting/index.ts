@@ -1,4 +1,1 @@
-import { alleenBase } from '../onderdeel.ts';
-import base, { IDS } from './base.ts';
-
-export const ankerketting = alleenBase('Ankerketting', IDS, base);
+export { Ankerketting } from './base.ts';

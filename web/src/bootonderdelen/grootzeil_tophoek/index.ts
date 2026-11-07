@@ -1,4 +1,1 @@
-import { alleenBase } from '../onderdeel.ts';
-import base, { IDS } from './base.ts';
-
-export const grootzeil_tophoek = alleenBase('Tophoek grootzeil (piek)', IDS, base);
+export { GrootzeilTophoek } from './base.ts';

@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Banden van de gaffeldraad (beslag): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Banden van de gaffeldraad (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['beslag_gaffel'] as const;
-
-/** Base: the banden van de gaffeldraad as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class BeslagGaffel extends Onderdeel {
+  static override readonly naam = 'Banden van de gaffeldraad';
+  static override readonly ids = ['beslag_gaffel'];
 }

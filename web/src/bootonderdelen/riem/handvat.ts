@@ -1,11 +1,9 @@
-import type { Versie } from '../onderdeel.ts';
-import { type Riem, zonderHandvatBand } from './base.ts';
+import { Versie } from '../onderdeel.ts';
+import type { RiemBase } from './base.ts';
 
 /** Handvat: the band in the bakskleur near the handle, as the model has it (the standaard). */
-export default function handvat(rs: Riem[]): Versie {
-  return {
-    naam: 'Markering bij het handvat',
-    aan: () => zonderHandvatBand(rs, false),
-    uit: () => {},
-  };
+export class Handvat extends Versie<RiemBase> {
+  readonly naam = 'Markering bij het handvat';
+  override aan(): void { this.onderdeel.zonderHandvatBand(false); }
+  override uit(): void {}
 }

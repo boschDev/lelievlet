@@ -1,14 +1,12 @@
-import type { Onderdeel } from '../onderdeel.ts';
-import base, { riemen } from './base.ts';
-import handvat from './handvat.ts';
-import blad from './blad.ts';
+import type { Versie } from '../onderdeel.ts';
+import { Kaal, RiemBase } from './base.ts';
+import { Handvat } from './handvat.ts';
+import { Blad } from './blad.ts';
 
-export const riem: Onderdeel<'base' | 'handvat' | 'blad'> = {
-  naam: 'Riem',
-  versies: ['base', 'handvat', 'blad'],
-  standaard: 'handvat',
-  maak(delen) {
-    const rs = riemen(delen);
-    return rs.length ? { base: base(rs), handvat: handvat(rs), blad: blad(rs) } : null;
-  },
-};
+export class Riem extends RiemBase {
+  static override readonly versies = ['base', 'handvat', 'blad'] as const;
+  static override readonly standaard = 'handvat';
+  override maakVersies(): Record<(typeof Riem.versies)[number], Versie> {
+    return { base: new Kaal(this), handvat: new Handvat(this), blad: new Blad(this) };
+  }
+}

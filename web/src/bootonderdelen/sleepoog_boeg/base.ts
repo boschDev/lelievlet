@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Sleepoog (beslag): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Sleepoog (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['sleepoog_boeg'] as const;
-
-/** Base: the sleepoog as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class SleepoogBoeg extends Onderdeel {
+  static override readonly naam = 'Sleepoog';
+  static override readonly ids = ['sleepoog_boeg'];
 }

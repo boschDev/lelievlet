@@ -1,5 +1,5 @@
-import type { Versie } from '../onderdeel.ts';
-import { type Riem, zonderHandvatBand } from './base.ts';
+import { Versie } from '../onderdeel.ts';
+import type { RiemBase } from './base.ts';
 
 // Blad: the band in the bakskleur near the tip of the blade, not at the handle. The model has no band there to
 // colour, so it is worked out per pixel, from how far along the riem it is from the tip.
@@ -7,13 +7,19 @@ import { type Riem, zonderHandvatBand } from './base.ts';
 const VAN_TIP = 0.05;                  // m: from the tip of the blade to the band
 const BREEDTE = 0.5;                   // the band as wide as this part of the one at the handle
 
-export default function blad(rs: Riem[]): Versie {
-  const on = { value: 0 };
-  let klaar = false;
-  const prepare = (): void => {
-    if (klaar) return;
-    klaar = true;
-    for (const r of rs) {
+export class Blad extends Versie<RiemBase> {
+  readonly naam = 'Markering bij het blad';
+  readonly #on = { value: 0 };
+  #klaar = false;
+
+  override aan(): void { this.#prepare(); this.#on.value = 1; this.onderdeel.zonderHandvatBand(true); }
+  override uit(): void { this.#on.value = 0; this.onderdeel.zonderHandvatBand(false); }
+
+  #prepare(): void {
+    if (this.#klaar) return;
+    this.#klaar = true;
+    const on = this.#on;
+    for (const r of this.onderdeel.riemen) {
       const own = {
         uTip: { value: r.tip }, uAs: { value: r.as },
         uVan: { value: VAN_TIP }, uTot: { value: VAN_TIP + BREEDTE * r.breedte },
@@ -41,10 +47,5 @@ export default function blad(rs: Riem[]): Versie {
       material.customProgramCacheKey = () => 'riem-blad';
       material.needsUpdate = true;
     }
-  };
-  return {
-    naam: 'Markering bij het blad',
-    aan: () => { prepare(); on.value = 1; zonderHandvatBand(rs, true); },
-    uit: () => { on.value = 0; zonderHandvatBand(rs, false); },
-  };
+  }
 }

@@ -1,4 +1,1 @@
-import { alleenBase } from '../onderdeel.ts';
-import base, { IDS } from './base.ts';
-
-export const anker = alleenBase('Anker', IDS, base);
+export { Anker } from './base.ts';

@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Dolboord (romp, bakboord en stuurboord): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Dolboord (romp, bakboord en stuurboord), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['dolboord_bb', 'dolboord_sb'] as const;
-
-/** Base: the dolboord as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Dolboord extends Onderdeel {
+  static override readonly naam = 'Dolboord';
+  static override readonly ids = ['dolboord_bb', 'dolboord_sb'];
 }

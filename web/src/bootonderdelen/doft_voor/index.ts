@@ -1,4 +1,1 @@
-import { alleenBase } from '../onderdeel.ts';
-import base, { IDS } from './base.ts';
-
-export const doft_voor = alleenBase('Voorste doft (mastdoft)', IDS, base);
+export { DoftVoor } from './base.ts';

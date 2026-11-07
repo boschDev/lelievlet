@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Schot voorste luchtkast (romp): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Schot voorste luchtkast (romp), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['voorschot'] as const;
-
-/** Base: the schot voorste luchtkast as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Voorschot extends Onderdeel {
+  static override readonly naam = 'Schot voorste luchtkast';
+  static override readonly ids = ['voorschot'];
 }

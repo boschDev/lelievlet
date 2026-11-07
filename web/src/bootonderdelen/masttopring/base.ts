@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Masttopring (rondhout): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Masttopring (rondhout), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['masttopring'] as const;
-
-/** Base: the masttopring as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Masttopring extends Onderdeel {
+  static override readonly naam = 'Masttopring';
+  static override readonly ids = ['masttopring'];
 }

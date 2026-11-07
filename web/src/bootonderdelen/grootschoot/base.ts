@@ -1,10 +1,9 @@
-import type { ModelDeel, Versie } from '../onderdeel.ts';
+import { Onderdeel } from '../onderdeel.ts';
 
-// Grootschoot met blokken (lopend_want): as the model has it. A version that changes it goes in a file of its own beside this one.
+// Grootschoot met blokken (lopend_want), as the model has it. A version that changes its shape goes in a file of its own beside
+// this one, and in index.ts with versies and standaard (see riem/).
 
-export const IDS = ['grootschoot'] as const;
-
-/** Base: the grootschoot met blokken as the model has it. */
-export default function base(_delen: ModelDeel[]): Versie {
-  return { naam: 'Standaard', aan: () => {}, uit: () => {} };
+export class Grootschoot extends Onderdeel {
+  static override readonly naam = 'Grootschoot met blokken';
+  static override readonly ids = ['grootschoot'];
 }
