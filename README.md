@@ -467,7 +467,7 @@ bakskleur, zeilkleur, de letterkleuren, `rompnummer` als het zeilnummer ook mids
 als het boeisel in banen geschilderd is, zoals een vlag: rood, wit, blauw, de bovenste eerst; voor de groep of één
 boot, ook alleen zo; `boeiselVoor` als de voorste helft van het boeisel in de bakskleur is; `onderdelen` met per bootonderdeel de versie
 (zie hieronder: `{ [OnderdeelNaam.Riem]: RiemVersie.Blad }` als de band op de riemen en de wrikriem bij het blad zit en niet bij het handvat); `roerbeslagKleur` als de roerkoning, de roerhaken en de vingerlingen een eigen kleur hebben; `beslagKleur` als de
-mikhouders, de wantputtingen, de dolpotten, de kikkers op het voordek, de leiogen en de landvastogen geverfd zijn; `lummelKleur` als het lummelbeslag, de mastband ervan en de banden en de wervel aan de uiteinden van de giek niet in de bakskleur zijn; `naamBordje` als de naam op een houten bordje op het boeisel staat; `plechtKleur` als de
+mikhouders, de wantputtingen, de dolpotten, de kikkers op het voordek, de leiogen en de landvastogen geverfd zijn; `zwaardkastBinnenKleur` als de binnenkant van de zwaardkast (de sleuf waar het zwaard in zit) een eigen kleur heeft; `lummelKleur` als het lummelbeslag, de mastband ervan en de banden en de wervel aan de uiteinden van de giek niet in de bakskleur zijn; `naamBordje` als de naam op een houten bordje op het boeisel staat; `plechtKleur` als de
 voorplecht en de hanenkam niet in de bakskleur zijn (dan in die van het dolboord); `roerKleur` als het hele roer, ook
 de roerkop, één kleur heeft; `spiegelKleur` als de spiegel buiten niet in de rompkleur is; `spiegelTekst` voor
 letters op de spiegel, bakboord van het roer, één of twee regels, met `spiegelTekstKleur` als die niet in de kleur van de

@@ -40,8 +40,8 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
 |---|---|
 | Groep Baracuda (zeven boten, Epifanes-kleuren) | `web/src/groepen.ts`, onderaan `GROEPEN` |
 | `BAKSKLEUR` (`'$bakskleur'`) en `RVS` (`'$rvs'`) als kleurwaarde | `groepen.ts` (export), `customize.ts` (`paintOf`, `applyZone`, `STAAL`) |
-| Velden `roerbeslagKleur`, `beslagKleur`, `lummelKleur`, `onderdelen` | `customize.ts`, `main.ts`, `README.md`, kop van `groepen.ts` |
-| Extra verfzones `roerbeslag`, `vingerlingen`, `beslag`, `lummel` | `customize.ts`: `MEE`, `zoneColor`, `collectZoneMaterials`, `SCHEME` |
+| Velden `roerbeslagKleur`, `beslagKleur`, `lummelKleur`, `zwaardkastBinnenKleur`, `onderdelen` | `customize.ts`, `main.ts`, `README.md`, kop van `groepen.ts` |
+| Extra verfzones `roerbeslag`, `vingerlingen`, `beslag`, `lummel`, `zwaardkastBinnen` (sleuf van de zwaardkast, in de viewer afgesplitst) | `customize.ts`: `MEE`, `zoneColor`, `collectZoneMaterials`, `SCHEME` |
 | Alles TypeScript (`.js` → `.ts`, imports met `.ts`, `// @ts-nocheck` waar nog niet getypeerd) | `web/src/`, `web/tsconfig.json`, `scripts/*.mjs`, `index.html`, `vite.lib.config.js` |
 | Bootonderdelen: een map per onderdeel van het model; de riem met versies `base`, `handvat`, `blad` | `web/src/bootonderdelen/`, aangeroepen in `main.ts` |
 | Melden staat standaard uit (`feedback: false`) | `web/src/config.ts` |

@@ -37,6 +37,8 @@
 //                           and the landvastogen painted in this colour (left out: galvanised; the kikkers on the mastkoker go with the zwaardkast)
 //   lummelKleur             the lummelbeslag, the mastband with it, and the bands and the wervel at the ends of the
 //                           giek in this colour (left out: the bakskleur)
+//   zwaardkastBinnenKleur   the inside of the zwaardkast's slot, the faces towards the zwaard, in this colour (left
+//                           out: as the zwaardkast)
 //
 // Any of these colours may be BAKSKLEUR: each boat's own bakskleur; the colours of beslag also RVS: bare stainless
 // steel, not painted.
@@ -81,6 +83,7 @@ export interface Groep {
   roerbeslagKleur?: string;
   beslagKleur?: string;
   lummelKleur?: string;
+  zwaardkastBinnenKleur?: string;
   spiegelKleur?: string;
   spiegelTekst?: string;
   spiegelTekstKleur?: string;
@@ -290,7 +293,7 @@ export const GROEPEN: Groep[] = [
     },
     zeilkleur: 10,
     spiegelKleur: BAKSKLEUR, roerbeslagKleur: BAKSKLEUR, beslagKleur: BAKSKLEUR,
-    lummelKleur: RVS, onderdelen: {
+    lummelKleur: RVS, zwaardkastBinnenKleur: '#0a0a0b', onderdelen: {
       [OnderdeelNaam.Riem]: RiemVersie.Blad, [OnderdeelNaam.Sleepogen]: SleepogenVersie.Geen,
       [OnderdeelNaam.Landvastogen]: LandvastogenVersie.Kikkers,
     },

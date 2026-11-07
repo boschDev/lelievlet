@@ -25,17 +25,43 @@ export class LandvastogenBase extends Onderdeel {
   static override readonly groep = ModelGroep.Beslag;
   static override readonly ids = ['landvastogen'];
 
-  /** The middle of the oog on this side, in the boat's space (naarNode). */
-  oog(boord: Boord): THREE.Vector3 {
-    const box = new THREE.Box3(); const p = new THREE.Vector3();
-    for (const mesh of this.meshes) {
+  /** Every point of one of the model's parts, in the boat's space. */
+  punten(id: string): THREE.Vector3[] {
+    const out: THREE.Vector3[] = [];
+    for (const mesh of this.model.find((d) => d.extras.id === id)?.meshes ?? []) {
       const naar = this.naarNode(mesh); const pos = mesh.geometry.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        p.fromBufferAttribute(pos, i).applyMatrix4(naar);
-        if (Math.sign(p.z) === boord) box.expandByPoint(p);
-      }
+      for (let i = 0; i < pos.count; i++) out.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(naar));
     }
-    return box.getCenter(new THREE.Vector3());
+    return out;
+  }
+
+  /** What is free of the inside of the spiegel above the achterdek, in the boat's space: from the top of the achterdek
+   *  where it meets the spiegel (onder) to the underside of the dolboord over it (boven), and how far out from the
+   *  middle the plate reaches at a height (breedte: to the boeisel). */
+  vrij(): { onder: number; boven: number; breedte(y: number): number } | null {
+    const mesh = this.model.find((d) => d.extras.id === 'spiegel')?.meshes.find((m) => m.material.name === Materiaal.Kuip);
+    const rand = this.punten('spiegelrand'); const dek = this.punten('achterdek');
+    if (!mesh || !rand.length || !dek.length) return null;
+    const achterst = Math.min(...dek.map((p) => p.x));
+    const onder = Math.max(...dek.filter((p) => p.x < achterst + 0.1).map((p) => p.y));
+    const boven = Math.min(...rand.map((p) => p.y));
+    // the face's own edges cut at the height: the furthest out of them
+    const naar = this.naarNode(mesh);
+    const g = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+    const pos = g.attributes.position;
+    const P = Array.from({ length: pos.count }, (_, i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(naar));
+    if (g !== mesh.geometry) g.dispose();
+    const breedte = (y: number): number => {
+      let ver = 0;
+      for (let i = 0; i < P.length; i += 3) {
+        for (const [a, b] of [[P[i], P[i + 1]], [P[i + 1], P[i + 2]], [P[i + 2], P[i]]]) {
+          if ((a.y - y) * (b.y - y) > 0 || a.y === b.y) continue;
+          ver = Math.max(ver, Math.abs(a.z + (b.z - a.z) * (y - a.y) / (b.y - a.y)));
+        }
+      }
+      return ver;
+    };
+    return { onder, boven, breedte };
   }
 
   /** The inside face of the spiegel in the boat's space, its normal forward into the boat: the plane of its biggest
