@@ -79,14 +79,16 @@ Niet elke lelievlet is hetzelfde. Wat per vlet in vorm verschilt (niet in kleur:
 `web/src/bootonderdelen/{onderdeel}/`: een `base.ts` met wat de versies delen en het onderdeel op zijn kaalst, een
 bestand per versie (`{versie}.ts`) en een `index.ts` met de versies en de standaard, de versie die het model heeft.
 Een groep kiest in `groepen.ts` per onderdeel een versie (`onderdelen: { riem: 'blad' }`); een onderdeel dat ze niet
-noemt, houdt de standaard. Nu is er één:
+noemt, houdt de standaard. Elk onderdeel dat het model rendert heeft een map (bakboord en stuurboord samen, zoals
+`berghout/` voor `berghout_bb` en `berghout_sb`). De meeste hebben nog alleen hun `base`: het onderdeel zoals het
+model het heeft. Versies zijn er nu voor:
 
 | Onderdeel | Versies | Standaard |
 |---|---|---|
 | `riem` (roeiriemen en wrikriem) | `base` (zonder markering), `handvat` (band in de bakskleur bij het handvat), `blad` (band 5 cm van de punt van het blad, half zo breed) | `handvat` |
 
-Een nieuw onderdeel: een map naast `riem/` met een `base.ts`, een bestand per versie en een `index.ts`, en de naam in
-`bootonderdelen/index.ts`. De versies veranderen het model in de viewer; het model zelf (`lelievlet.glb`) heeft elk
+Een nieuwe versie: een bestand naast de `base.ts` van het onderdeel, en erbij in zijn `index.ts` (zie `riem/`). Een
+nieuw onderdeel: een map met een `base.ts` en een `index.ts`, en de naam in `bootonderdelen/index.ts`. De versies veranderen het model in de viewer; het model zelf (`lelievlet.glb`) heeft elk
 onderdeel in één vorm.
 
 `web/index.html` is niet meer dan een lege `<div>` die de viewer vult; alles zit in de bibliotheek

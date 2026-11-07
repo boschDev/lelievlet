@@ -30,3 +30,19 @@ export interface Onderdeel<V extends string = string> {
   /** The versions for this model; null when the part is not in it. */
   maak(delen: ModelDeel[]): Record<V, Versie> | null;
 }
+
+/** The model's parts with these ids: what a part's versions work on. */
+export const delenVan = (delen: ModelDeel[], ids: readonly string[]): ModelDeel[] => delen.filter((d) => ids.includes(d.extras.id));
+
+/** A part with one version yet, its base: the model as it is. Gets more versions as lelievletten turn out to differ. */
+export function alleenBase(naam: string, ids: readonly string[], base: (delen: ModelDeel[]) => Versie): Onderdeel<'base'> {
+  return {
+    naam,
+    versies: ['base'],
+    standaard: 'base',
+    maak(delen) {
+      const eigen = delenVan(delen, ids);
+      return eigen.length ? { base: base(eigen) } : null;
+    },
+  };
+}

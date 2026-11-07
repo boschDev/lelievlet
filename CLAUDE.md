@@ -20,7 +20,8 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
   en die staat niet in de repo. Wat anders moet aan het model, doet de viewer.
 - **Bootonderdelen** (`web/src/bootonderdelen/{onderdeel}/{versie}.ts`): wat per lelievlet in vorm verschilt. Per
   onderdeel een `base.ts` (wat de versies delen, en het onderdeel op zijn kaalst), een bestand per versie en een
-  `index.ts` (versies en standaard: de versie die het model heeft). Registreren in `bootonderdelen/index.ts`. Een
+  `index.ts` (versies en standaard: de versie die het model heeft). Registreren in `bootonderdelen/index.ts`. Elk
+  onderdeel uit `lelievlet.parts.json` heeft een map (`_bb`/`_sb` samen); met alleen een `base` via `alleenBase`. Een
   groep kiest met `onderdelen: { riem: 'blad' }`. Kleur hoort hier niet: dat is Aanpassen (`customize.ts`).
 - Stijl van het origineel aanhouden: commentaar in het Engels met de Nederlandse vaktermen (boeisel, bakskleur,
   roerkoning), tekst voor gebruikers in het Nederlands, commitberichten in dezelfde stijl als de bestaande.
@@ -36,7 +37,7 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
 | Velden `roerbeslagKleur`, `beslagKleur`, `lummelKleur`, `onderdelen` | `customize.ts`, `main.ts`, `README.md`, kop van `groepen.ts` |
 | Extra verfzones `roerbeslag`, `vingerlingen`, `beslag`, `lummel` | `customize.ts`: `MEE`, `zoneColor`, `collectZoneMaterials`, `SCHEME` |
 | Alles TypeScript (`.js` → `.ts`, imports met `.ts`, `// @ts-nocheck` waar nog niet getypeerd) | `web/src/`, `web/tsconfig.json`, `scripts/*.mjs`, `index.html`, `vite.lib.config.js` |
-| Bootonderdelen; de riem met versies `base`, `handvat`, `blad` | `web/src/bootonderdelen/`, aangeroepen in `main.ts` |
+| Bootonderdelen: een map per onderdeel van het model; de riem met versies `base`, `handvat`, `blad` | `web/src/bootonderdelen/`, aangeroepen in `main.ts` |
 | Melden staat standaard uit (`feedback: false`) | `web/src/config.ts` |
 | Docker | `Dockerfile`, `docker-compose.yml`, `docker/nginx.conf`, `.dockerignore` |
 | Vermelding van de bewerking | `README.md`, blok Licentie |
@@ -82,6 +83,8 @@ komen op de importregels (`.js` ↔ `.ts`) en, hoe meer we typeren, in de code z
   `leiogen_bb/_sb`, `lummelbeslag`, `mastband_lummel`, `giek`, `wervel`, `riem_bb`, `riem_sb`, `wrikriem`, en aan hun
   materiaal (`romp`, `verzinkt`, `bakskleur`, `hout_gelakt`). Komt er een nieuw model binnen, controleer dan of ze nog
   bestaan en hetzelfde materiaal hebben; anders verandert er stil niets op de boot.
+- **Onderdelen erbij of eraf** in `lelievlet.parts.json`: elk onderdeel heeft een map in `bootonderdelen/` met zijn
+  id's in `IDS` (`base.ts`). Een nieuw onderdeel: map erbij; een verdwenen id: uit `IDS` halen.
 - **De riem** (`bootonderdelen/riem/base.ts`) gaat ervan uit dat de band in het model bij het handvat zit en het enige
   stuk met materiaal `bakskleur` op de riem is. Verandert dat in `pipeline/parts.py` (`BANDS`), dan opnieuw kijken.
 - **`ROER`** in `customize.ts` is bij ons alleen `['roerblad']`; `roerkoning` en `roerhaken` staan in `ROERBESLAG`.
