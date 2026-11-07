@@ -14,6 +14,11 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
 - De viewer is TypeScript. Controleren: `corepack pnpm run typecheck` (moet foutloos). Een bestand met
   `// @ts-nocheck` bovenaan is nog niet getypeerd; wie een bestand typeert, haalt die regel weg. Nieuwe bestanden
   (zoals alles in `bootonderdelen/`) krijgen hem niet: die zijn meteen getypeerd. Imports met de extensie `.ts`.
+- **Enums** voor vaste reeksen waarden in onze eigen code (string-enums: `enum RiemVersie { Blad = 'blad' }`), niet
+  losse strings. Zo al in `bootonderdelen/`: `OnderdeelNaam`, `ModelGroep`, `Materiaal`, `BaseVersie`, `RiemVersie`.
+  De code van upstream (lessen, quiz, modes, krachten, zeiltermen, bpr) houdt voorlopig zijn string-unions: omzetten
+  maakt mergen lastiger. Daarom staat `erasableSyntaxOnly` niet aan in `tsconfig.json`. Een nieuw onderdeel uit
+  het model: ook in `OnderdeelNaam` en `ONDERDELEN` (`bootonderdelen/index.ts`).
 - Dependencies: alleen toevoegen wat nodig is, met een vaste versie. Let op: `pnpm add` en `pnpm run` kunnen andere
   pakketten (three, vite) ongevraagd ophogen; na afloop `git diff web/package.json web/pnpm-lock.yaml` bekijken.
 - Het 3D-model (`web/public/models/`) kan hier niet opnieuw gebouwd worden: `pipeline/` heeft `reference/cad/` nodig,
@@ -23,7 +28,7 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
   `index.ts` (versies en standaard: de versie die het model heeft). Registreren in `bootonderdelen/index.ts`. Elk
   onderdeel uit `lelievlet.parts.json` heeft een map (`_bb`/`_sb` samen); elk een class (`extends Onderdeel`) die zijn meshes beheert en waar de vorm
   gemaakt wordt (`vervorm`, `zetVorm`, `verberg`, `voegToe`, `herstel`); versies zijn classes (`extends Versie`). Een
-  groep kiest met `onderdelen: { riem: 'blad' }`. Kleur hoort hier niet: dat is Aanpassen (`customize.ts`).
+  groep kiest met `onderdelen: { [OnderdeelNaam.Riem]: RiemVersie.Blad }`. Kleur hoort hier niet: dat is Aanpassen (`customize.ts`).
 - Stijl van het origineel aanhouden: commentaar in het Engels met de Nederlandse vaktermen (boeisel, bakskleur,
   roerkoning), tekst voor gebruikers in het Nederlands, commitberichten in dezelfde stijl als de bestaande.
 - Na een wijziging aan kleuren of groepen: in de browser een boot kiezen onder Aanpassen › Bekend en kijken.
@@ -80,7 +85,7 @@ komen op de importregels (`.js` ↔ `.ts`) en, hoe meer we typeren, in de code z
 - **Nieuwe velden van upstream** voor een groep (zoals ooit `spiegelBand`): staan ze ook in `samePaint` en `pick`, en
   mogen ze `BAKSKLEUR` zijn? Haal ze dan in `paintOf` door `kleur()`.
 - **Namen van onderdelen en materialen.** Onze zones hangen aan id's uit `web/public/models/lelievlet.parts.json`:
-  `roerkoning`, `roerhaken`, `vingerlingen`, `mikhouders`, `wantputting_bb/_sb`, `dolpotten_bb/_sb`, `kikkers_voordek`,
+  `roerkoning`, `roerhaken`, `vingerlingen`, `mikhouders`, `wantputting_bb/_sb`, `dolpotten_bb/_sb`, `kikkers_voordek`, `landvastogen`,
   `leiogen_bb/_sb`, `lummelbeslag`, `mastband_lummel`, `giek`, `wervel`, `riem_bb`, `riem_sb`, `wrikriem`, en aan hun
   materiaal (`romp`, `verzinkt`, `bakskleur`, `hout_gelakt`). Komt er een nieuw model binnen, controleer dan of ze nog
   bestaan en hetzelfde materiaal hebben; anders verandert er stil niets op de boot.

@@ -1,9 +1,16 @@
 import * as THREE from 'three';
-import { type Mesh, type ModelDeel, Onderdeel, Versie } from '../onderdeel.ts';
+import { Materiaal, type Mesh, type ModelDeel, ModelGroep, Onderdeel, Versie } from '../onderdeel.ts';
 
 // De riem: the two roeiriemen and the wrikriem. The model has them with a band in the bakskleur cut in near the
 // handle (pipeline/parts.py BANDS): that is the version handvat. The base is the riem without any marking, all of
 // it in its varnish; blad has the band near the tip of the blade instead.
+
+/** The versions of the riem: where the band in the bakskleur is, if anywhere. */
+export enum RiemVersie {
+  Base = 'base',             // no band
+  Handvat = 'handvat',       // at the handle, as the model has it
+  Blad = 'blad',             // near the tip of the blade
+}
 
 /** One riem, measured along its length: from the tip of the blade towards the handle. */
 export interface RiemMaat {
@@ -26,8 +33,8 @@ function positionsIn(mesh: THREE.Mesh, space: THREE.Mesh): THREE.Vector3[] {
 function meet(delen: ModelDeel[]): RiemMaat[] {
   const out: RiemMaat[] = [];
   for (const deel of delen) {
-    const hout = deel?.meshes.find((m) => m.material.name === 'hout_gelakt');
-    const band = deel?.meshes.find((m) => m.material.name === 'bakskleur');
+    const hout = deel?.meshes.find((m) => m.material.name === Materiaal.HoutGelakt);
+    const band = deel?.meshes.find((m) => m.material.name === Materiaal.Bakskleur);
     if (!hout || !band) continue;
     hout.updateWorldMatrix(true, false); band.updateWorldMatrix(true, false);
     const houtPunten = positionsIn(hout, hout); const bandPunten = positionsIn(band, hout);
@@ -44,6 +51,7 @@ function meet(delen: ModelDeel[]): RiemMaat[] {
 /** The riem's class: its versions in index.ts (Riem). */
 export class RiemBase extends Onderdeel {
   static override readonly naam = 'Riem';
+  static override readonly groep = ModelGroep.Roeien;
   static override readonly ids = ['riem_bb', 'riem_sb', 'wrikriem'];
 
   /** Each riem measured, when the model is loaded. */

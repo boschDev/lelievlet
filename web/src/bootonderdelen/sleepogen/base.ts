@@ -1,9 +1,15 @@
-import { Onderdeel } from '../onderdeel.ts';
+import { ModelGroep, Onderdeel } from '../onderdeel.ts';
 
-// Sleepogen (beslag), as the model has it. A version that changes its shape goes in a file of its own beside
-// this one, and in index.ts with versies and standaard (see riem/).
+// Sleepogen (beslag): the two eyes on the outside of the spiegel, for towing and being towed (pipeline/sleepogen.py).
+// The sleepoog on the stem is a part of its own (sleepoog_boeg/).
 
-export class Sleepogen extends Onderdeel {
+export enum SleepogenVersie {
+  Base = 'base',             // as the model has them
+  Geen = 'geen',             // none: the spiegel bare on the outside
+}
+
+export class SleepogenBase extends Onderdeel {
   static override readonly naam = 'Sleepogen';
+  static override readonly groep = ModelGroep.Beslag;
   static override readonly ids = ['sleepogen'];
 }

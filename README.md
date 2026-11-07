@@ -78,14 +78,17 @@ bestand dat nog niet getypeerd is, begint met `// @ts-nocheck`: haal dat weg zod
 Niet elke lelievlet is hetzelfde. Wat per vlet in vorm verschilt (niet in kleur: dat is Aanpassen), staat in
 `web/src/bootonderdelen/{onderdeel}/`: een `base.ts` met wat de versies delen en het onderdeel op zijn kaalst, een
 bestand per versie (`{versie}.ts`) en een `index.ts` met de versies en de standaard, de versie die het model heeft.
-Een groep kiest in `groepen.ts` per onderdeel een versie (`onderdelen: { riem: 'blad' }`); een onderdeel dat ze niet
-noemt, houdt de standaard. Elk onderdeel dat het model rendert heeft een map (bakboord en stuurboord samen, zoals
+Een groep kiest in `groepen.ts` per onderdeel een versie (`onderdelen: { [OnderdeelNaam.Riem]: RiemVersie.Blad }`); een onderdeel dat ze niet
+noemt, houdt de standaard. Een boot kan er zelf nog `onderdelen` bij hebben, die gaan voor die van de groep
+(`{ zeilnummer: '913', …, onderdelen: { [OnderdeelNaam.Landvastogen]: LandvastogenVersie.KikkerStuurboord } }`). Elk onderdeel dat het model rendert heeft een map (bakboord en stuurboord samen, zoals
 `berghout/` voor `berghout_bb` en `berghout_sb`). De meeste hebben nog alleen hun `base`: het onderdeel zoals het
 model het heeft. Versies zijn er nu voor:
 
 | Onderdeel | Versies | Standaard |
 |---|---|---|
 | `riem` (roeiriemen en wrikriem) | `base` (zonder markering), `handvat` (band in de bakskleur bij het handvat), `blad` (band 5 cm van de punt van het blad, half zo breed) | `handvat` |
+| `sleepogen` (de twee ogen buiten op de spiegel) | `base` (zoals het model), `geen` (weg) | `base` |
+| `landvastogen` (de twee ogen binnen op de spiegel) | `base` (zoals het model), `kikkers` (een kikker aan beide kanten in plaats van het oog), `kikker_bb` (kikker aan bakboord, oog aan stuurboord), `kikker_sb` (oog aan bakboord, kikker aan stuurboord); de kikkers in de verf van die op het voordek | `base` |
 
 Elk onderdeel is een class (`class Berghout extends Onderdeel`, in zijn `base.ts`) met de meshes uit het model, en
 daar wordt de vorm gemaakt: `vervorm()` verplaatst de punten van de vorm uit het model (schalen, buigen, inkorten),
@@ -463,8 +466,8 @@ bakskleur, zeilkleur, de letterkleuren, `rompnummer` als het zeilnummer ook mids
 (alleen zo, niet onder Eigen) en de boten met zeilnummer, naam en eventueel een eigen bakskleur, `boeiselBanen`
 als het boeisel in banen geschilderd is, zoals een vlag: rood, wit, blauw, de bovenste eerst; voor de groep of één
 boot, ook alleen zo; `boeiselVoor` als de voorste helft van het boeisel in de bakskleur is; `onderdelen` met per bootonderdeel de versie
-(zie hieronder: `{ riem: 'blad' }` als de band op de riemen en de wrikriem bij het blad zit en niet bij het handvat); `roerbeslagKleur` als de roerkoning, de roerhaken en de vingerlingen een eigen kleur hebben; `beslagKleur` als de
-mikhouders, de wantputtingen, de dolpotten, de kikkers op het voordek en de leiogen geverfd zijn; `lummelKleur` als het lummelbeslag, de mastband ervan en de banden en de wervel aan de uiteinden van de giek niet in de bakskleur zijn; `naamBordje` als de naam op een houten bordje op het boeisel staat; `plechtKleur` als de
+(zie hieronder: `{ [OnderdeelNaam.Riem]: RiemVersie.Blad }` als de band op de riemen en de wrikriem bij het blad zit en niet bij het handvat); `roerbeslagKleur` als de roerkoning, de roerhaken en de vingerlingen een eigen kleur hebben; `beslagKleur` als de
+mikhouders, de wantputtingen, de dolpotten, de kikkers op het voordek, de leiogen en de landvastogen geverfd zijn; `lummelKleur` als het lummelbeslag, de mastband ervan en de banden en de wervel aan de uiteinden van de giek niet in de bakskleur zijn; `naamBordje` als de naam op een houten bordje op het boeisel staat; `plechtKleur` als de
 voorplecht en de hanenkam niet in de bakskleur zijn (dan in die van het dolboord); `roerKleur` als het hele roer, ook
 de roerkop, één kleur heeft; `spiegelKleur` als de spiegel buiten niet in de rompkleur is; `spiegelTekst` voor
 letters op de spiegel, bakboord van het roer, één of twee regels, met `spiegelTekstKleur` als die niet in de kleur van de

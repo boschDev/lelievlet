@@ -33,7 +33,7 @@ export const ZONES: [Zone, string][] = [
 // zones that go with another unless a group gives them a colour of their own: the voorplecht and the hanenkam with
 // the bakskleur, the roer with the romp, the roerkop with the bakskleur, the outside of the spiegel with the romp, the
 // roerkoning and the roerhaken with the roer, the vingerlingen with the romp, the mikhouders, the wantputtingen, the
-// dolpotten, the kikkers on the voordek and the leiogen galvanised as they came
+// dolpotten, the kikkers on the voordek, the leiogen and the landvastogen galvanised as they came
 // and the steel of the giek - its lummelbeslag, the mastband that takes it, the bands and the wervel at its ends -
 // with the bakskleur (collectZoneMaterials)
 type Mee = 'plecht' | 'roer' | 'roerkop' | 'spiegel' | 'roerbeslag' | 'vingerlingen' | 'beslag' | 'lummel';
@@ -100,8 +100,8 @@ export const DEFAULTS: Aanpassen = {
   roerKleur: null,        // the whole roer in one colour, the roerkop too; null: as the romp, the roerkop in the bakskleur. Only from a group
   roerbeslagKleur: null,  // the roerkoning, the roerhaken and the vingerlingen in a colour of their own; null: the roerkoning
                           // and the roerhaken as the rest of the roer, the vingerlingen as the romp. Only from a group
-  beslagKleur: null,      // the mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek and the
-                          // leiogen painted; null: galvanised. Only from a group
+  beslagKleur: null,      // the mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek, the
+                          // leiogen and the landvastogen painted; null: galvanised. Only from a group
   lummelKleur: null,      // the lummelbeslag, the mastband with it, and the bands and the wervel at the ends of the giek in a
                           // colour of their own, or RVS; null: the bakskleur. Only from a group
   boeiselBanen: null,     // the boeisel in lengthwise bands of these colours, top first (a flag); null: none. Only from a group
@@ -378,7 +378,7 @@ function initBekend(ui: ShadowRoot, { config, base, opslaan, applyAll, melden }:
       spiegelTekst: g.spiegelTekst ?? '', spiegelTekstKleur: kleur(g.spiegelTekstKleur ?? null),
       boeiselBanen: boat?.boeiselBanen ?? g.boeiselBanen ?? null, boeiselVoor: g.boeiselVoor === true,
       spiegelBand: kleur(boat?.spiegelBand ?? g.spiegelBand ?? null), spiegelPunt: (boat?.spiegelPunt ?? g.spiegelPunt) === true,
-      onderdelen: volledig(g.onderdelen),
+      onderdelen: volledig({ ...g.onderdelen, ...boat?.onderdelen }),
     };
   };
   // what a boat may have of her own besides her bakskleur
@@ -471,12 +471,13 @@ function initBekend(ui: ShadowRoot, { config, base, opslaan, applyAll, melden }:
  *  romp's paint), its roerkop ('roerkop', in the bakskleur), the steel of the giek and its lummelbeslag ('lummel',
  *  in the bakskleur), its roerkoning and roerhaken ('roerbeslag', the roer's), the
  *  vingerlingen they hang in ('vingerlingen', the romp's), the outside of the spiegel ('spiegel', the romp's) and the
- *  mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek and the leiogen ('beslag', galvanised). */
+ *  mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek, the leiogen and the landvastogen ('beslag',
+ *  galvanised). */
 const PLECHT = ['voorplecht', 'hanekam'];
 const ROER = ['roerblad'];
 const ROERBESLAG = ['roerkoning', 'roerhaken'];
 // the giek's own parts in the bakskleur are its two steel bands, not the varnished wood
-const BESLAG = ['mikhouders', 'wantputting_bb', 'wantputting_sb', 'dolpotten_bb', 'dolpotten_sb', 'kikkers_voordek', 'leiogen_bb', 'leiogen_sb'];
+const BESLAG = ['mikhouders', 'wantputting_bb', 'wantputting_sb', 'dolpotten_bb', 'dolpotten_sb', 'kikkers_voordek', 'leiogen_bb', 'leiogen_sb', 'landvastogen'];
 const LUMMEL = ['lummelbeslag', 'mastband_lummel', 'giek', 'wervel'];
 export function collectZoneMaterials(parts: ModelDeel[]): Map<string, Materiaal[]> {
   const zones = new Map<string, Materiaal[]>([...ZONES.map(([zone]) => zone), 'bakskleur', ...MEE].map((zone) => [zone, []]));

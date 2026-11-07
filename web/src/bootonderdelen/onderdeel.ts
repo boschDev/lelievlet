@@ -13,6 +13,52 @@ import * as THREE from 'three';
 // A shape changed here is what is drawn and picked. The lines along the edges (edges.ts) are drawn once, after the
 // model has loaded, from the shape as it was: a version that changes the shape much, changes them too.
 
+/** The groups of the model (groep in a part's extras): where a part is under Onderdelen. */
+export enum ModelGroep {
+  Romp = 'romp',
+  Roer = 'roer',
+  Zwaard = 'zwaard',
+  Interieur = 'interieur',
+  Beslag = 'beslag',
+  Rondhout = 'rondhout',
+  Zeil = 'zeil',
+  StaandWant = 'staand_want',
+  LopendWant = 'lopend_want',
+  Roeien = 'roeien',
+}
+
+/** The materials of the model, by their name in lelievlet.glb (a mesh's material.name). */
+export enum Materiaal {
+  Achterdek = 'achterdek',
+  Kuip = 'kuip',
+  Berghout = 'berghout',
+  Dolboord = 'dolboord',
+  Boeisel = 'boeisel',
+  Verzinkt = 'verzinkt',
+  Romp = 'romp',
+  Zwaardkast = 'zwaardkast',
+  Voordek = 'voordek',
+  Bakskleur = 'bakskleur',
+  HoutGelakt = 'hout_gelakt',
+  Touw = 'touw',
+  HoutVlonder = 'hout_vlonder',
+  KunststofWit = 'kunststof_wit',
+  EhboRood = 'ehbo_rood',
+  Rvs = 'rvs',
+  Zeildoek = 'zeildoek',
+  ZeilLijk = 'zeil_lijk',
+  ZeilHoek = 'zeil_hoek',
+  ZeilNummer = 'zeil_nummer',
+  ZeilTeken = 'zeil_teken',
+  Zeillat = 'zeillat',
+  TouwZwart = 'touw_zwart',
+}
+
+/** The one version of a part that has nothing but its base. */
+export enum BaseVersie {
+  Base = 'base',
+}
+
 export type Mesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
 /** A part of the model as main.ts collects it: its node, what the model says of it, its meshes. */
@@ -28,6 +74,7 @@ export const delenVan = (delen: ModelDeel[], ids: readonly string[]): ModelDeel[
 /** A kind of part as a class: what the registry (index.ts) knows of it before there is a model. */
 export interface OnderdeelKlasse {
   readonly naam: string;                    // as the user reads it
+  readonly groep: ModelGroep;
   readonly ids: readonly string[];          // its parts in the model (lelievlet.parts.json), _bb and _sb both
   readonly versies: readonly string[];
   readonly standaard: string;               // the version the model has, and a boat keeps unless her group names another
@@ -38,12 +85,15 @@ export interface OnderdeelKlasse {
  *  versions gives versies and standaard too, and makes them in maakVersies(). */
 export abstract class Onderdeel {
   static readonly naam: string = '';
+  static readonly groep: ModelGroep = ModelGroep.Romp;
   static readonly ids: readonly string[] = [];
-  static readonly versies: readonly string[] = ['base'];
-  static readonly standaard: string = 'base';
+  static readonly versies: readonly string[] = [BaseVersie.Base];
+  static readonly standaard: string = BaseVersie.Base;
 
   /** This part's parts in the model. */
   readonly delen: ModelDeel[];
+  /** Every part of the model: what a version may take a shape or a material from. */
+  readonly model: ModelDeel[];
   /** The geometry the model has, of each mesh whose shape is changed now. */
   readonly #model = new Map<Mesh, THREE.BufferGeometry>();
   /** Meshes made for this part (voegToe), off again in herstel(). */
@@ -53,6 +103,7 @@ export abstract class Onderdeel {
 
   constructor(alle: ModelDeel[]) {
     this.delen = delenVan(alle, (this.constructor as OnderdeelKlasse).ids);
+    this.model = alle;
   }
 
   get naam(): string { return (this.constructor as OnderdeelKlasse).naam; }
@@ -63,8 +114,11 @@ export abstract class Onderdeel {
   /** The meshes of one of its parts in the model (e.g. 'berghout_bb'). */
   meshesVan(id: string): Mesh[] { return this.delen.find((d) => d.extras.id === id)?.meshes ?? []; }
 
+  /** Its meshes in this material. */
+  meshesIn(materiaal: Materiaal, meshes: Mesh[] = this.meshes): Mesh[] { return meshes.filter((m) => m.material.name === materiaal); }
+
   /** Its versions, by name; a part with only its base has the model's shape and nothing else. */
-  maakVersies(): Record<string, Versie> { return { base: new Standaard(this) }; }
+  maakVersies(): Record<string, Versie> { return { [BaseVersie.Base]: new Standaard(this) }; }
 
   // ---- the shape
 
@@ -88,6 +142,37 @@ export abstract class Onderdeel {
     }
   }
 
+  /** Only the triangles of the model's shape that houd keeps, by their middle in the space of the part's node
+   *  (naarNode: the boat's, x forward, y up, z to starboard); e.g. one side of a part drawn on both. */
+  knip(houd: (midden: THREE.Vector3) => boolean, meshes: Mesh[] = this.meshes): void {
+    for (const mesh of meshes) {
+      const model = this.#model.get(mesh) ?? mesh.geometry;
+      const g = model.index ? model.toNonIndexed() : model.clone();
+      const naar = this.naarNode(mesh); const m = new THREE.Vector3(); const p = new THREE.Vector3();
+      const pos = g.attributes.position; const houden: number[] = [];
+      for (let i = 0; i < pos.count; i += 3) {
+        m.set(0, 0, 0);
+        for (let j = i; j < i + 3; j++) m.add(p.fromBufferAttribute(pos, j).applyMatrix4(naar));
+        if (houd(m.divideScalar(3))) houden.push(i, i + 1, i + 2);
+      }
+      const uit = new THREE.BufferGeometry();
+      for (const [naam, attr] of Object.entries(g.attributes) as [string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute][]) {
+        const a = new Float32Array(houden.length * attr.itemSize);
+        houden.forEach((v, k) => { for (let c = 0; c < attr.itemSize; c++) a[k * attr.itemSize + c] = attr.getComponent(v, c); });
+        uit.setAttribute(naam, new THREE.BufferAttribute(a, attr.itemSize));
+      }
+      g.dispose();
+      this.zetVorm(mesh, uit);
+    }
+  }
+
+  /** From an object's own space into that of the part's (first) node: the boat's, however she lies in the water. */
+  naarNode(o: THREE.Object3D): THREE.Matrix4 {
+    const node = this.delen[0].node;
+    node.updateWorldMatrix(true, false); o.updateWorldMatrix(true, false);
+    return node.matrixWorld.clone().invert().multiply(o.matrixWorld);
+  }
+
   /** The part, or some of its meshes, out of sight; herstel() shows them again. */
   verberg(meshes: Mesh[] = this.meshes): void {
     for (const m of meshes) {
@@ -101,6 +186,7 @@ export abstract class Onderdeel {
   voegToe(geometry: THREE.BufferGeometry, material: THREE.MeshStandardMaterial, id?: string): Mesh {
     const deel = (id ? this.delen.find((d) => d.extras.id === id) : this.delen[0])!;
     const mesh: Mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.part = deel.node;               // picked as that part (main.ts)
     deel.node.add(mesh); deel.meshes.push(mesh);
     this.#eigen.push({ mesh, deel });
     return mesh;

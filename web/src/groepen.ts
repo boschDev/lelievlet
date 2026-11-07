@@ -28,12 +28,13 @@
 //   boeiselBanen            the boeisel in lengthwise bands of these colours, top first (a flag on the sides), for
 //                           the group or one boat: boeiselBanen: VLAG
 //   boeiselVoor             true: the fore half of the boeisel in the bakskleur, the aft half in the boeisel's own
-//   onderdelen              the version of each bootonderdeel (bootonderdelen/), as { riem: 'blad' }; a part left
-//                           out has its standaard
+//   onderdelen              the version of each bootonderdeel (bootonderdelen/), as
+//                           { [OnderdeelNaam.Riem]: RiemVersie.Blad }; a part left out has its standaard; a boat may have
+//                           onderdelen of her own too, over the group's
 //   roerbeslagKleur         the roerkoning, the roerhaken and the vingerlingen in this colour (left out: the roerkoning
 //                           and the roerhaken the roer's, the vingerlingen the romp's)
-//   beslagKleur             the mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek and the
-//                           leiogen painted in this colour (left out: galvanised; the kikkers on the mastkoker go with the zwaardkast)
+//   beslagKleur             the mikhouders, the wantputtingen, the dolpotten, the kikkers on the voordek, the leiogen
+//                           and the landvastogen painted in this colour (left out: galvanised; the kikkers on the mastkoker go with the zwaardkast)
 //   lummelKleur             the lummelbeslag, the mastband with it, and the bands and the wervel at the ends of the
 //                           giek in this colour (left out: the bakskleur)
 //
@@ -43,7 +44,10 @@
 // Picked in Bekend, a group gives its colours and its plaats on the hull; one of its boats also its zeilnummer,
 // naam and bakskleur. Found by either plaats.
 // the Dutch flag, as some boats have it on the boeisel
-import type { Keuze } from './bootonderdelen/index.ts';
+import { type Keuze, OnderdeelNaam } from './bootonderdelen/index.ts';
+import { RiemVersie } from './bootonderdelen/riem/index.ts';
+import { SleepogenVersie } from './bootonderdelen/sleepogen/index.ts';
+import { LandvastogenVersie } from './bootonderdelen/landvastogen/index.ts';
 
 /** The paint zones a group gives a colour, as customize.ts ZONES has them. */
 export type Zone = 'romp' | 'berghout' | 'boeisel' | 'dolboord' | 'voordek' | 'achterdek' | 'kuip' | 'zwaardkast';
@@ -56,6 +60,7 @@ export interface Boot {
   boeiselBanen?: string[];
   spiegelBand?: string;
   spiegelPunt?: boolean;
+  onderdelen?: Keuze;                 // over the group's: the parts she has of her own
 }
 
 /** A group as above. A colour is '#rrggbb', or BAKSKLEUR; a colour of beslag may also be RVS. */
@@ -285,11 +290,15 @@ export const GROEPEN: Groep[] = [
     },
     zeilkleur: 10,
     spiegelKleur: BAKSKLEUR, roerbeslagKleur: BAKSKLEUR, beslagKleur: BAKSKLEUR,
-    lummelKleur: RVS, onderdelen: { riem: 'blad' },
+    lummelKleur: RVS, onderdelen: {
+      [OnderdeelNaam.Riem]: RiemVersie.Blad, [OnderdeelNaam.Sleepogen]: SleepogenVersie.Geen,
+      [OnderdeelNaam.Landvastogen]: LandvastogenVersie.Kikkers,
+    },
     // the bakskleuren as Epifanes numbers them, where the group gave a number
     boten: [
       { zeilnummer: '286', naam: '', bakskleur: '#e0620a' },             // oranje
-      { zeilnummer: '913', naam: '', bakskleur: '#f5c20d' },             // Epifanes 37, yellow
+      { zeilnummer: '913', naam: '', bakskleur: '#f5c20d',              // Epifanes 37, yellow
+        onderdelen: { [OnderdeelNaam.Landvastogen]: LandvastogenVersie.KikkerStuurboord } },
       { zeilnummer: '1008', naam: '', bakskleur: '#e57fa8' },            // roze
       { zeilnummer: '1053', naam: '', bakskleur: '#c8102e' },            // Epifanes 16, bright red
       { zeilnummer: '1100', naam: '', bakskleur: '#0b4ea2' },            // Epifanes 7, bright blue

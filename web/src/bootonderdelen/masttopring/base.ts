@@ -1,9 +1,10 @@
-import { Onderdeel } from '../onderdeel.ts';
+import { ModelGroep, Onderdeel } from '../onderdeel.ts';
 
 // Masttopring (rondhout), as the model has it. A version that changes its shape goes in a file of its own beside
 // this one, and in index.ts with versies and standaard (see riem/).
 
 export class Masttopring extends Onderdeel {
   static override readonly naam = 'Masttopring';
+  static override readonly groep = ModelGroep.Rondhout;
   static override readonly ids = ['masttopring'];
 }
