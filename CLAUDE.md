@@ -44,6 +44,7 @@ naar het origineel maken we niet: alles gaat rechtstreeks op `main` van deze rep
 | Extra verfzones `roerbeslag`, `vingerlingen`, `beslag`, `lummel`, `zwaardkastBinnen` (sleuf van de zwaardkast, in de viewer afgesplitst) | `customize.ts`: `MEE`, `zoneColor`, `collectZoneMaterials`, `SCHEME` |
 | Alles TypeScript (`.js` → `.ts`, imports met `.ts`, `// @ts-nocheck` waar nog niet getypeerd) | `web/src/`, `web/tsconfig.json`, `scripts/*.mjs`, `index.html`, `vite.lib.config.js` |
 | Bootonderdelen: een map per onderdeel van het model; de riem met versies `base`, `handvat`, `blad` | `web/src/bootonderdelen/`, aangeroepen in `main.ts` |
+| Waar de achterlandvast en -spring aan boord vastzitten (`dock.eyes.*.achter`) wordt opnieuw uitgerekend als de landvastogen van vorm veranderen (kikker in plaats van oog) | `web/src/modes.ts`, bij `centreOf` |
 | Melden staat standaard uit (`feedback: false`) | `web/src/config.ts` |
 | Docker | `Dockerfile`, `docker-compose.yml`, `docker/nginx.conf`, `.dockerignore` |
 | Vermelding van de bewerking | `README.md`, blok Licentie |

@@ -21,6 +21,7 @@ export class Kikkers extends Versie<LandvastogenBase> {
     const bron = o.model.find((d) => d.extras.id === 'kikkers_voordek')?.meshes[0];
     const vlak = o.binnenkantSpiegel(); const vrij = o.vrij();
     if (!bron || !vlak || !vrij) return;
+    const oogBakboord = o.oogMidden(Boord.Bakboord);          // where the achterlandvast is made fast, before it goes
     // the ogen on these sides away
     o.knip((m) => !this.boorden.includes(Math.sign(m.z) as Boord));
     const kikker = bakboordKikker(bron, o.naarNode(bron));
@@ -41,6 +42,10 @@ export class Kikkers extends Versie<LandvastogenBase> {
         .translate(-kikker.las.x, -kikker.las.y, -kikker.las.z)
         .applyMatrix4(draai)
         .translate(x, y, z);
+      if (boord === Boord.Bakboord && oogBakboord) {
+        g.computeBoundingBox();
+        o.verlegAchterlandvast(oogBakboord, g.boundingBox!.getCenter(new THREE.Vector3()));
+      }
       const verf = bron.material.clone();
       const mesh: Mesh = o.voegToe(g, verf);
       mesh.onBeforeRender = () => {               // the voordek kikkers' paint, as it is now; not their highlight

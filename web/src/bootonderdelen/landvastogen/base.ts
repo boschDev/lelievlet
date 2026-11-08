@@ -25,6 +25,64 @@ export class LandvastogenBase extends Onderdeel {
   static override readonly groep = ModelGroep.Beslag;
   static override readonly ids = ['landvastogen'];
 
+  /** The middle of the oog on this side, in the boat's space; null when it is not there (any more). */
+  oogMidden(boord: Boord): THREE.Vector3 | null {
+    const box = new THREE.Box3(); const p = new THREE.Vector3();
+    for (const d of this.delen) {
+      for (const mesh of d.meshes) {
+        const naar = this.naarNode(mesh); const pos = mesh.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          p.fromBufferAttribute(pos, i).applyMatrix4(naar);
+          if (Math.sign(p.z) === boord) box.expandByPoint(p);
+        }
+      }
+    }
+    return box.isEmpty() ? null : box.getCenter(new THREE.Vector3());
+  }
+
+  /** The achterlandvast, made fast to the port oog in the model (pipeline/landvasten.py: coiled on the achterdek, led
+   *  aft along it, two round turns through the oog just over the deck), made fast at naar instead: its turns moved
+   *  there whole. The line to them follows over the deck - level, the more the nearer it is to them - and only its
+   *  last bit climbs to them: the rest stays on the deck. herstel() lays it as it was. */
+  verlegAchterlandvast(van: THREE.Vector3, naar: THREE.Vector3): void {
+    const deel = this.model.find((d) => d.extras.id === 'achterlandvast');
+    if (!deel) return;
+    const opzij = new THREE.Vector3(naar.x - van.x, 0, naar.z - van.z); const op = naar.y - van.y;
+    const glad = (r: number, binnen: number, buiten: number): number => {
+      const t = THREE.MathUtils.clamp((buiten - r) / (buiten - binnen), 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+    const dek = this.dekHoogte();
+    for (const mesh of deel.meshes) {
+      const heen = this.naarNode(mesh); const terug = heen.clone().invert();
+      this.vervorm((p) => {
+        p.applyMatrix4(heen);
+        const r = Math.hypot(p.x - van.x, p.z - van.z);              // m from the oog, level
+        const was = dek(p.x, p.z);
+        p.addScaledVector(opzij, glad(r, 0.08, 0.8));               // the turns all the way, the coil not at all
+        const is = dek(p.x, p.z);
+        const klim = glad(r, 0.06, 0.2);                             // up off the deck only the last 20 cm
+        if (was !== null && is !== null) p.y += (is - was) * (1 - klim);   // over the deck's camber, on it as it was
+        p.y += op * klim;
+        p.applyMatrix4(terug);
+      }, [mesh]);
+    }
+  }
+
+  /** The height of the top of the achterdek at x, z, in the boat's space; null off it. */
+  dekHoogte(): (x: number, z: number) => number | null {
+    const dek = this.model.find((d) => d.extras.id === 'achterdek')?.meshes ?? [];
+    const node = this.delen[0].node; node.updateWorldMatrix(true, false);
+    const naarWereld = node.matrixWorld; const terug = naarWereld.clone().invert();
+    const ray = new THREE.Raycaster(); const o = new THREE.Vector3(); const omlaag = new THREE.Vector3();
+    return (x, z) => {
+      o.set(x, 2, z).applyMatrix4(naarWereld); omlaag.set(0, -1, 0).transformDirection(naarWereld);
+      ray.set(o, omlaag);
+      const hit = ray.intersectObjects(dek, false)[0];
+      return hit ? hit.point.applyMatrix4(terug).y : null;
+    };
+  }
+
   /** Every point of one of the model's parts, in the boat's space. */
   punten(id: string): THREE.Vector3[] {
     const out: THREE.Vector3[] = [];

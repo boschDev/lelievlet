@@ -4681,9 +4681,20 @@ export function initModes({ parts, tuig, scene, ui, wrap, config, signal, onResi
       return c.divideScalar(Math.max(n, 1));
     };
     const bow = centreOf(['sleepoog_boeg']);
+    // the achterlandvast's: worked out again whenever the landvastogen change shape (bootonderdelen: a kikker
+    // in place of an oog), from what is there on that side now
+    const achter = (keep: (v: THREE.Vector3) => boolean) => {
+      let shape: THREE.BufferGeometry[] = []; let at = new THREE.Vector3();
+      return () => {
+        const now = meshesOf(['landvastogen']).map((m) => m.geometry);
+        if (now.length !== shape.length || now.some((g, i) => g !== shape[i])) { shape = now; at = centreOf(['landvastogen'], keep); }
+        return at;
+      };
+    };
+    const bbAchter = achter((v) => v.z < 0); const sbAchter = achter((v) => v.z >= 0);
     const eyes = {
-      bb: { voor: bow, achter: centreOf(['landvastogen'], (v) => v.z < 0) },
-      sb: { voor: bow, achter: centreOf(['landvastogen'], (v) => v.z >= 0) },
+      bb: { voor: bow, get achter() { return bbAchter(); } },
+      sb: { voor: bow, get achter() { return sbAchter(); } },
     };
     const lineMaterial = (byId.get('voorlandvast') ?? byId.get('fokkenschoot')!).meshes[0].material;   // the landvasten's own black rope
     const lines = Object.fromEntries(['voor', 'achter', 'vspring', 'aspring'].map((k) => [k, new RopeLine(24, 0.007, lineMaterial)]));
